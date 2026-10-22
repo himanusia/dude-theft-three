@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture } from './utils';
+import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from './utils';
+import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 
 export const PITCH = 52;
 export const BLOCK = 38;
@@ -160,6 +161,8 @@ export class City {
   declare focusTarget: THREE.Vector3;
   declare daylight: number;
   declare propAudit: { name: string; x: number; z: number; bottom: number }[];
+  declare shopDoors: { x: number; z: number; kind: InteriorKind; name: string }[];
+  declare interiors: PlacedInterior[];
   declare clouds: THREE.Group;
   declare starMat: THREE.PointsMaterial;
   declare lampPositions: THREE.Vector3[];
@@ -191,6 +194,9 @@ export class City {
     this.group = new THREE.Group();
     scene.add(this.group);
 
+    this.shopDoors = [];
+    this.interiors = [];
+    this.buildInteriors();
     this.dayT = 0.32; // 0..1, 0.25 = sunrise, 0.5 = noon
     this.buildLights();
     this.buildClouds();
@@ -224,6 +230,38 @@ export class City {
     this.scene.add(sun);
     this.scene.add(sun.target);
     this.sun = sun;
+  }
+
+  buildInteriors() {
+    const kinds: InteriorKind[] = ['minimarket', 'warteg', 'bengkel', 'kopi'];
+    kinds.forEach((kind, i) => {
+      const room = buildInterior(kind);
+      const origin = new THREE.Vector3(600 + i * 60, 0, 0);
+      room.group.position.copy(origin);
+      this.scene.add(room.group);
+      // world-space colliders (walls + furniture) so the player and camera stay inside
+      const hw = (room.bounds.maxX - room.bounds.minX) / 2;
+      const hd = (room.bounds.maxZ - room.bounds.minZ) / 2;
+      const wallH = room.bounds.h ?? 3.4;
+      const walls: AABB[] = [
+        { minX: -hw - 0.4, maxX: hw + 0.4, minZ: -hd - 0.4, maxZ: -hd, h: wallH },
+        { minX: -hw - 0.4, maxX: -hw, minZ: -hd, maxZ: hd, h: wallH },
+        { minX: hw, maxX: hw + 0.4, minZ: -hd, maxZ: hd, h: wallH },
+      ];
+      const local = [...room.colliders, ...walls];
+      room.colliders = local.map((c) => ({
+        minX: c.minX + origin.x,
+        maxX: c.maxX + origin.x,
+        minZ: c.minZ + origin.z,
+        maxZ: c.maxZ + origin.z,
+        h: c.h,
+      }));
+      this.interiors.push({ ...room, origin });
+    });
+  }
+
+  roomFor(kind: InteriorKind) {
+    return this.interiors.find((r) => r.kind === kind);
   }
 
   buildClouds() {
@@ -597,7 +635,7 @@ export class City {
 
     // occasional billboard with real text, like the reference storefronts
     if (Math.random() < 0.6 && h < 34) {
-      const words = ['BURGER', '24/7', 'MOTEL', 'PAWN', 'GYM', 'PIZZA', 'TACOS', 'AUTO'];
+      const words = ['DISKON', 'MURAH', 'PROMO', 'GRATIS ONGKIR', 'BUKA 24 JAM', 'KOPI ENAK', 'SERVIS AC', 'KOSONG'];
       const word = pick(words);
       const bg = pick(['#e94f4f', '#2f6fd0', '#f2b134', '#39b54a', '#8a3ad9']);
       const boardTex = canvasTexture(256, 96, (ctx, cw, ch) => {
@@ -661,7 +699,10 @@ export class City {
     band.receiveShadow = true;
     this.group.add(band);
 
-    const shopWords = ['BURGER', '24/7', 'PIZZA', 'MARKET', 'GYM', 'PAWN', 'TATTOO', 'NOODLES', 'AUTO', 'LIQUOR', 'DONUTS', 'BARBER'];
+    // plesetan, bukan merek asli
+    const shopWords = ['ALFAMURTI', 'INDOMERET', 'WARTEG BAHARI', 'BAKSO PAK TJE', 'MIE GACUAN', 'SATE SENAYUN',
+      'PULSA PERDANU', 'APOTEK SEHAT', 'BENGKEL AHOS', 'KOPI TUBRUK', 'TOKO EMAS MULYA', 'LAUNDRY KILAT',
+      'PANGKAS RAMBUT', 'MARTABAK BANGKOK', 'NASI PADANG SELONGSOR', 'JAMU GENDONG'];
     const word = pick(shopWords);
     const signColor = pick(['#ffd257', '#ff6b6b', '#64d2ff', '#a8ff8f', '#ff9f43', '#f2f2f6']);
     const signTex = canvasTexture(256, 64, (ctx, cw, ch) => {
@@ -685,6 +726,39 @@ export class City {
     const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), chromeLike);
     handle.position.set(doorX + 0.45, 1.35, doorZ + 0.14);
     this.group.add(handle);
+    // remember this entrance as an enterable shop
+    if (w > 8 && d > 8) {
+      const kind = pick(['minimarket', 'minimarket', 'warteg', 'kopi', 'bengkel'] as InteriorKind[]);
+      const room = this.roomFor(kind);
+      if (room) {
+        this.shopDoors.push({ x: doorX, z: doorZ + 1.1, kind, name: room.name });
+        // physical shop sign above the door so the street reads Indonesian
+        const boardTex = canvasTexture(512, 96, (ctx, cw, ch) => {
+          ctx.fillStyle = kind === 'minimarket' ? '#c0392b' : kind === 'kopi' ? '#3f2a1d' : '#2f5d3a';
+          ctx.fillRect(0, 0, cw, ch);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 46px ui-sans-serif, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(room.name, cw / 2, ch / 2 + 1);
+        });
+        const board = new THREE.Mesh(
+          new THREE.BoxGeometry(4.4, 0.9, 0.16),
+          new THREE.MeshStandardMaterial({ map: boardTex, emissive: 0xffffff, emissiveMap: boardTex, emissiveIntensity: 0.25, roughness: 0.55 })
+        );
+        board.position.set(doorX, 3.55, doorZ + 0.18);
+        board.castShadow = true;
+        this.group.add(board);
+        // welcome mat
+        const mat2 = new THREE.Mesh(
+          new THREE.BoxGeometry(2.0, 0.04, 0.8),
+          new THREE.MeshStandardMaterial({ color: kind === 'minimarket' ? 0xc0392b : 0x3f6b4a, roughness: 0.95 })
+        );
+        mat2.position.set(doorX, 0.29, doorZ + 0.55);
+        this.group.add(mat2);
+      }
+    }
+
     for (let s2 = 0; s2 < 2; s2++) {
       const step = new THREE.Mesh(
         new THREE.BoxGeometry(1.9 - s2 * 0.25, 0.13, 0.5),
