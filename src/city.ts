@@ -741,6 +741,23 @@ export class City {
   }
 
 
+
+  /** Pull a point onto the nearest block plate, so street props always have a kerb. */
+  nudgeOntoKerb(x: number, z: number) {
+    let best = null as any;
+    let bd = Infinity;
+    for (const b of this.blocks) {
+      const d = Math.hypot(b.x - x, b.z - z);
+      if (d < bd) { bd = d; best = b; }
+    }
+    if (!best) return { x, z };
+    const half = ((best.size ?? BLOCK) / 2) - 2.4;
+    return {
+      x: clamp(x, best.x - half, best.x + half),
+      z: clamp(z, best.z - half, best.z + half),
+    };
+  }
+
   /** Distance from a point to a polyline, in world metres. */
   distToPath(x: number, z: number, pts: [number, number][]): number {
     let best = Infinity;
@@ -764,7 +781,6 @@ export class City {
   planBlockSites() {
     const sites: { x: number; z: number; size: number }[] = [];
     const step = 25;
-    const minGap = 21;
     for (let gx = -7; gx <= 7; gx++) {
       for (let gz = -7; gz <= 7; gz++) {
         const x = gx * step + rand(-7, 7);
@@ -785,8 +801,9 @@ export class City {
           if (Math.hypot(x - lm.x, z - lm.z) < 26) { blocked = true; break; }
         }
         if (blocked) continue;
-        if (sites.some((o) => Math.hypot(o.x - x, o.z - z) < minGap)) continue;
-        sites.push({ x, z, size: rand(20, 28) });
+        const size = rand(20, 28);
+        if (sites.some((o) => Math.hypot(o.x - x, o.z - z) < (o.size + size) / 2 + 6)) continue;
+        sites.push({ x, z, size });
       }
     }
     return sites;
@@ -1107,11 +1124,16 @@ export class City {
       new THREE.Matrix4().makeTranslation(doorX + tx * 0.45 + nx * 0.14, 1.35, doorZ + tz * 0.45 + nz * 0.14)
     );
     // remember this entrance as an enterable shop
-    if (w > 8 && d > 8) {
+    if (w > 6.5 && d > 6.5) {
       const kind = SHOP_KINDS[this.shopDoorKindCursor++ % SHOP_KINDS.length];
       const room = this.roomFor(kind);
       if (room) {
-        this.shopDoors.push({ x: doorX + nx * 1.1, z: doorZ + nz * 1.1, nx, nz, kind, name: room.name });
+        // two doors inside a few metres make "nearest shop" ambiguous, so only the first one
+        // becomes enterable; the shopfront sign still goes up either way
+        const ex = doorX + nx * 1.1;
+        const ez = doorZ + nz * 1.1;
+        const crowded = this.shopDoors.some((dd) => Math.hypot(dd.x - ex, dd.z - ez) < 8);
+        if (!crowded) this.shopDoors.push({ x: ex, z: ez, nx, nz, kind, name: room.name });
         // physical shop sign above the door so the street reads Indonesian
         const boardTex = canvasTexture(512, 96, (ctx, cw, ch) => {
           ctx.fillStyle = KIND_SIGN[kind];
@@ -1502,11 +1524,16 @@ export class City {
     const stallAlong = [-7, 2.5, 8];
     for (let i = 0; i < Math.min(3, anchors.length); i++) {
       const b = anchors[i];
-      const px = b.x + stallAlong[i % stallAlong.length];
-      const pz = b.z + BLOCK / 2 - 2.7;
+      let px = b.x + stallAlong[i % stallAlong.length];
+      let pz = b.z + ((b.size ?? BLOCK) / 2) - 2.7;
       const yaw = 0; // faces the street (+z)
-      const g = this.groundHeightAt(px, pz);
+      // a stall needs a kerb under it: if the spot landed on asphalt, pull it onto the nearest
+      // block instead of dropping it, so the street keeps its warungs
+      const nudged = this.nudgeOntoKerb(px, pz);
+      const g = this.groundHeightAt(nudged.x, nudged.z);
       if (g <= 0) continue;
+      px = nudged.x;
+      pz = nudged.z;
       this.dressingSpots.push({ type: 'warung', x: px, z: pz, yaw });
       for (const [lx, lz] of [[-1.55, -1.15], [1.55, -1.15], [-1.55, 1.15], [1.55, 1.15]]) {
         stallLegs.push(place(px, pz, yaw, lx, g + 1.05, lz));
@@ -1816,7 +1843,9 @@ export class City {
     });
     if (!candidates.length) return this.randomSidewalkPointNear(maxR + 20);
     const b = pick(candidates);
-    const half = BLOCK / 2 - 2.2;
+    // every block has its own footprint now, so the sidewalk ring has to follow it instead of
+    // assuming the old 38 m cell
+    const half = ((b.size ?? BLOCK) / 2) - 2.2;
     const t = rand(-half, half);
     const side = randInt(0, 3);
     if (side === 0) return new THREE.Vector3(b.x + t, 0, b.z - half);
@@ -1836,8 +1865,9 @@ export class City {
   randomSidewalkPoint() {
     const b = pick(this.blocks);
     const edge = Math.floor(rand(0, 4));
-    const off = BLOCK / 2 - 2.2;
-    const t = rand(-BLOCK / 2 + 2, BLOCK / 2 - 2);
+    const size = b.size ?? BLOCK;
+    const off = size / 2 - 2.2;
+    const t = rand(-size / 2 + 2, size / 2 - 2);
     if (edge === 0) return new THREE.Vector3(b.x + t, 0, b.z - off);
     if (edge === 1) return new THREE.Vector3(b.x + t, 0, b.z + off);
     if (edge === 2) return new THREE.Vector3(b.x - off, 0, b.z + t);
