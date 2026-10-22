@@ -205,6 +205,32 @@ function updateFx(dt: number) {
 
 const ragdolls: Ragdoll[] = [];
 
+// Pedestrians need to know about traffic, corpses, cruisers and the wanted level.
+// The context is rebuilt every frame from scratch arrays so the AI never allocates.
+const pedCars: any[] = [];
+const pedCops: any[] = [];
+
+function pedContext() {
+  pedCars.length = 0;
+  for (const c of cityCars) pedCars.push(c);
+  for (const e of traffic.cars) pedCars.push(e.car);
+  for (const e of police.cars) pedCars.push(e.car);
+  pedCops.length = 0;
+  for (const e of police.cars) pedCops.push(e.car);
+  return {
+    playerPos: player.pos,
+    wanted: police.wanted,
+    armed: mouse.right && !player.inCar,
+    aimX: -Math.sin(camYaw),
+    aimZ: -Math.cos(camYaw),
+    panic: police.starCount >= 3,
+    cars: pedCars,
+    copCars: pedCops,
+    corpses: ragdolls,
+    addWanted: (n: number) => police.addWanted(n),
+  };
+}
+
 
 function lockPointer() {
   suppressLockPauseUntil = performance.now() + 600;
@@ -881,6 +907,9 @@ function shoot() {
     audio.play('metal', { vol: 0.16, rate: 1.4 });
   }
 
+  // the street reacts: everyone within earshot runs, the nearest bystander fetches the cops
+  peds.onGunshot(player.pos.x, player.pos.z, hitKind === 'ped');
+
   addTracer(muzzle, hitPoint);
   window.__lastShot = {
     origin: origin.toArray().map((v) => +v.toFixed(2)),
@@ -1159,13 +1188,7 @@ function update(dt: number) {
   if (player.inCar) updateDriving(dt);
   else updateOnFoot(dt);
 
-  if (!player.inInterior) peds.update(dt, {
-    playerPos: player.pos,
-    wanted: police.wanted,
-    armed: mouse.right && !player.inCar,
-    panic: police.starCount >= 3,
-    cars: player.inCar ? [player.inCar] : [],
-  });
+  if (!player.inInterior) peds.update(dt, pedContext());
 
   if (!player.inInterior) traffic.update(dt, { playerPos: player.pos, playerCar: player.inCar, peds, wanted: police.wanted });
 
@@ -1413,6 +1436,7 @@ window.__game = {
     keys() {
       return [...keys];
     },
+    pedContext,
 
     // ---- floating geometry audit: every actor and prop must touch the ground ----
     audit() {
