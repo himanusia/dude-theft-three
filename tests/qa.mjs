@@ -130,7 +130,10 @@ function check(name, ok, detail) {
       if (!ped) return;
       ped.pos.set(26 + off, g.city.groundHeightAt(26 + off, -32), -32);
       ped.target = ped.pos.clone(); ped.speed = 0.0001;
-      g._test.teleport(26 + off, -40); g._test.setCam(Math.PI, 0.08);
+      g._test.teleport(26 + off, -40);
+      // aim straight at the target: the shot follows the camera direction, and a fixed
+      // pitch could drop the ray into the road now that weapons have their own spread
+      g._test.lookFrom(26 + off, 2.4, -40, ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
     }, dx);
     await sleep(650);
     shot = await page.evaluate(() => {

@@ -6,6 +6,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><rect width=%2216%22 height=%2216%22 fill=%22%23111%22/></svg>" />
 <title>Dude Theft Auto — Three.js Sandbox</title>
 <style>
+
   :root {
     --accent: #ffcc33;
     --danger: #ff3b30;
@@ -352,18 +353,544 @@
     font-family: var(--font); font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
     padding: 10px 22px; border: none; border-radius: 6px; background: var(--accent); color: #14140c;
   }
+
+/* ---------------------------------------------------------------- responsive layer */
+
+  /* ---------------------------------------------------------------- tokens
+     One scale factor (--hud-scale, 0.8–1.4) is derived from the viewport
+     min-dimension by HUD.layout() in src/hud.ts; every panel size and offset
+     is expressed through it plus the safe-area insets. Layout mode classes
+     (hud-narrow / hud-short) come from the same pass and only decide where
+     the corner stacks sit. */
+  :root {
+    --accent: #ffcc33;
+    --danger: #ff3b30;
+    --panel: rgba(10, 12, 16, .82);
+    --stroke: rgba(255,255,255,.16);
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --ink: #f2f2f5;
+    --ink-dim: #b9bec9;
+    --hud-scale: 1;
+    --hud-safe-t: env(safe-area-inset-top, 0px);
+    --hud-safe-r: env(safe-area-inset-right, 0px);
+    --hud-safe-b: env(safe-area-inset-bottom, 0px);
+    --hud-safe-l: env(safe-area-inset-left, 0px);
+    --hud-band: 0px;
+  }
+  /* Derived layout tokens live on <body>: custom properties are substituted on
+     the element that declares them, so a token declared on :root would never
+     see body.touch-mode's --hud-band override. */
+  body {
+    --s: var(--hud-scale);
+    --hud-pad: calc(14px * var(--s));
+    --hud-gap: calc(8px * var(--s));
+    --hud-radius: calc(10px * var(--s));
+    --hud-top: calc(var(--hud-safe-t) + var(--hud-pad));
+    --hud-right: calc(var(--hud-safe-r) + var(--hud-pad));
+    --hud-left: calc(var(--hud-safe-l) + var(--hud-pad));
+    --hud-bottom: calc(var(--hud-safe-b) + var(--hud-pad) + var(--hud-band));
+    --hud-map: calc(196px * var(--s));
+    --hud-row: calc(30px * var(--s));
+    --hud-tr-h: calc(56px * var(--s));
+    --hud-tl-bottom: calc(var(--hud-top) + 56px * var(--s));
+    --hud-hints-h: calc(18px * var(--s));
+    --hud-toast-top: calc(var(--hud-top) + 96px * var(--s));
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0a0c10; overflow: hidden; font-family: var(--font); color: #fff; }
+  canvas#game { display: block; width: 100vw; height: 100vh; }
+
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+
+  /* ------------------------------------------------------------ top left */
+  #tl {
+    position: absolute; top: var(--hud-top); left: var(--hud-left);
+    display: flex; flex-direction: column; align-items: flex-start; gap: calc(6px * var(--s));
+    max-width: min(calc(320px * var(--s)), 34vw);
+  }
+  #objective {
+    width: 100%;
+    font-size: max(12px, calc(13.5px * var(--s))); letter-spacing: .01em; line-height: 1.35;
+    padding: calc(9px * var(--s)) calc(14px * var(--s)) calc(10px * var(--s));
+    border-left: 3px solid var(--accent);
+    background: var(--panel); backdrop-filter: blur(12px); border-radius: var(--hud-radius);
+    border-top: 1px solid var(--stroke); border-right: 1px solid var(--stroke); border-bottom: 1px solid var(--stroke);
+    text-transform: uppercase; font-weight: 700; color: var(--ink);
+    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+  #objective::before {
+    content: "OBJECTIVE"; display: block; font-size: max(12px, calc(9.5px * var(--s)));
+    letter-spacing: .22em; color: var(--accent); margin-bottom: calc(4px * var(--s)); font-weight: 800;
+  }
+  #fps {
+    font-size: 12px; color: var(--ink-dim); letter-spacing: .12em; line-height: 1;
+    padding: calc(4px * var(--s)) calc(8px * var(--s)); border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--stroke); font-variant-numeric: tabular-nums;
+  }
+  #fps::after { content: " FPS"; }
+
+  /* ----------------------------------------------------------- top right */
+  #topright {
+    position: absolute; top: var(--hud-top); right: var(--hud-right);
+    display: flex; flex-direction: column; align-items: flex-end; gap: calc(6px * var(--s));
+    text-align: right; max-width: 46vw;
+  }
+  #cash {
+    display: inline-block; padding: calc(3px * var(--s)) calc(13px * var(--s)) calc(4px * var(--s));
+    border-radius: var(--hud-radius);
+    font-size: max(20px, calc(28px * var(--s))); font-weight: 900; letter-spacing: -.02em;
+    color: #6ee787; background: rgba(6, 22, 12, .88); backdrop-filter: blur(10px);
+    border: 1px solid rgba(110,231,135,.3);
+    box-shadow: 0 8px 26px rgba(0,0,0,.4);
+    font-variant-numeric: tabular-nums;
+  }
+  #wanted {
+    padding: calc(3px * var(--s)) calc(9px * var(--s)) calc(4px * var(--s));
+    border-radius: var(--hud-radius); background: var(--panel); border: 1px solid var(--stroke);
+    backdrop-filter: blur(10px);
+  }
+  #wanted-label { font-size: 12px; letter-spacing: .22em; color: #ff8f83; font-weight: 800; }
+  #stars { font-size: max(16px, calc(24px * var(--s))); letter-spacing: 1px; line-height: 1.05; }
+  #stars .on { color: var(--accent); text-shadow: 0 0 14px rgba(255,204,51,.85), 0 2px 4px rgba(0,0,0,.7); }
+  #stars .off { color: var(--ink-dim); }
+
+  /* --------------------------------------------------------------- help */
+  #help-btn {
+    display: none; position: absolute; top: var(--hud-top); left: var(--hud-left);
+    width: max(32px, calc(34px * var(--s))); height: max(32px, calc(34px * var(--s)));
+    align-items: center; justify-content: center; padding: 0;
+    border-radius: 50%; border: 1px solid var(--stroke); background: var(--panel); color: var(--accent);
+    font-family: var(--font); font-size: max(12px, calc(15px * var(--s))); font-weight: 800;
+    backdrop-filter: blur(10px); pointer-events: auto; cursor: pointer;
+  }
+  body.touch-mode #help-btn, body.hud-short #help-btn { display: flex; }
+  #help-sheet {
+    position: fixed; inset: 0; z-index: 32; display: none; align-items: center; justify-content: center;
+    padding: calc(var(--hud-safe-t) + 16px) calc(var(--hud-safe-r) + 16px) calc(var(--hud-safe-b) + 16px) calc(var(--hud-safe-l) + 16px);
+    background: rgba(6,8,12,.86); backdrop-filter: blur(8px);
+  }
+  #help-sheet.show { display: flex; }
+  #help-sheet .sheet {
+    width: min(380px, 100%); max-height: 100%; overflow: auto; pointer-events: auto;
+    padding: calc(18px * var(--s)) calc(20px * var(--s)) calc(20px * var(--s));
+    border-radius: 14px; background: var(--panel);
+    border: 1px solid var(--stroke); border-left: 3px solid var(--accent);
+  }
+  #help-sheet .keys { margin: calc(10px * var(--s)) 0 calc(16px * var(--s)); }
+  #help-close {
+    font-family: var(--font); font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    padding: calc(10px * var(--s)) calc(22px * var(--s)); border: none; border-radius: 6px;
+    background: var(--accent); color: #14140c; cursor: pointer;
+  }
+
+  /* -------------------------------------------------------- bottom right */
+  #br {
+    position: absolute; right: var(--hud-right); bottom: var(--hud-bottom);
+    display: flex; flex-direction: column; align-items: flex-end; gap: calc(8px * var(--s));
+  }
+  #minimap {
+    display: block; width: var(--hud-map); height: var(--hud-map);
+    border-radius: calc(12px * var(--s)); background: #15181d;
+    box-shadow: 0 12px 34px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.12);
+  }
+  #ammo-wrap {
+    text-align: right; padding: calc(2px * var(--s)) calc(10px * var(--s)) calc(4px * var(--s));
+    border-radius: calc(8px * var(--s)); background: var(--panel); backdrop-filter: blur(8px);
+    border: 1px solid var(--stroke);
+    font-size: max(14px, calc(19px * var(--s))); font-weight: 700; letter-spacing: .04em;
+    font-variant-numeric: tabular-nums;
+  }
+  #ammo-wrap small { display: block; font-size: 12px; letter-spacing: .2em; color: var(--ink-dim); font-weight: 700; }
+
+  /* --------------------------------------------------------- bottom left */
+  #bl {
+    position: absolute; left: var(--hud-left); bottom: var(--hud-bottom);
+    display: flex; flex-direction: column; align-items: flex-start;
+    max-width: min(62vw, calc(560px * var(--s)));
+  }
+  #hints {
+    position: absolute; left: var(--hud-left);
+    bottom: calc(var(--hud-bottom) + var(--hud-row) + var(--hud-gap));
+    display: flex; align-items: center; flex-wrap: wrap; gap: calc(4px * var(--s)) calc(8px * var(--s));
+    max-width: min(62vw, calc(560px * var(--s)));
+    font-size: 12px; line-height: 1.5; letter-spacing: .02em; color: var(--ink-dim);
+    padding: calc(4px * var(--s)) calc(11px * var(--s)); border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--stroke); backdrop-filter: blur(10px);
+  }
+  #hints b { color: var(--ink); font-weight: 700; }
+  #hints-help {
+    pointer-events: auto; cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: 800; line-height: 1;
+    color: var(--accent); background: rgba(255,255,255,.12); border: 1px solid var(--stroke);
+    border-radius: 50%; width: 22px; height: 22px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #health-wrap {
+    display: flex; align-items: center; gap: calc(8px * var(--s));
+    padding: calc(4px * var(--s)) calc(10px * var(--s)); border-radius: var(--hud-radius);
+    background: var(--panel); border: 1px solid var(--stroke); backdrop-filter: blur(10px);
+  }
+  #health-label { font-size: 12px; letter-spacing: .16em; font-weight: 700; color: var(--ink-dim); }
+  #health-bar {
+    width: calc(160px * var(--s)); height: max(10px, calc(12px * var(--s)));
+    background: rgba(0,0,0,.6); border: 1px solid var(--stroke); border-radius: 999px; overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,.6);
+  }
+  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#4ade80,#22c55e); transition: width .18s ease; }
+  #health-num { font-size: max(12px, calc(14px * var(--s))); font-weight: 700; min-width: calc(26px * var(--s)); font-variant-numeric: tabular-nums; }
+
+  /* ------------------------------------------------------- bottom center
+     Prompt + speedo share one bottom-centre column; its baseline clears the
+     bottom-left row (health) and the hint chip, so the centre lane can never
+     collide with a corner stack no matter how many lines the hint wraps to. */
+  #bc {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(var(--hud-bottom) + var(--hud-row) + var(--hud-gap) * 2 + var(--hud-hints-h));
+    width: min(40vw, calc(520px * var(--s)));
+    display: flex; flex-direction: column; align-items: center; gap: calc(6px * var(--s));
+  }
+  #prompt {
+    max-width: 100%; padding: calc(8px * var(--s)) calc(16px * var(--s)); border-radius: calc(16px * var(--s));
+    background: var(--panel); backdrop-filter: blur(8px);
+    font-size: max(12px, calc(13px * var(--s))); font-weight: 600; letter-spacing: .03em; opacity: 0;
+    transition: opacity .18s ease, transform .18s ease; border: 1px solid var(--stroke);
+    white-space: normal; overflow-wrap: break-word; text-align: center;
+    transform: translateY(6px);
+  }
+  #prompt.show { opacity: 1; transform: translateY(0); }
+  #prompt::first-letter { color: var(--accent); }
+  #speedo {
+    text-align: center; opacity: 0; transition: opacity .2s ease;
+    padding: calc(1px * var(--s)) calc(14px * var(--s)) calc(3px * var(--s));
+    border-radius: var(--hud-radius); background: var(--panel); border: 1px solid var(--stroke);
+  }
+  #speedo.show { opacity: 1; }
+  #speed-val { font-size: max(22px, calc(40px * var(--s))); font-weight: 800; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  #speedo .unit { font-size: 12px; letter-spacing: .18em; color: var(--ink-dim); display: block; }
+
+  /* crosshair + feedback */
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%,-50%); opacity: 0; transition: opacity .15s; }
+  #crosshair.show { opacity: .95; }
+  #crosshair i { position: absolute; background: #fff; box-shadow: 0 0 3px rgba(0,0,0,.9); }
+  #crosshair i:nth-child(1) { left: 50%; top: 0; width: 2px; height: 7px; transform: translateX(-50%); }
+  #crosshair i:nth-child(2) { left: 50%; bottom: 0; width: 2px; height: 7px; transform: translateX(-50%); }
+  #crosshair i:nth-child(3) { top: 50%; left: 0; height: 2px; width: 7px; transform: translateY(-50%); }
+  #crosshair i:nth-child(4) { top: 50%; right: 0; height: 2px; width: 7px; transform: translateY(-50%); }
+  #crosshair i:nth-child(5) { left: 50%; top: 50%; width: 2px; height: 2px; transform: translate(-50%,-50%); background: var(--accent); }
+
+  #hitmarker {
+    position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%,-50%) rotate(45deg);
+    opacity: 0; pointer-events: none;
+  }
+  #hitmarker::before, #hitmarker::after { content: ""; position: absolute; background: #ff5b4a; border-radius: 1px; }
+  #hitmarker::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+  #hitmarker::after { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+  #hitmarker.pop { animation: hit .22s ease-out; }
+  @keyframes hit { 0% { opacity: 1; transform: translate(-50%,-50%) rotate(45deg) scale(.6); } 100% { opacity: 0; transform: translate(-50%,-50%) rotate(45deg) scale(1.35); } }
+
+  #damage-flash {
+    position: absolute; inset: 0; opacity: 0;
+    background: radial-gradient(circle at center, rgba(255,0,0,0) 45%, rgba(190,10,10,.75) 100%);
+  }
+  #damage-flash.flash { animation: dmg .45s ease-out; }
+  @keyframes dmg { 0% { opacity: .95; } 100% { opacity: 0; } }
+
+  /* -------------------------------------------------------------- toasts
+     The lane starts below every top-anchored panel, measured by the layout
+     pass (--hud-toast-top), so the stack can never sit on the objective. */
+  #toasts {
+    position: absolute; left: 50%; transform: translateX(-50%); top: var(--hud-toast-top);
+    width: min(46vw, calc(520px * var(--s)));
+    display: flex; flex-direction: column; align-items: center; gap: calc(6px * var(--s));
+  }
+  .toast {
+    max-width: 100%; padding: calc(7px * var(--s)) calc(14px * var(--s)); border-radius: 6px;
+    font-size: 12px; font-weight: 700; letter-spacing: .04em; text-align: center;
+    background: var(--panel); backdrop-filter: blur(10px); border-left: 3px solid var(--accent);
+    animation: toastIn .22s ease-out; text-transform: uppercase;
+  }
+  .toast.cash { border-left-color: #7fe08a; color: #b6f5bd; }
+  .toast.bad { border-left-color: var(--danger); color: #ffb3ad; }
+  .toast.good { border-left-color: #7fe08a; }
+  .toast.out { opacity: 0; transform: translateY(-6px); transition: all .35s ease; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ------------------------------------------------- overlay / pause panel
+     Same scale + safe-area rules: the card is a real panel with its own
+     scroll area, so a 390 px tall phone never clips the resume button. */
+  .overlay {
+    position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+    padding: calc(var(--hud-safe-t) + 14px) calc(var(--hud-safe-r) + 14px) calc(var(--hud-safe-b) + 14px) calc(var(--hud-safe-l) + 14px);
+    background: radial-gradient(circle at 30% 20%, rgba(48,58,80,.85), rgba(6,8,12,.96) 70%);
+    backdrop-filter: blur(6px); transition: opacity .35s ease, visibility .35s;
+    overflow: auto;
+  }
+  .overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  .card { width: min(640px, 100%); max-height: 100%; margin: auto; overflow: auto; padding: calc(26px * var(--s)) calc(32px * var(--s)); text-align: left; }
+  .kicker { font-size: 12px; letter-spacing: .28em; color: var(--accent); font-weight: 700; text-transform: uppercase; }
+  h1 { font-size: clamp(28px, 8vw, calc(52px * var(--s))); line-height: .95; margin: 10px 0 6px; letter-spacing: -.04em; font-weight: 900; text-transform: uppercase; }
+  h1 span { color: var(--accent); }
+  h2 { font-size: max(22px, calc(34px * var(--s))); margin: calc(4px * var(--s)) 0 calc(12px * var(--s)); text-transform: uppercase; letter-spacing: -.02em; line-height: 1.05; }
+  .sub { color: rgba(255,255,255,.72); font-size: 13px; line-height: 1.55; margin-bottom: calc(16px * var(--s)); }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: calc(6px * var(--s)) calc(14px * var(--s)); font-size: 12.5px; color: rgba(255,255,255,.8); align-items: center; }
+  .keys kbd {
+    font-family: var(--font); font-size: 12px; font-weight: 700; padding: calc(3px * var(--s)) calc(8px * var(--s)); border-radius: 4px;
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); color: #fff; white-space: nowrap;
+    justify-self: start;
+  }
+  .keys span { line-height: 1.35; }
+  button#start-btn {
+    font-family: var(--font); font-size: 14px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+    padding: calc(13px * var(--s)) calc(30px * var(--s)); border: none; border-radius: 5px; background: var(--accent); color: #14140c; cursor: pointer;
+    pointer-events: auto; transition: transform .12s ease, box-shadow .12s ease;
+  }
+  button#start-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 28px rgba(255,204,51,.28); }
+  button#start-btn:disabled { opacity: .55; cursor: wait; }
+  button#resume-btn {
+    font-family: var(--font); font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+    padding: calc(12px * var(--s)) calc(28px * var(--s)); border: none; border-radius: 6px; background: var(--accent); color: #14140c; cursor: pointer;
+    width: 100%;
+  }
+  #loading-text { margin-top: 12px; font-size: 12px; color: rgba(255,255,255,.55); letter-spacing: .06em; min-height: 16px; }
+  .credits { margin-top: 18px; font-size: 11.5px; line-height: 1.6; color: rgba(255,255,255,.42); }
+
+  #pause-screen .card {
+    width: min(520px, 100%); padding: calc(22px * var(--s)) calc(24px * var(--s)) calc(24px * var(--s));
+    border-radius: 14px; background: var(--panel); border: 1px solid var(--stroke);
+    border-left: 3px solid var(--accent); box-shadow: 0 30px 80px rgba(0,0,0,.55);
+  }
+  .pause-actions { margin: 0 0 calc(16px * var(--s)); }
+  .pause-section { border-top: 1px solid var(--stroke); padding-top: calc(12px * var(--s)); margin-top: calc(12px * var(--s)); }
+  .section-title { font-size: 12px; letter-spacing: .22em; text-transform: uppercase; font-weight: 800; color: var(--accent); margin-bottom: calc(8px * var(--s)); }
+  .muted { font-size: 12.5px; line-height: 1.5; color: var(--ink-dim); margin: 0; }
+
+  /* ---------------------------------------------------------------- touch
+     Everything below only applies once <body> gets .touch-mode, so the desktop
+     HUD keeps its pixel layout. Sizes derive from dv/safe-area so a notched
+     phone and a tablet both land inside the thumb band. */
+  .touch-only { display: none; }
+  body.touch-mode .touch-only { display: revert; }
+  body.touch-mode .kb-only { display: none; }
+  #touch-ui { position: fixed; inset: 0; z-index: 12; display: none; pointer-events: none; }
+
+  body.touch-mode {
+    --t-btn: clamp(46px, 12.6vw, 58px);
+    --t-gap: clamp(6px, 1.8vw, 10px);
+    --t-row: calc(var(--t-btn) * 2 + var(--t-gap));
+    --t-stick: clamp(104px, 30vw, 132px);
+    --t-band: max(var(--t-stick), var(--t-row));
+    --hud-band: calc(var(--t-band) + 18px * var(--s));
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+  body.touch-mode canvas#game { touch-action: none; }
+  body.touch-mode #touch-ui { display: block; }
+  body.touch-mode #hints { display: none; }
+  body.touch-mode #tl { top: calc(var(--hud-top) + 44px * var(--s)); }
+  body.touch-mode .card { padding: calc(20px * var(--s)) calc(20px * var(--s)); }
+
+  /* virtual stick */
+  #touch-stick {
+    position: absolute; left: calc(16px + env(safe-area-inset-left, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    width: var(--t-stick); height: var(--t-stick); border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.32);
+    background: radial-gradient(circle at 50% 45%, rgba(255,255,255,.09), rgba(10,12,16,.46));
+    box-shadow: inset 0 0 0 8px rgba(255,255,255,.03), 0 10px 26px rgba(0,0,0,.32);
+    backdrop-filter: blur(6px);
+    transition: left .16s ease, top .16s ease, border-color .16s ease;
+  }
+  #touch-stick.floating { transition: none; border-color: rgba(255,204,51,.5); }
+  #touch-stick.engaged { border-color: rgba(255,204,51,.8); }
+  #touch-stick-knob {
+    position: absolute; left: 50%; top: 50%; width: 42%; height: 42%; margin: -21% 0 0 -21%;
+    border-radius: 50%; background: rgba(255,255,255,.15); border: 1.5px solid rgba(255,255,255,.34);
+    box-shadow: 0 4px 14px rgba(0,0,0,.35);
+  }
+  #touch-stick.engaged #touch-stick-knob { background: rgba(255,204,51,.32); border-color: rgba(255,204,51,.8); }
+
+  /* action cluster */
+  #touch-actions {
+    position: absolute; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    display: grid; grid-template-columns: repeat(3, var(--t-btn)); grid-auto-rows: var(--t-btn);
+    gap: var(--t-gap); pointer-events: auto;
+  }
+  .t-btn {
+    width: var(--t-btn); height: var(--t-btn); padding: 0; border-radius: 50%;
+    border: 1.5px solid var(--stroke); background: var(--panel); color: #fff;
+    font-family: var(--font); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    backdrop-filter: blur(10px); box-shadow: 0 6px 18px rgba(0,0,0,.36);
+    pointer-events: auto; -webkit-tap-highlight-color: transparent; transition: transform .08s ease, background .12s ease;
+  }
+  .t-btn-label { font-size: max(12px, calc(var(--t-btn) * .24)); font-weight: 800; letter-spacing: .04em; line-height: 1; }
+  .t-btn-key { font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--ink-dim); line-height: 1; }
+  /* a coarse pointer has no keyboard: the key glyph is noise, the label is the control */
+  body.touch-mode .t-btn-key { display: none; }
+  .t-btn.on { border-color: rgba(255,204,51,.85); background: rgba(255,204,51,.22); }
+  .t-btn.on .t-btn-key { color: var(--accent); }
+  .t-btn.active { transform: scale(.93); background: rgba(255,204,51,.32); border-color: var(--accent); }
+  .t-btn-fire { border-color: rgba(255,59,48,.5); background: rgba(40,10,10,.82); }
+  .t-btn-fire .t-btn-label { font-size: max(12px, calc(var(--t-btn) * .23)); color: #ff9b93; }
+  .t-btn-fire.active { background: rgba(255,59,48,.45); border-color: var(--danger); }
+
+  /* ------------------------------------------------------ layout modes
+     narrow: phones in portrait. The right stack moves under the cash chip so
+     the bottom corners stay free for the thumbs and the minimap never sits on
+     the prompt. short: landscape phones / very short windows; one-line hints
+     and a "?" button replace the long hint chip. */
+  body.hud-short #tl { top: calc(var(--hud-top) + 44px * var(--s)); max-width: min(26vw, 250px); }
+  /* short layouts: the hint chip moves up under the objective and the prompt
+     drops into the free strip just above the thumb band */
+  body.hud-short #hints {
+    top: calc(var(--hud-tl-bottom) + var(--hud-gap)); bottom: auto;
+    max-width: min(60vw, calc(420px * var(--s)));
+  }
+  body.hud-short #bc { bottom: calc(var(--hud-bottom) + 4px * var(--s)); }
+  body.hud-short #toasts { top: var(--hud-top); width: min(40vw, calc(360px * var(--s))); }
+  body.hud-narrow #tl {
+    top: calc(var(--hud-top) + var(--hud-tr-h) + var(--hud-gap));
+    max-width: calc(100vw - var(--hud-right) - var(--hud-map) - var(--hud-gap) - var(--hud-left));
+  }
+  body.hud-narrow #br {
+    top: calc(var(--hud-top) + var(--hud-tr-h) + var(--hud-gap)); bottom: auto;
+    flex-direction: column-reverse;
+  }
+  /* the thumb cluster owns the bottom corners, so every touch layout lifts the
+     map stack under the cash chip and keeps the prompt above the stick band */
+  body.touch-mode #br {
+    top: calc(var(--hud-top) + var(--hud-tr-h) + var(--hud-gap)); bottom: auto;
+    flex-direction: column-reverse;
+  }
+  body.hud-narrow #hints { max-width: 100%; }
+  body.hud-narrow #toasts { width: min(72vw, 340px); }
+
+
+  /* ---------------------------------------------------------------- merge fixes
+     The responsive sheet assumes wrappers (#tl) whose children are flow-positioned,
+     and enforces a readability floor the older base rules did not. */
+  #tl { display: flex; flex-direction: column; gap: calc(6px * var(--s)); align-items: flex-start; }
+  #tl > #objective, #tl > #hints, #tl > #fps { position: static; top: auto; left: auto; }
+  #tl > #objective { font-size: max(12px, calc(13.5px * var(--s))); max-width: min(46vw, 320px); }
+  body.touch-mode #tl > #objective { font-size: max(12px, calc(11.5px * var(--s))); }
+  #prompt { max-width: 40vw; }
+
+  /* help sheet: one row per action, keyboard and touch variants of the same row */
+  #help-sheet .keys { display: grid; grid-template-columns: auto 1fr; gap: 9px 12px; align-items: center; }
+  #help-sheet .keys span { font-size: max(12px, calc(13px * var(--s))); color: var(--fg, #fff); opacity: .92; }
+  #help-sheet kbd { font-size: max(12px, calc(12px * var(--s))); }
+  #help-sheet .touch-only { display: none; }
+  body.touch-mode #help-sheet .kb-only { display: none; }
+  body.touch-mode #help-sheet .touch-only { display: inline-flex; }
+
+  /* bottom-right stack: minimap is the anchor, everything else sits above it */
+  #minimap { width: var(--hud-map); height: var(--hud-map); }
+  #ammo-wrap { bottom: calc(var(--hud-map) + 18px * var(--s)); right: calc(18px * var(--s)); }
+  #speedo { bottom: calc(var(--hud-map) + 74px * var(--s)); right: calc(18px * var(--s)); }
+  body.hud-narrow #ammo-wrap,
+  body.hud-short #ammo-wrap { bottom: calc(var(--hud-map) + 14px * var(--s)); }
+  body.hud-narrow #speedo,
+  body.hud-short #speedo { bottom: calc(var(--hud-map) + 66px * var(--s)); }
+  /* the prompt must never eat more than 40% of the width, whatever the input mode */
+  #prompt, body.touch-mode #prompt { max-width: 40vw; }
+
+  /* narrow/short: HUD stacks must share the screen with the touch band */
+  #ammo-wrap { bottom: calc(var(--hud-map) + 28px * var(--s)); }
+  body.hud-narrow #ammo-wrap { bottom: calc(var(--t-band) + 104px * var(--s)); right: calc(12px * var(--s)); }
+  body.hud-short #ammo-wrap { bottom: calc(var(--t-band) + 74px * var(--s)); }
+  body.hud-narrow #toasts { top: auto; bottom: calc(var(--hud-map) + 128px * var(--s)); }
+  body.hud-short #toasts { top: auto; bottom: calc(var(--t-band) + 128px * var(--s)); }
+  body.hud-narrow #prompt { bottom: calc(var(--t-band) + 46px * var(--s)); }
+  body.hud-short #prompt { bottom: calc(var(--t-band) + 40px * var(--s)); }
+  body.hud-short #speedo { bottom: calc(var(--t-band) + 118px * var(--s)); }
+
+  /* speedo rides above the ammo chip, on every layout mode */
+  #speedo { bottom: calc(var(--hud-map) + 104px * var(--s)); }
+  body.hud-narrow #speedo { bottom: calc(var(--t-band) + 168px * var(--s)); }
+  body.hud-short #speedo { bottom: calc(var(--t-band) + 150px * var(--s)); right: calc(18px * var(--s)); }
+  body.hud-short #toasts { bottom: calc(var(--t-band) + 96px * var(--s)); }
+
+  /* phones: one vertical stack above the touch band, toasts back at the top */
+  body.hud-narrow #hints { display: none; }
+  body.hud-narrow #health-wrap { bottom: calc(var(--t-band) + 44px * var(--s)); left: calc(14px * var(--s)); }
+  body.hud-narrow #prompt { bottom: calc(var(--t-band) + 92px * var(--s)); }
+  body.hud-narrow #ammo-wrap { bottom: calc(var(--t-band) + 150px * var(--s)); right: calc(14px * var(--s)); }
+  body.hud-narrow #speedo { bottom: calc(var(--t-band) + 210px * var(--s)); right: calc(14px * var(--s)); }
+  body.hud-narrow #toasts { top: var(--hud-toast-top); bottom: auto; }
+  body.hud-short #speedo { left: auto; right: calc(16px * var(--s)); width: auto; transform: none; }
+
+  /* ---- narrow (portrait phones): explicit bands instead of stacked overrides ---- */
+  body.hud-narrow #toasts { top: calc(var(--hud-top) + 112px * var(--s)); bottom: auto; width: min(84vw, 320px); }
+  body.hud-narrow #minimap { top: calc(var(--hud-top) + 62px * var(--s)); right: calc(12px * var(--s)); bottom: auto; }
+  body.hud-narrow #ammo-wrap { top: calc(var(--hud-top) + 62px * var(--s) + var(--hud-map) + 10px); right: calc(12px * var(--s)); bottom: auto; }
+  body.hud-narrow #speedo { top: auto; bottom: calc(var(--t-band) + 104px * var(--s)); right: calc(12px * var(--s)); }
+  body.hud-narrow #health-wrap { top: auto; bottom: calc(var(--t-band) + 8px * var(--s)); left: calc(12px * var(--s)); }
+  body.hud-narrow #prompt { top: auto; bottom: calc(var(--t-band) + 46px * var(--s)); max-width: 40vw; }
+  /* ---- short (landscape phones): keep the speedo out of the toast lane ---- */
+  body.hud-short #speedo { top: auto; bottom: calc(var(--t-band) + 10px * var(--s)); right: calc(12px * var(--s)); }
+  body.hud-short #toasts { top: calc(var(--hud-top) + 96px * var(--s)); bottom: auto; width: min(52vw, 300px); }
+  body.hud-short #hints { display: none; }
+
+  /* ---- narrow: measure-driven placement (see RECTS in the harness) ---- */
+  body.hud-narrow #minimap { top: calc(var(--hud-top) + var(--hud-tr-h, 64px) + 6px * var(--s)); right: calc(12px * var(--s)); bottom: auto; }
+  body.hud-narrow #toasts { top: calc(var(--hud-top) + var(--hud-tr-h, 64px) + var(--hud-map) + 14px * var(--s)); bottom: auto; width: min(70vw, 300px); }
+  body.hud-narrow #health-wrap { top: auto; bottom: calc(var(--t-stick, 120px) + 24px * var(--s)); left: calc(12px * var(--s)); }
+  body.hud-narrow #prompt { bottom: calc(var(--t-stick, 120px) + 56px * var(--s)); }
+  body.hud-short #speedo { top: auto; bottom: calc(var(--t-band) + 128px * var(--s)); right: calc(12px * var(--s)); }
+
+  /* ---- narrow: ammo sits directly under the minimap, toasts under the ammo ---- */
+  body.hud-narrow #ammo-wrap {
+    top: calc(var(--hud-top) + var(--hud-tr-h, 64px) + var(--hud-map) + 8px * var(--s));
+    right: calc(12px * var(--s)); bottom: auto;
+  }
+  body.hud-narrow #toasts {
+    top: calc(var(--hud-top) + var(--hud-tr-h, 64px) + var(--hud-map) + 62px * var(--s));
+    bottom: auto;
+  }
+
+  /* ---- final: speedo gets its own corner per mode, ammo clears the minimap ---- */
+  body.hud-narrow #ammo-wrap {
+    top: calc(var(--hud-top) + var(--hud-tr-h, 64px) + var(--hud-map) + 16px * var(--s));
+  }
+  body.hud-narrow #speedo,
+  body.hud-short #speedo { left: auto; width: auto; transform: none; }
+  body.hud-narrow #speedo { bottom: calc(var(--t-band) + 104px * var(--s)); right: calc(12px * var(--s)); }
+  body.hud-short #speedo { bottom: calc(var(--t-band) + 18px * var(--s)); left: calc(12px * var(--s)); right: auto; }
+
+  /* phones: the speedometer is desktop-only — the touch HUD has no room for it and
+     the driving speed already reads from the car's motion */
+  body.hud-narrow #speedo,
+  body.hud-short #speedo { display: none; }
+  body.hud-narrow #toasts {
+    top: calc(var(--hud-top) + var(--hud-tr-h, 64px) + var(--hud-map) + 70px * var(--s));
+  }
+
+  /* phones keep the speedometer, parked under the left stack where nothing else lives */
+  body.hud-narrow #speedo,
+  body.hud-short #speedo {
+    display: block; top: calc(var(--hud-tl-bottom, 120px) + 10px * var(--s));
+    left: calc(12px * var(--s)); right: auto; bottom: auto; width: auto; transform: none;
+  }
+
+  /* health sits just above the stick, below the prompt chip */
+  body.hud-narrow #health-wrap { top: auto; bottom: calc(var(--t-stick, 120px) + 12px * var(--s)); left: calc(12px * var(--s)); }
+
+  /* narrow bands, measured: health hugs the stick, the prompt rides above it */
+  body.hud-narrow #health-wrap { top: auto; bottom: calc(var(--t-stick, 120px) + 26px * var(--s)); left: calc(12px * var(--s)); }
+  body.hud-narrow #prompt { bottom: calc(var(--t-stick, 120px) + 62px * var(--s)); }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <div id="objective">Explore the city</div>
+  <div id="tl">
+    <div id="objective">Explore the city</div>
+    <div id="fps"></div>
+    <div id="hints"><b>F</b> enter / exit car &nbsp;·&nbsp; <b>Q</b> punch &nbsp;·&nbsp; <b>R</b> reload &nbsp;·&nbsp; <b>T</b> skip time &nbsp;·&nbsp; <b>M</b> map &nbsp;·&nbsp; <b>N</b> mute</div>
+  </div>
   <div id="topright">
     <div id="cash">$0</div>
     <div id="wanted"><div id="wanted-label"></div><div id="stars"></div></div>
   </div>
-  <div id="fps"></div>
+
   <button id="help-btn" type="button" aria-label="Touch controls" aria-expanded="false">?</button>
 
   <div id="health-wrap">
@@ -374,7 +901,7 @@
 
   <div id="ammo-wrap"><small>AMMO</small><span id="ammo">12 / 12</span></div>
 
-  <div id="hints"><b>F</b> enter / exit car &nbsp;·&nbsp; <b>Q</b> punch &nbsp;·&nbsp; <b>R</b> reload &nbsp;·&nbsp; <b>T</b> skip time &nbsp;·&nbsp; <b>M</b> map &nbsp;·&nbsp; <b>N</b> mute</div>
+
 
   <div id="speedo"><div id="speed-val">0</div><span class="unit">KM/H</span></div>
   <div id="prompt"></div>
@@ -386,22 +913,24 @@
   <canvas id="minimap" width="196" height="196"></canvas>
 </div>
 
-<div id="help-sheet" role="dialog" aria-modal="true" aria-label="Touch controls">
+<div id="help-sheet" role="dialog" aria-modal="true" aria-label="Controls">
   <div class="sheet">
-    <div class="kicker">Touch controls</div>
+    <div class="kicker">Controls</div>
     <div class="keys">
-      <kbd>Stick</kbd><span>Move — drag anywhere in the lower-left</span>
-      <kbd>Drag</kbd><span>Look — right half of the screen</span>
-      <kbd>FIRE</kbd><span>Shoot</span>
-      <kbd>JUMP</kbd><span>Jump</span>
-      <kbd>PUNCH</kbd><span>Melee</span>
-      <kbd>CAR</kbd><span>Enter / exit a vehicle (F)</span>
-      <kbd>USE</kbd><span>Enter / leave a shop (E)</span>
-      <kbd>RUN</kbd><span>Toggle sprint</span>
-      <kbd>2 fingers</kbd><span>Tap to pause</span>
+      <kbd class="kb-only">W A S D</kbd><span class="kb-only">Move</span><kbd class="touch-only">Stick</kbd><span class="touch-only">Move</span>
+      <kbd class="kb-only">Shift</kbd><span class="kb-only">Sprint</span><kbd class="touch-only">RUN</kbd><span class="touch-only">Sprint</span>
+      <kbd class="kb-only">Click</kbd><span class="kb-only">Shoot</span><kbd class="touch-only">FIRE</kbd><span class="touch-only">Shoot</span>
+      <kbd class="kb-only">Mouse</kbd><span class="kb-only">Look / aim</span><kbd class="touch-only">Drag</kbd><span class="touch-only">Look / aim</span>
+      <kbd class="kb-only">Q</kbd><span class="kb-only">Melee</span><kbd class="touch-only">PUNCH</kbd><span class="touch-only">Melee</span>
+      <kbd class="kb-only">R</kbd><span class="kb-only">Reload</span><kbd class="touch-only">RELOAD</kbd><span class="touch-only">Reload</span>
+      <kbd class="kb-only">1 – 6</kbd><span class="kb-only">Weapon slots / vehicle</span><kbd class="touch-only">CAR</kbd><span class="touch-only">Weapon slots / vehicle</span>
+      <kbd class="kb-only">E</kbd><span class="kb-only">Enter a shop</span><kbd class="touch-only">USE</kbd><span class="touch-only">Enter a shop</span>
+      <kbd class="kb-only">M</kbd><span class="kb-only">City map</span><kbd class="touch-only">Map</kbd><span class="touch-only">City map</span>
+      <kbd class="kb-only">Esc</kbd><span class="kb-only">Pause</span><kbd class="touch-only">2 fingers</kbd><span class="touch-only">Pause</span>
     </div>
     <button id="help-close" type="button">Got it</button>
   </div>
+</div>
 </div>
 
 <canvas id="bigmap" role="img" aria-label="City map"></canvas>
