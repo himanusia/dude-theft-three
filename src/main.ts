@@ -4,6 +4,7 @@ import { Character } from './character';
 import { Car, driverLook } from './car';
 import { loadCarModels } from './carmodels';
 import { districtAt } from './jakarta';
+import * as JakartaMap from './jakartamap';
 import { Ragdoll } from './ragdoll';
 import { PedManager } from './npc';
 import { Police } from './police';
@@ -929,7 +930,7 @@ function finishReload() {
   a.reserve -= take;
   player.mag += take;
   a.mag = player.mag;
-  hud.setWeapon(spec.name, spec.slot, a.reserve);
+  hud.setWeapon(spec.name, spec.slot, a.reserve, spec.id);
 }
 
 function ammoFor(id: WeaponId) {
@@ -956,7 +957,7 @@ function equipWeapon(id: WeaponId) {
   character.armR.add(model);
   heldModel = model;
   character.gun.visible = false;
-  hud.setWeapon(spec.name, spec.slot, a.reserve);
+  hud.setWeapon(spec.name, spec.slot, a.reserve, spec.id);
   hud.setAmmo(player.mag, spec.magSize, false);
   audio.play('click', { vol: 0.35 });
 }
@@ -1118,7 +1119,7 @@ function shoot() {
   setShake(spec.shake, 0.1);
   addMuzzle(muzzlePos());
   for (let i = 0; i < spec.pellets; i++) firePelletRaw(spec.spread, spec.damage, spec.range);
-  hud.setWeapon(spec.name, spec.slot, ammoFor(player.weapon).reserve);
+  hud.setWeapon(spec.name, spec.slot, ammoFor(player.weapon).reserve, spec.id);
   hud.setAmmo(player.mag, spec.magSize, false);
 }
 
@@ -1962,6 +1963,7 @@ animate();
 window.__game = {
   THREE,
   districtAt,
+  jakartaMap: JakartaMap,
   scene,
   camera,
   renderer,
