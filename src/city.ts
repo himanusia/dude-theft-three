@@ -46,18 +46,16 @@ export const PALETTE = {
   frame: '#f8f5ec',
   awnings: [0xe02727, 0x1a8ecf, 0xf0a20a, 0x27b34f, 0xef5620, 0x8a24e0],
   streets: {
-    // neutral base, strongly tinted patches: cells read warm or cool while the mean stays
-    // balanced, which is how the reference road carries colour without a cast
     // the road is the biggest single mass in frame, so it carries the frame's cool
-    // balance the way the reference's violet-grey asphalt does; the warm/cool patches
-    // are a tint variation on top, never a brown wash
-    asphalt: '#8a80ab',
-    asphaltWarm: '#9c8a76',
-    asphaltCool: '#6670c6',
-    seam: '#4a4657',
-    paving: '#d8cba8',
-    pavingAlt: '#cabf9c',
-    joint: '#8b8371',
+    // balance the way the reference's periwinkle asphalt does. Sampled from
+    // reference/dtw-02.png (a clean, flat (131,147,177) at noon): the reference road has
+    // no stains at all, so this base is the whole colour story and the texture below only
+    // adds grain.
+    asphalt: '#7f8cb4',
+    seam: '#5f5b5a',
+    paving: '#e3c684',
+    pavingAlt: '#d3ba7a',
+    joint: '#8a7f66',
     curb: '#c9bda6',
     park: '#38c94f',
     lot: '#9a949c',
@@ -81,22 +79,31 @@ export const PALETTE = {
 // sky. These values are the single source of truth for the light rig; they are tuned
 // against tests/palette.mjs (mean RGB inside ±12, brightness 126-136).
 export const LIGHT = {
-  hemiSky: 0xf3f7ff,
-  hemiGround: 0x6fae62,
+  // Near-white sky bounce with a warm bias: the reference city reads neutral-bright, and
+  // a cool sky tint is what dragged every shadow (and the road) toward blue.
+  hemiSky: 0xf4f1ec,
+  hemiGround: 0x4fa845,
   hemiNight: 0x4a5f8a,
   hemiGroundNight: 0x2a2b33,
-  fill: 0xfff3e4,
+  fill: 0xffe9d2,
   sun: 0xfff2dc,
-  skyDay: 0x2aa8f5,
+  // sampled from the reference stills' sky (dtw-02 (48,143,216), dtw-04 (48,162,225)):
+  // a deeper, less cyan blue than the old 0x2aa8f5, which is what the frame's blue cast
+  // was actually coming from once the road was cleaned up
+  skyDay: 0x3a9cd2,
   skyDusk: 0xff8a4a,
   skyNight: 0x0b1220,
 };
 
 // ---------------------------------------------------------------- facade textures
-// Six window languages, each baked into one 128x128 canvas and cached per block accent,
-// so variety comes from the texture instead of from extra meshes.
+// Six window languages, each baked into one 128x256 canvas (four storeys) and cached per
+// block accent, so variety comes from the texture instead of from extra meshes. Four
+// storeys per tile instead of two: a 20 m block used to repeat the same bay 2.5 times up
+// the wall, which is what made neighbouring buildings read as one recoloured box.
 const TILE = 128;
-export const TILE_WORLD = 6.5; // world units covered by one facade tile (one tile ~= 2 floors)
+const TILE_H = 256;
+const FLOORS_PER_TILE = 4;
+export const TILE_WORLD = 6.5; // world units covered by 128 px of facade
 const FLOOR = 64; // px per floor inside a tile
 
 type FacadeStyle = 'grid' | 'bands' | 'strips' | 'louvre' | 'balcony' | 'shopfront';
@@ -518,7 +525,7 @@ export class City {
     this.scene.add(fill);
     this.fill = fill;
 
-    const sun = new THREE.DirectionalLight(LIGHT.sun, 2.2);
+    const sun = new THREE.DirectionalLight(LIGHT.sun, 2.3);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 1;
@@ -596,8 +603,10 @@ export class City {
   }
 
   buildGround() {
-    // ---- asphalt: neutral-violet base with visible warm/cool tint patches and tar
-    // seams, so the road carries colour without washing the whole frame one way
+    // ---- asphalt: one flat periwinkle with texel-scale grain and two hairline seams.
+    // The reference road (dtw-02/03) is a single clean colour with zero stains, so every
+    // patch painted on it here - warm stones, resurfacing strips, tan blobs - read as
+    // "stained water" at gameplay distance. Value varies at texel scale; hue does not.
     const S = PALETTE.streets;
     const seeded = (seed: number) => {
       const R = mulberry32(seed);
@@ -606,58 +615,33 @@ export class City {
         ri: (a: number, b: number) => Math.floor(a + R() * (b - a + 1)),
       };
     };
-    const { r: ar, ri: ari } = seeded(0x0a59a17);
+    const { r: ar } = seeded(0x0a59a17);
     const { r: pr, ri: pri } = seeded(0x9a7e1);
     const { r: gr, ri: gri } = seeded(0x6a55);
     const asphaltTex = cachedTexture('asphalt', 256, 256, (ctx, w, h) => {
-      const rand = ar, randInt = ari;
+      const rand = ar;
       ctx.fillStyle = S.asphalt;
       ctx.fillRect(0, 0, w, h);
-      // warm / cool patches: the mean stays neutral while the surface gains colour
-      // many small tint patches instead of a few big blobs: the road reads as worn
-      // asphalt with patch repairs, not as a wet painted surface
-      // warm / cool patches: the road tints locally, the pair averages neutral across a
-      // tile so the frame mean does not depend on which patch the camera stands on
-      for (let i = 0; i < 30; i++) {
-        ctx.fillStyle = i % 2 ? S.asphaltWarm : S.asphaltCool;
-        ctx.globalAlpha = rand(0.45, 0.8);
-        ctx.beginPath();
-        ctx.ellipse(rand(0, w), rand(0, h), rand(28, 96), rand(20, 62), rand(0, 3), 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-      for (let i = 0; i < 4200; i++) {
-        const v = rand(0.72, 1.16);
-        ctx.fillStyle = `rgba(${Math.round(136 * v)},${Math.round(130 * v)},${Math.round(122 * v)},0.5)`;
+      // Grain, and nothing else. 1-2 px at 256 over a 25 m tile is 10-20 cm, so it reads
+      // as aggregate up close and as flat colour from the sidewalk. Lightening and
+      // darkening the base by the same amount keeps the tile mean exactly on S.asphalt
+      // whichever part of the road the camera stands on.
+      for (let i = 0; i < 11000; i++) {
+        const up = i % 2 === 0;
+        const a = rand(0.05, 0.16).toFixed(3);
+        ctx.fillStyle = up ? `rgba(232,238,255,${a})` : `rgba(54,58,78,${a})`;
         ctx.fillRect(rand(0, w), rand(0, h), rand(1, 2.2), rand(1, 2.2));
       }
-      // tar seams
+      // tar seams: two hairlines, low enough contrast to show up close only
       ctx.strokeStyle = S.seam;
-      for (const [x0, y0, x1, y1] of [[20, 0, 20, h], [0, 168, w, 168], [150, 0, 150, h]]) {
-        ctx.globalAlpha = 0.45;
-        ctx.lineWidth = 2.6;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        ctx.globalAlpha = 0.8;
-        ctx.lineWidth = 1;
+      ctx.lineWidth = 1.3;
+      for (const [x0, y0, x1, y1] of [[26, 0, 26, h], [0, 174, w, 174]]) {
+        ctx.globalAlpha = 0.18;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
       }
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = 'rgba(84,80,74,0.5)';
-      ctx.lineWidth = 1.2;
-      for (let i = 0; i < 7; i++) {
-        ctx.beginPath();
-        let x = rand(0, w);
-        let y = rand(0, h);
-        ctx.moveTo(x, y);
-        for (let k = 0; k < 4; k++) {
-          x += rand(-22, 22);
-          y += rand(-22, 22);
-          ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-      }
     });
-    asphaltTex.repeat.set(35, 35);
+    asphaltTex.repeat.set(55, 55);
     const asphalt = new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.96 });
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), asphalt);
     ground.rotation.x = -Math.PI / 2;
@@ -697,10 +681,10 @@ export class City {
     // ---- grass: mottled turf instead of a flat green card
     const grassTex = cachedTexture('grass', 256, 256, (ctx, w, h) => {
       const rand = gr, randInt = gri;
-      ctx.fillStyle = '#46c248';
+      ctx.fillStyle = '#3fc256';
       ctx.fillRect(0, 0, w, h);
       for (let i = 0; i < 40; i++) {
-        ctx.fillStyle = i % 3 === 0 ? 'rgba(126,194,72,0.35)' : i % 3 === 1 ? 'rgba(46,150,58,0.35)' : 'rgba(88,210,98,0.32)';
+        ctx.fillStyle = i % 3 === 0 ? 'rgba(126,194,72,0.35)' : i % 3 === 1 ? 'rgba(46,150,74,0.35)' : 'rgba(88,206,112,0.32)';
         ctx.beginPath();
         ctx.ellipse(rand(0, w), rand(0, h), rand(10, 46), rand(8, 30), rand(0, 3), 0, Math.PI * 2);
         ctx.fill();
@@ -878,7 +862,7 @@ export class City {
     const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 2.8, 6);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4f34, roughness: 1 });
     const crownGeo = new THREE.IcosahedronGeometry(1.7, 0);
-    const crownMat = new THREE.MeshStandardMaterial({ color: 0x2fae4a, roughness: 1, flatShading: true });
+    const crownMat = new THREE.MeshStandardMaterial({ color: 0x4fae5e, roughness: 1, flatShading: true });
 
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, this.treeTrunks.length);
     this.treeTrunks.forEach((m, i) => trunks.setMatrixAt(i, m));
@@ -1185,7 +1169,7 @@ export class City {
     trunk.position.set(x, 1.6 * scale + 0.28, z);
     trunk.castShadow = true;
     this.group.add(trunk);
-    const leafMat = new THREE.MeshStandardMaterial({ color: pick([0x2fae4a, 0x1f8c43, 0x46c95c]), roughness: 1, flatShading: true });
+    const leafMat = new THREE.MeshStandardMaterial({ color: pick([0x4fae5e, 0x3f9660, 0x62bd74]), roughness: 1, flatShading: true });
     for (let i = 0; i < 2; i++) {
       const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(rand(1.5, 2.1) * scale, 0), leafMat);
       leaf.position.set(x + rand(-0.5, 0.5) * scale, (3.4 + i * 1.2) * scale, z + rand(-0.5, 0.5) * scale);
