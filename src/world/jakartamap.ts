@@ -156,7 +156,7 @@ const LM = (x: number, z: number): [number, number] => [+(x * SCALE).toFixed(1),
 
 export const LANDMARKS: LandmarkSlot[] = [
   { id: 'monas', name: 'Monas', ...lm(0, -46), district: 'gambir', brief: 'marble obelisk with a gold flame on an open square' },
-  { id: 'bundaran-hi', name: 'Bundaran HI', ...lm(2, 8), district: 'thamrin', brief: 'roundabout with the Welcome Monument and its fountain ring' },
+  { id: 'bundaran-hi', name: 'Bundaran HI', ...lm(5.2, 8), district: 'thamrin', brief: 'roundabout with the Welcome Monument and its fountain ring' },
   { id: 'stadhuis', name: 'Stadhuis', ...lm(-104, -130), district: 'kotatua', brief: 'white colonial town hall, red clay roof, clock tower, cobbled square' },
   { id: 'glodok-gate', name: 'Gapura Glodok', ...lm(-70, -96), district: 'glodok', brief: 'paifang over the road: grey pillars, tiled roof, three plaques' },
   { id: 'ancol-beach', name: 'Pantai Ancol', ...lm(96, -140), district: 'ancol', brief: 'sand, calm water, timber pier, feather flags, ferris wheel silhouette' },

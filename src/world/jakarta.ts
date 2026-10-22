@@ -175,7 +175,7 @@ export function buildMonas(ctx: Ctx, cx: number, cz: number) {
   const gold = new THREE.MeshStandardMaterial({ color: 0xffcf4a, emissive: 0x7a5a12, emissiveIntensity: 0.5, metalness: 0.85, roughness: 0.28 });
 
   // paved square
-  const plaza = new THREE.Mesh(new THREE.BoxGeometry(34, 0.14, 34), new THREE.MeshStandardMaterial({ color: 0xcfc9bc, roughness: 0.95 }));
+  const plaza = new THREE.Mesh(new THREE.BoxGeometry(26, 0.14, 26), new THREE.MeshStandardMaterial({ color: 0xcfc9bc, roughness: 0.95 }));
   plaza.position.set(cx, 0.29, cz);
   plaza.receiveShadow = true;
   ctx.group.add(plaza);
@@ -221,7 +221,7 @@ export function buildBundaran(ctx: Ctx, cx: number, cz: number) {
   const water = new THREE.MeshStandardMaterial({ color: 0x3fa9d8, roughness: 0.18, metalness: 0.25, transparent: true, opacity: 0.85 });
   const gold = new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0x6b4d0d, emissiveIntensity: 0.45, metalness: 0.8, roughness: 0.3 });
 
-  const grass = new THREE.Mesh(new THREE.CylinderGeometry(19, 19, 0.16, 32), new THREE.MeshStandardMaterial({ color: 0x4e8a44, roughness: 0.95 }));
+  const grass = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 0.16, 32), new THREE.MeshStandardMaterial({ color: 0x4e8a44, roughness: 0.95 }));
   grass.position.set(cx, 0.28, cz);
   grass.receiveShadow = true;
   ctx.group.add(grass);
