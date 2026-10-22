@@ -120,10 +120,12 @@ const muzzleAt = await p.evaluate(() => {
   v.project(g.camera);
   return { x: Math.round((v.x * 0.5 + 0.5) * window.innerWidth), y: Math.round((-v.y * 0.5 + 0.5) * window.innerHeight) };
 });
-await p.mouse.down();
 let bestFlash = { px: -1, b64: null };
-for (let i = 0; i < 8; i++) {
+for (let i = 0; i < 10; i++) {
+  // semi-auto weapons need a fresh press per shot, so pull the trigger every frame we sample
+  await p.mouse.down();
   const b64 = await p.screenshot({ encoding: 'base64' });
+  await p.mouse.up();
   const px = await p.evaluate(async ({ b64, cx, cy }) => {
     const img = new Image();
     img.src = 'data:image/png;base64,' + b64;
@@ -144,7 +146,6 @@ for (let i = 0; i < 8; i++) {
   if (px > bestFlash.px) bestFlash = { px, b64 };
   if (bestFlash.px > 150) break;
 }
-await p.mouse.up();
 if (bestFlash.b64) fs.writeFileSync(path.join(OUT, 'feel-shoot.png'), Buffer.from(bestFlash.b64, 'base64'));
 const flash = { sprites: await p.evaluate(() => window.__game.scene.children.filter(o => o.isSprite).length), pixels: bestFlash.px };
 await sleep(400);
