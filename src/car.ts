@@ -426,7 +426,9 @@ export class Car {
       this.speed = Math.abs(this.speed) <= drop ? 0 : this.speed - Math.sign(this.speed) * drop;
     }
     if (handbrake && this.speed !== 0) {
-      const drop = 10 * dt;
+      // a handbrake in an arcade racer is a drift trigger, not a brake pedal: it scrubs some
+      // speed but must leave enough momentum to carry the slide
+      const drop = 4 * dt;
       this.speed = Math.abs(this.speed) <= drop ? 0 : this.speed - Math.sign(this.speed) * drop;
     }
 
@@ -454,12 +456,12 @@ export class Car {
 
     // Yaw the front wheels ask for, capped: the tail may outrun the nose, which is a drift
     const yawAsk = (this.speed / WHEELBASE) * Math.tan(this.steer);
-    const yawCap = handbrake ? 2.9 : 1.75;
+    const yawCap = handbrake ? 2.2 : 1.75;
     const yawRate = clamp(yawAsk, -yawCap, yawCap);
     this.yaw += yawRate * dt;
 
     // Sideways grip: strong while rolling, nearly gone on the handbrake
-    const gripRate = handbrake ? this.grip * 0.14 : this.grip;
+    const gripRate = handbrake ? this.grip * 0.14 : this.grip * 1.5;
     vLat *= Math.exp(-gripRate * dt);
     // Rotating the body throws weight sideways: with the handbrake, that slide survives
     vLat -= yawRate * this.speed * dt * (handbrake ? 0.62 : 0.3);
@@ -467,6 +469,15 @@ export class Car {
     this.slip = Math.atan2(vLat, Math.abs(this.speed) + 0.001);
     this.vx = fwd.x * this.speed + rightX * vLat;
     this.vz = fwd.z * this.speed + rightZ * vLat;
+    // total momentum still obeys the spec top speed, otherwise a long slide adds lateral
+    // speed on top of forward speed and the car exceeds its own limit
+    const total = Math.hypot(this.vx, this.vz);
+    const topSpeed = this.maxSpeed * 1.08;
+    if (total > topSpeed) {
+      const k = topSpeed / total;
+      this.vx *= k;
+      this.vz *= k;
+    }
     this.pos.x += this.vx * dt;
     this.pos.z += this.vz * dt;
 
