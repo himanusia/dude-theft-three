@@ -121,11 +121,19 @@ function check(name, ok, detail) {
       const cz = Math.max(b.minZ, Math.min(z, b.maxZ));
       return Math.hypot(x - cx, z - cz) > 3.6;
     });
-    let spot = { x: 26, z: 0 };
-    for (const z of [0, 52, -52, 104, -104, 156, -156]) {
-      if (clear(26, z)) { spot = { x: 26, z }; break; }
+    // park on the spawn road, and only where the ground is road level: a car set down on a
+    // kerb plate sits 26 cm high and cannot pull away
+    const spawn = g.city.getSpawn();
+    const onRoad = (x, z) => Math.abs(g.city.groundHeightAt(x, z) - (g.city.groundHeightAt(x + 500, z + 500))) < 0.2;
+    let spot = { x: spawn.x, z: spawn.z + 20 };
+    for (const dz of [20, 40, -20, 60, -40]) {
+      const x = spawn.x;
+      const z = spawn.z + dz;
+      if (clear(x, z) && onRoad(x, z)) { spot = { x, z }; break; }
     }
-    c.pos.set(spot.x, 0, spot.z); c.yaw = 0; c.mesh.position.copy(c.pos); c.mesh.rotation.y = 0;
+    const ground = g.city.groundHeightAt(spot.x, spot.z);
+    c.pos.set(spot.x, ground, spot.z); c.y = ground; c.vy = 0; c.yaw = 0;
+    c.mesh.position.copy(c.pos); c.mesh.rotation.y = 0;
     g._test.teleport(spot.x + 2.2, spot.z + 0.4);
     return { car: c.pos.toArray(), spot, dist: +c.pos.distanceTo(g.player.pos).toFixed(2) };
   });
@@ -215,7 +223,23 @@ function check(name, ok, detail) {
   const punchAfter = await page.evaluate(() => ({ rag: window.__game.ragdolls.length, cash: window.__game.player.cash }));
   check('punch ragdolls a ped', punchAfter.rag > punch.before, { punch, punchAfter });
 
-  // ragdoll settles onto the ground and eventually expires
+  // ragdoll settles onto the ground and eventually expires. Poll until the body stops moving
+  // instead of guessing a delay: a fixed wait measured a body that was still in the air.
+  await page
+    .waitForFunction(
+      () => {
+        const g = window.__game;
+        const r = g.ragdolls[0];
+        if (!r) return false;
+        const y = r.points.hips.p.y;
+        const w = window;
+        const prev = w.__lastHips === undefined ? y : w.__lastHips;
+        w.__lastHips = y;
+        return Math.abs(y - prev) < 0.004;
+      },
+      { timeout: 6000, polling: 120 }
+    )
+    .catch(() => {});
   const settle = await page.evaluate(() => {
     const r = window.__game.ragdolls[0];
     if (!r) return null;
@@ -250,7 +274,12 @@ function check(name, ok, detail) {
   const dead = await page.evaluate(() => ({ hp: Math.round(window.__game.player.hp), wanted: +window.__game.police.wanted.toFixed(2), cops: window.__game.police.cars.length, pos: window.__game.player.pos.toArray().map(v => Math.round(v)) }));
   check('death respawns with full hp and clears police', dead.hp === 100 && dead.wanted === 0 && dead.cops === 0, dead);
 
-  // cash pickup
+  // cash pickup - step out of the car first: a seated player is snapped back to the car every
+  // frame, so a teleport onto the pickup never sticks
+  if (await page.evaluate(() => !!window.__game.player.inCar)) {
+    await page.keyboard.press('f');
+    await sleep(500);
+  }
   const pickup = await page.evaluate(async () => {
     const g = window.__game;
     const before = g.player.cash;

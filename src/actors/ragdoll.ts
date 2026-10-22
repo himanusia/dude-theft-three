@@ -286,7 +286,14 @@ export class Ragdoll {
    * lift the whole body by the deepest penetration instead of guessing per-point offsets.
    */
   liftOutOfGround() {
-    let lowest = 0;
+    // Reference is the terrain under the body, not the world origin. Measured against zero,
+    // a body resting correctly on a slope below y = 0 was lifted until its lowest mesh
+    // reached zero - which is why a collapsed ragdoll hovered 2.4 m over the road.
+    const pts = Object.values(this.points);
+    const cx = pts.reduce((a, p) => a + p.p.x, 0) / pts.length;
+    const cz = pts.reduce((a, p) => a + p.p.z, 0) / pts.length;
+    const ground = this.groundAt ? this.groundAt(cx, cz) : 0;
+    let lowest = ground;
     const box = Ragdoll.box || (Ragdoll.box = new THREE.Box3());
     for (const child of this.group.children) {
       const mesh = child as THREE.Mesh;
@@ -295,10 +302,11 @@ export class Ragdoll {
       box.setFromObject(mesh);
       if (box.min.y < lowest) lowest = box.min.y;
     }
-    if (lowest < -0.001) {
+    if (lowest < ground - 0.001) {
+      const shift = ground - lowest;
       for (const pt of Object.values(this.points)) {
-        pt.p.y -= lowest;
-        pt.prev.y -= lowest;
+        pt.p.y += shift;
+        pt.prev.y += shift;
       }
       this.syncMeshes();
     }

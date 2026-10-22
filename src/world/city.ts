@@ -854,6 +854,10 @@ export class City {
     const sites: { x: number; z: number; size: number }[] = [];
     const PITCH_BLOCK = 112;
     const SIZE = 92;
+    // Block centres sit on multiples of the pitch, which is where src/world/streets.ts draws the
+    // local streets: halfway between two centres. Offsetting the lattice by the district's own
+    // bounding box (the old code) put streets straight through blocks - 12% of the road samples
+    // ended up under a footprint, and a police route handed such a leg drove into the wall.
     for (const d of JKT_DISTRICTS) {
       let minX = Infinity;
       let maxX = -Infinity;
@@ -865,10 +869,12 @@ export class City {
         minZ = Math.min(minZ, z);
         maxZ = Math.max(maxZ, z);
       }
-      for (let x = minX + SIZE / 2; x <= maxX; x += PITCH_BLOCK) {
-        for (let z = minZ + SIZE / 2; z <= maxZ; z += PITCH_BLOCK) {
-          const jx = x + rand(-4, 4);
-          const jz = z + rand(-4, 4);
+      const firstX = Math.ceil((minX + SIZE / 2) / PITCH_BLOCK) * PITCH_BLOCK;
+      const firstZ = Math.ceil((minZ + SIZE / 2) / PITCH_BLOCK) * PITCH_BLOCK;
+      for (let x = firstX; x <= maxX + SIZE / 2; x += PITCH_BLOCK) {
+        for (let z = firstZ; z <= maxZ + SIZE / 2; z += PITCH_BLOCK) {
+          const jx = x + rand(-3, 3);
+          const jz = z + rand(-3, 3);
           // the block centre has to be inside the district, and its corners too, so a block
           // never spills into the bay or the next district's park
           if (!pointInPoly(jx, jz, d.poly)) continue;
@@ -879,10 +885,10 @@ export class City {
           // the roads come first: a block may not sit on an arterial, or the street the player
           // spawns on has a building in the middle of it
           for (const a of ARTERIALS) {
-            if (this.distToPath(jx, jz, a.path) < a.width / 2 + SIZE * 0.72 + 3) { blocked = true; break; }
+            if (this.distToPath(jx, jz, a.path) < a.width / 2 + SIZE * 1.45 + 2) { blocked = true; break; }
           }
           if (blocked) continue;
-          if (this.distToPath(jx, jz, RING_ROAD) < 12 + SIZE * 0.72 + 3) continue;
+          if (this.distToPath(jx, jz, RING_ROAD) < 12 + SIZE * 1.45 + 2) continue;
           for (const lm of LANDMARKS) {
             if (Math.hypot(jx - lm.x, jz - lm.z) < SIZE / 2 + 34) { blocked = true; break; }
           }
@@ -891,7 +897,9 @@ export class City {
             if (this.distToPath(jx, jz, r.path) < r.width / 2 + SIZE * 0.42) { blocked = true; break; }
           }
           if (blocked) continue;
-          sites.push({ x: jx, z: jz, size: SIZE + rand(-6, 8) });
+          // a plate may not grow past half the gap to the street line (56 - 6), or its outer
+          // buildings stand on the carriageway
+          sites.push({ x: jx, z: jz, size: SIZE + rand(-6, 2) });
         }
       }
     }
@@ -1900,7 +1908,17 @@ export class City {
     const [ax, az] = spine[1];
     const [bx, bz] = spine[2];
     const t = 0.55;
-    return new THREE.Vector3(ax + (bx - ax) * t + 3, 0, az + (bz - az) * t);
+    const baseX = ax + (bx - ax) * t;
+    const baseZ = az + (bz - az) * t;
+    const inside = (x: number, z: number) =>
+      this.colliders.some((c) => x > c.minX - 1 && x < c.maxX + 1 && z > c.minZ - 1 && z < c.maxZ + 1);
+    // walk along the spine until a point is free: spawning inside a wall made the camera start
+    // inside a building and every shot hit a wall at zero distance
+    for (const offset of [3, -3, 6, -6, 9, -9, 12, -12]) {
+      const x = baseX + offset;
+      if (!inside(x, baseZ)) return new THREE.Vector3(x, 0, baseZ);
+    }
+    return new THREE.Vector3(baseX, 0, baseZ);
   }
 
   /**
@@ -1947,7 +1965,11 @@ export class City {
             const district = districtAtPoint(px, pz);
             const styleKey = (district === 'gambir' ? 'monas' : district) as keyof typeof DISTRICTS;
             const style = DISTRICTS[styleKey] || DISTRICTS.kampung;
-            if (!isWater(px, pz)) {
+            let onRoad = false;
+            for (const other of roads) {
+              if (this.distToPath(px, pz, other.path) < other.width / 2 + 2) { onRoad = true; break; }
+            }
+            if (!onRoad && !isWater(px, pz)) {
               const group = new THREE.Group();
               group.position.set(px, terrainHeight(px, pz), pz);
               group.rotation.y = Math.atan2(dx, dz);

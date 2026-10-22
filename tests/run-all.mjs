@@ -10,7 +10,7 @@ import { readdirSync } from 'node:fs';
 
 const GROUPS = {
   gameplay: ['qa', 'playtest', 'weapons-smoke', 'fps'],
-  world: ['audit', 'floats', 'drivers', 'drift', 'police-path', 'npc-behavior'],
+  world: ['audit', 'floats', 'drivers', 'drift', 'police-path', 'npc-behavior', 'roadnav'],
   ui: ['interior', 'touch', 'responsive', 'persistence'],
   visual: ['proof-shots', 'ragdoll-shots', 'bgm'],
 };

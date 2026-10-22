@@ -146,6 +146,13 @@ export class Police {
     }
   }
 
+  /** Distance from the car to the last waypoint of its current route (Infinity without one). */
+  private distToRouteEnd(entry: CopEntry, car: any): number {
+    if (entry.points <= 0) return Infinity;
+    const k = (entry.points - 1) * 2;
+    return Math.hypot(car.pos.x - entry.path[k], car.pos.z - entry.path[k + 1]);
+  }
+
   /** Pure-pursuit lookahead: aim at a point ~8-22 m further along the polyline. */
   private aim(entry: CopEntry, car: any) {
     const path = entry.path;
@@ -312,9 +319,12 @@ export class Police {
       // Dismount: once the cruiser has stopped near a player on foot, two officers get out and
       // come for them, GTA-style, instead of the fight happening through the windscreen.
       const stopped = Math.abs(car.speed) < 3.5;
-      // The route now ends where the cruiser can legally stop, so "finished the route" is the
-      // signal to dismount and let the crew walk the last stretch behind the building.
-      const routeDone = entry.points > 0 && (entry.idx ?? 0) >= entry.points - 1;
+      // The route now ends where the cruiser can legally stop, so "arrived at the end of the
+      // route" is the signal to dismount and let the crew walk the last stretch behind the
+      // building. Measure it against the geometry, not the index: a replan resets idx to 0 every
+      // 0.7 s, and the endpoint of a route that cannot reach the player is a road point up to a
+      // block away.
+      const routeDone = entry.points > 0 && this.distToRouteEnd(entry, car) < 10;
       const canDeploy = this.wanted >= 2 && onFoot && stopped && !entry.crew && (dist < 28 || routeDone);
       if (canDeploy) {
         entry.crew = true;
@@ -352,6 +362,11 @@ export class Police {
         }
       }
 
+      // The last waypoint is not a point to swing past: it is where this cruiser parks. Without
+      // this the pure-pursuit loop orbits the endpoint at its corner speed (measured: 7 m/s,
+      // 88-108 m from the player, idx never advancing) and the crew can never dismount.
+      const atRouteEnd = entry.points > 0 && entry.idx >= entry.points - 1;
+
       const aimX = entry.aimX - car.pos.x;
       const aimZ = entry.aimZ - car.pos.z;
       const aimDist = Math.hypot(aimX, aimZ) || 1;
@@ -367,6 +382,9 @@ export class Police {
       if (direct) {
         if (dist < 14) want = Math.min(want, 8);
         if (dist < 6.5) want = 0;
+      } else if (atRouteEnd) {
+        // park at the end of the route: creep the last metres, then stand on the brake
+        want = Math.min(want, Math.max(0, aimDist - 3));
       } else if (aimDist < 9) {
         want = Math.min(want, 10);
       }
@@ -406,10 +424,13 @@ export class Police {
       }
     }
 
-    // officers leave the street when the heat dies, or when the chase has long moved on
+    // officers leave the street when the heat dies, or when the chase has long moved on. The
+    // radius is wider than the dismount range on purpose: a crew can get out at the end of a
+    // route that stops short of the player (a block interior), and it has to be able to walk the
+    // rest instead of being deleted the moment it appears.
     for (const o of [...this.officers]) {
       const far = Math.hypot(o.pos.x - playerPos.x, o.pos.z - playerPos.z);
-      if (this.wanted === 0 || far > 90) this.killOfficer(o);
+      if (this.wanted === 0 || far > 120) this.killOfficer(o);
     }
 
     // officers on foot: close the gap, then shoot from cover distance

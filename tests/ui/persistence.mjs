@@ -145,7 +145,7 @@ try {
   check(
     'pause writes a versioned dta.save.v1',
     !!parsed &&
-      parsed.version === 1 &&
+      parsed.version === 2 &&
       typeof parsed.player?.x === 'number' &&
       typeof parsed.player?.camYaw === 'number' &&
       typeof parsed.cash === 'number' &&
