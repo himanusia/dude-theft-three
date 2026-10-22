@@ -351,3 +351,155 @@ export function buildMarketStalls(ctx: Ctx, cx: number, cz: number, count = 2) {
     ctx.audit.push({ name: 'stall', x, z, bottom: 0.3 });
   }
 }
+
+/**
+ * Glodok gateway: a paifang over the road, modelled from the Pancoran Chinatown arch —
+ * grey carved pillars, a terracotta roof with upturned eaves, and three gold-on-brown
+ * signboards reading SELAMAT DATANG / KAWASAN GLODOK / PECINAN JAKARTA.
+ */
+export function buildGlodokGate(ctx: Ctx, cx: number, cz: number) {
+  const stone = new THREE.MeshStandardMaterial({ color: 0x9a9791, roughness: 0.85 });
+  const darkStone = new THREE.MeshStandardMaterial({ color: 0x6f6c67, roughness: 0.9 });
+  const tile = new THREE.MeshStandardMaterial({ color: 0xa34a30, roughness: 0.88 });
+  const bronze = new THREE.MeshStandardMaterial({ color: 0x5b4632, roughness: 0.7, metalness: 0.25 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xe8c464, roughness: 0.45, metalness: 0.55 });
+
+  const span = 8.2; // half the clear width: the road is 14 m, the pillars sit on the kerbs
+  for (const sx of [-1, 1]) {
+    const base = block(ctx, darkStone, 2.2, 0.7, 2.2, cx + sx * span, 0.3, cz);
+    base.castShadow = true;
+    const pillar = block(ctx, stone, 1.5, 6.4, 1.5, cx + sx * span, 1.0, cz);
+    pillar.castShadow = true;
+    // carved band near the top of each pillar
+    block(ctx, bronze, 1.75, 0.34, 1.75, cx + sx * span, 6.1, cz);
+    solid(ctx, 2.2, 2.2, cx + sx * span, cz, 12);
+  }
+
+  // lintel + the three plaques
+  block(ctx, stone, span * 2 + 2.2, 1.5, 1.7, cx, 7.4, cz);
+  const plaques: [string, number, number][] = [
+    ['SELAMAT DATANG', 7.0, 0.9],
+    ['KAWASAN GLODOK', 8.5, 1.0],
+    ['PECINAN JAKARTA', 10.0, 0.9],
+  ];
+  for (const [text, y, hgt] of plaques) {
+    const tex = canvasTexture(512, 128, (c, w, h) => {
+      c.fillStyle = '#4a3222';
+      c.fillRect(0, 0, w, h);
+      c.strokeStyle = '#c9a24a';
+      c.lineWidth = 8;
+      c.strokeRect(6, 6, w - 12, h - 12);
+      c.fillStyle = '#f0d27a';
+      fitFont(c, text, w - 46, 58);
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(text, w / 2, h / 2);
+    });
+    const plaque = new THREE.Mesh(
+      new THREE.BoxGeometry(6.4, hgt, 0.18),
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.16 })
+    );
+    plaque.position.set(cx, y, cz - 0.95);
+    ctx.group.add(plaque);
+    const backPlaque = plaque.clone();
+    backPlaque.position.z = cz + 0.95;
+    backPlaque.rotation.y = Math.PI;
+    ctx.group.add(backPlaque);
+  }
+
+  // roof: two slabs meeting at a raised ridge, with the eaves kicked up at the corners
+  for (const dir of [-1, 1]) {
+    const slope = new THREE.Mesh(new THREE.BoxGeometry(span * 2 + 4.4, 0.3, 3.4), tile);
+    slope.position.set(cx, 10.9, cz + dir * 1.35);
+    slope.rotation.x = dir * 0.34;
+    slope.castShadow = true;
+    ctx.group.add(slope);
+  }
+  const ridge = block(ctx, tile, span * 2 + 4.8, 0.42, 0.6, cx, 11.5, cz);
+  ridge.castShadow = true;
+  // side roofs stepping down over the outer bays
+  for (const sx of [-1, 1]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.26, 3.8), tile);
+    side.position.set(cx + sx * (span + 1.9), 8.3, cz);
+    side.rotation.z = sx * 0.12;
+    side.castShadow = true;
+    ctx.group.add(side);
+  }
+  // gold finials on the ridge ends
+  for (const sx of [-1, 1]) {
+    const finial = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 6), gold);
+    finial.position.set(cx + sx * (span + 2.2), 11.9, cz);
+    ctx.group.add(finial);
+  }
+}
+
+/**
+ * Ancol waterfront, from the beach reference: tan sand, calm murky water, a timber pier on
+ * pilings with a tall mast, and the yellow/blue feather flags that line the shore.
+ */
+export function buildAncolShore(ctx: Ctx, cx: number, cz: number, half = 38) {
+  const sand = new THREE.Mesh(new THREE.PlaneGeometry(half * 2, 16), new THREE.MeshStandardMaterial({ color: 0xd8c49a, roughness: 0.96 }));
+  sand.rotation.x = -Math.PI / 2;
+  sand.position.set(cx, 0.3, cz - 22);
+  sand.receiveShadow = true;
+  ctx.group.add(sand);
+
+  const water = new THREE.Mesh(
+    new THREE.PlaneGeometry(520, 150),
+    new THREE.MeshStandardMaterial({ color: 0x4a6b74, roughness: 0.12, metalness: 0.5, transparent: true, opacity: 0.94 })
+  );
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(cx, 0.22, cz - 100);
+  ctx.group.add(water);
+
+  // the seawall: keeps the player on the beach instead of walking on the sea
+  ctx.colliders.push({ minX: cx - half, maxX: cx + half, minZ: cz - 31, maxZ: cz - 29, h: 40 });
+
+  // timber pier on pilings, with the tall mast from the reference
+  const wood = new THREE.MeshStandardMaterial({ color: 0x8a6f4e, roughness: 0.92 });
+  const deck = block(ctx, wood, 3.4, 0.22, 26, cx + 8, 1.15, cz - 40);
+  deck.castShadow = true;
+  for (let i = 0; i < 6; i++) {
+    for (const sx of [-1, 1]) {
+      const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.6, 6), wood);
+      pile.position.set(cx + 8 + sx * 1.5, 0.75, cz - 29 - i * 4.4);
+      ctx.group.add(pile);
+    }
+  }
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 12, 6), new THREE.MeshStandardMaterial({ color: 0xb9b6ae, roughness: 0.6, metalness: 0.4 }));
+  mast.position.set(cx + 8, 6.4, cz - 30);
+  ctx.group.add(mast);
+
+  // feather flags: yellow and blue, the strongest colour anchor on the real beach
+  const flags = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(0.5, 1.9),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide }),
+    16
+  );
+  const color = new THREE.Color();
+  const mtx = new THREE.Matrix4();
+  for (let i = 0; i < 16; i++) {
+    const x = cx - 16 + i * 2.1;
+    mtx.makeTranslation(x, 1.55, cz - 20);
+    flags.setMatrixAt(i, mtx);
+    flags.setColorAt(i, color.setHex(i % 2 ? 0x2f6fd0 : 0xf2c43a));
+  }
+  flags.instanceMatrix.needsUpdate = true;
+  if (flags.instanceColor) flags.instanceColor.needsUpdate = true;
+  ctx.group.add(flags);
+
+  // a tree line behind the sand, like the coastal pines in the photo
+  const trunk = new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 0.95 });
+  const leaf = new THREE.MeshStandardMaterial({ color: 0x2f5c33, roughness: 0.95 });
+  for (let i = 0; i < 10; i++) {
+    const x = cx - 30 + i * 6.6;
+    const z = cz - 12;
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 3.2, 5), trunk);
+    t.position.set(x, 1.9, z);
+    ctx.group.add(t);
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(2.1, 4.2, 6), leaf);
+    crown.position.set(x, 5.2, z);
+    crown.castShadow = true;
+    ctx.group.add(crown);
+  }
+}

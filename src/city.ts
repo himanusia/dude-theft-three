@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from './utils';
-import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls } from './jakarta';
+import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 import { Car, driverLook } from './car';
 
@@ -472,6 +472,14 @@ export class City {
 
         this.decorateBlockEdge(cx, cz);
         this.collectDistrictProps(districtAt(cx, cz), cx, cz);
+        // the Glodok gateway arches over the road at the entrance to the quarter
+        if (districtAt(cx, cz) === 'glodok' && cx === -52 && cz === -104) {
+          buildGlodokGate({ group: this.group, colliders: this.colliders, audit: this.propAudit }, cx, cz - BLOCK / 2 - 7);
+        }
+        // Ancol is the waterfront: sand, sea, pier and flags along the northern edge
+        if (districtAt(cx, cz) === 'ancol' && cz === -GRID * PITCH) {
+          buildAncolShore({ group: this.group, colliders: this.colliders, audit: this.propAudit }, cx, cz, BLOCK / 2 + 2);
+        }
       }
     }
 

@@ -64,3 +64,9 @@ It is not affiliated with, endorsed by, or distributed by Poxel Studios.
   (https://commons.wikimedia.org/wiki/File:Mikrotrans.jpg). Used to match the one-box body,
   short nose, raked windscreen, three-window glass band, sliding door and running board.
   The 3D geometry is generated in code; no photograph is redistributed.
+
+- **Glodok gateway** — modelled from *Gateway to Glodok Chinatown, Jakarta* (Wikimedia Commons,
+  CC BY-SA 3.0) for the paifang structure, grey pillars, terracotta roof and three signboards.
+- **Ancol waterfront** — modelled from *Ancol Beach, Jakarta, Indonesia* (Wikimedia Commons,
+  CC BY-SA 4.0) for the sand strip, calm water, timber pier on pilings, tall mast and the
+  yellow/blue feather flags.
