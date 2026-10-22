@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Car } from './car';
+import { Car, driverLook } from './car';
 import { PITCH, GRID } from './city';
 import { clamp, angleDelta, pick, rand } from './utils';
 
@@ -26,6 +26,7 @@ export class Traffic {
       const heading = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
       const start = intersection(i, j);
       const car = new Car(scene, { type: pick(types), position: start, yaw: Math.atan2(heading[0], heading[1]), simple: true });
+      car.addDriver(...driverLook());
       this.cars.push({
         car,
         cell: { i, j },

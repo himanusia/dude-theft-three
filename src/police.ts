@@ -100,6 +100,7 @@ export class Police {
 
     const p = new THREE.Vector3(snap.x - dz * LANE, 0, snap.z + dx * LANE);
     const car = new Car(this.scene, { type: 'police', police: true, position: p, yaw: Math.atan2(dx, dz) });
+    car.addDriver(0xd8a273, 0x1f3a6e);
     const entry: CopEntry = {
       car,
       stuck: 0,

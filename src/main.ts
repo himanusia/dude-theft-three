@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { City, PITCH, WORLD_HALF } from './city';
 import { Character } from './character';
-import { Car } from './car';
+import { Car, driverLook } from './car';
 import { Ragdoll } from './ragdoll';
 import { PedManager } from './npc';
 import { Police } from './police';
@@ -145,6 +145,7 @@ for (let i = 0; i < 9; i++) {
   const spot = city.randomParkingSpot();
   const type = pick(['sedan', 'sedan', 'muscle', 'van', 'taxi']);
   const c = new Car(scene, { type, position: spot.pos, yaw: spot.yaw });
+  c.addDriver(...driverLook());
   cityCars.push(c);
 }
 
@@ -745,7 +746,9 @@ function exitInterior() {
 function toggleVehicle() {
   if (player.inCar) {
     const car = player.inCar;
-    player.inCar = null;
+    if (player.inCar) player.inCar.setDriverVisible(true);
+    if (player.inCar) player.inCar.setDriverVisible(true);
+  player.inCar = null;
     const side = new THREE.Vector3(Math.cos(car.yaw), 0, -Math.sin(car.yaw));
     player.pos.set(car.pos.x + side.x * 2.1, 0, car.pos.z + side.z * 2.1);
     for (const b of city.colliders) {
@@ -765,6 +768,7 @@ function toggleVehicle() {
   const near = nearestCar();
   if (!near) return;
   player.inCar = near.car;
+  near.car.setDriverVisible(false);
   character.group.visible = false;
   camYaw = near.car.yaw + Math.PI;
   autoAlignTimer = 0;
@@ -1134,7 +1138,9 @@ function explode(car: any) {
     addSpark(p, pick([0xffa030, 0xff5a20, 0xffd070]));
   }
   if (car === player.inCar) {
-    player.inCar = null;
+    if (player.inCar) player.inCar.setDriverVisible(true);
+    if (player.inCar) player.inCar.setDriverVisible(true);
+  player.inCar = null;
     character.group.visible = true;
     hurt(45);
     hud.toast('Your car blew up', 'bad');
@@ -1163,6 +1169,7 @@ function wasted() {
   player.pos.copy(city.getSpawn());
   player.vel.set(0, 0, 0);
   player.y = 0;
+  if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
   character.group.visible = true;
   police.clearWanted();
@@ -1174,6 +1181,7 @@ function wasted() {
 function busted() {
   const fine = Math.min(player.cash, 300);
   player.cash -= fine;
+  if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
   character.group.visible = true;
   player.pos.copy(city.getSpawn());
@@ -1276,6 +1284,7 @@ function applySave(data: SaveData) {
   player.vel.set(0, 0, 0);
   player.grounded = true;
   player.yaw = data.player.yaw;
+  if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
   player.inInterior = null;
   player.hp = clamp(data.hp, 1, 100);
@@ -1384,6 +1393,7 @@ function newGame() {
   player.rhythm = 0;
   player.grounded = true;
   player.lastHit = 0;
+  if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
   player.inInterior = null;
   player.savedPos = undefined;

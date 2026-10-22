@@ -34,6 +34,7 @@ export class Car {
   declare vx: number;
   declare vz: number;
   declare slip: number;
+  declare driver: any;
   declare roll: number;
   declare pitch: number;
   declare health: number;
@@ -75,6 +76,7 @@ export class Car {
     this.vx = 0;
     this.vz = 0;
     this.slip = 0;
+    this.driver = null;
     this.y = 0;
     this.vy = 0;
     this.roll = 0;
@@ -99,19 +101,22 @@ export class Car {
       metalness: 0.22,
       flatShading: true,
     });
+    // glass is see-through: an opaque windscreen hides the driver and the car looks remote
     const glass = new THREE.MeshStandardMaterial({
-      color: 0xaee8ff,
-      roughness: 0.12,
-      metalness: 0.35,
+      color: 0xcdeeff,
+      roughness: 0.08,
+      metalness: 0.2,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.24,
+      depthWrite: false,
     });
     const darkGlass = new THREE.MeshStandardMaterial({
-      color: 0x233040,
-      roughness: 0.18,
-      metalness: 0.4,
+      color: 0x33455c,
+      roughness: 0.14,
+      metalness: 0.3,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.26,
+      depthWrite: false,
     });
     const trim = new THREE.MeshStandardMaterial({ color: 0x1a1a20, roughness: 0.85, flatShading: true });
     const chrome = new THREE.MeshStandardMaterial({ color: 0xc3c8d0, roughness: 0.28, metalness: 0.85 });
@@ -385,6 +390,45 @@ export class Car {
     return clamp((gear + inGear) / gears, 0, 1);
   }
 
+  /** A driver you can see through the windscreen: head, shoulders, hair, hands on the wheel.
+   *  Cheap on purpose — three boxes and two arms, not a full character rig. */
+  addDriver(skin = 0xe0b28d, shirt = 0x3346a8, hair = 0x241a14) {
+    if (this.driver) {
+      this.driver.visible = true;
+      return this.driver;
+    }
+    const g = new THREE.Group();
+    const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.85, flatShading: true });
+    const shirtMat = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.9, flatShading: true });
+    const hairMat = new THREE.MeshStandardMaterial({ color: hair, roughness: 0.95, flatShading: true });
+    const bx = (mat: any, w: number, h: number, d: number, x: number, y: number, z: number) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      m.position.set(x, y, z);
+      m.castShadow = true;
+      g.add(m);
+      return m;
+    };
+    bx(shirtMat, 0.38, 0.44, 0.26, 0, 0.2, 0);        // torso against the seat back
+    bx(skinMat, 0.3, 0.3, 0.3, 0, 0.56, 0.02);         // head
+    bx(hairMat, 0.32, 0.09, 0.31, 0, 0.72, 0.02);      // hair cap
+    // arms reaching for the wheel
+    const armL = bx(shirtMat, 0.11, 0.11, 0.4, -0.17, 0.32, 0.2);
+    armL.rotation.x = -0.35;
+    const armR = bx(shirtMat, 0.11, 0.11, 0.4, 0.17, 0.32, 0.2);
+    armR.rotation.x = -0.35;
+    bx(skinMat, 0.1, 0.1, 0.1, -0.17, 0.3, 0.4);
+    bx(skinMat, 0.1, 0.1, 0.1, 0.17, 0.3, 0.4);
+    // left-hand drive, sitting where the steering wheel is
+    g.position.set(-0.4, 0.98, -0.22);
+    this.mesh.add(g);
+    this.driver = g;
+    return g;
+  }
+
+  setDriverVisible(v: boolean) {
+    if (this.driver) this.driver.visible = v;
+  }
+
   applyDamage(n: number) {
     if (this.wrecked) return;
     this.health = clamp(this.health - n, 0, 100);
@@ -574,4 +618,13 @@ export class Car {
       }
     });
   }
+}
+
+/** Random skin/shirt/hair triple for a visible driver. */
+export function driverLook(): [number, number, number] {
+  const skins = [0xe0b28d, 0xd8a273, 0xb97f52, 0x8d5a3b, 0xf0c9a6];
+  const shirts = [0x3346a8, 0xb8443a, 0x2f7f5b, 0xd0d0d8, 0x3a3a44, 0x8a6a2f, 0xb0552f];
+  const hairs = [0x241a14, 0x120f0d, 0x3a2a1c, 0x6b5540];
+  const pickOne = (a: number[]) => a[Math.floor(Math.random() * a.length)];
+  return [pickOne(skins), pickOne(shirts), pickOne(hairs)];
 }
