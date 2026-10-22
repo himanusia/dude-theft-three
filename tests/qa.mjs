@@ -19,7 +19,7 @@ function check(name, ok, detail) {
   page.on('pageerror', e => errs.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
 
-  await page.goto('http://localhost:8765/index.html', { waitUntil: 'domcontentloaded' });
+  await page.goto((process.env.DTA_URL || 'http://localhost:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
   await sleep(1200);
   const boot = await page.evaluate(() => ({ game: !!window.__game, peds: window.__game.peds.peds.length, cars: window.__game.cityCars.length, colliders: window.__game.city.colliders.length }));

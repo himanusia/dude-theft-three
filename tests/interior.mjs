@@ -13,7 +13,7 @@ const check = (n, ok, d) => { results.push({ n, ok }); console.log((ok ? 'PASS '
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
-  await page.goto('http://localhost:8765/index.html', { waitUntil: 'domcontentloaded' });
+  await page.goto((process.env.DTA_URL || 'http://localhost:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
   await sleep(1500);
   await page.click('#start-btn');

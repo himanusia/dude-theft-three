@@ -7,7 +7,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const page = await b.newPage();
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));
-  await page.goto('http://localhost:8765/index.html', { waitUntil: 'domcontentloaded' });
+  await page.goto((process.env.DTA_URL || 'http://localhost:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
   await sleep(1500);
   await page.click('#start-btn');
