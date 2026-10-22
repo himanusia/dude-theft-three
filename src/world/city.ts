@@ -4,6 +4,8 @@ import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKota
 import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater } from './jakartamap';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 import { Car, driverLook } from '../vehicles/car';
+import { Bajaj } from '../vehicles/bajaj';
+import { Ojek } from '../vehicles/ojek';
 
 export const PITCH = 52;
 export const BLOCK = 38;
@@ -194,6 +196,7 @@ type InstancedAdder = (
 export class City {
   declare scene: any;
   declare colliders: any[];
+  declare vehicleCounts: { bajaj: number; ojek: number };
   declare blocks: any[];
   declare roadLines: any[];
   declare jumpPads: any[];
@@ -480,6 +483,7 @@ export class City {
       this.blocks.push({ x: lm.x, z: lm.z, type: 'landmark', landmark: lm.id, size: 40 });
     }
 
+    this.buildIndonesianVehicles();
     this.buildRoadRibbons();
     this.buildWater();
     this.buildDistrictProps();
@@ -1784,6 +1788,53 @@ export class City {
 
   getSpawn() {
     return new THREE.Vector3(PITCH * 0.5, 0, PITCH * 0.5 + 4);
+  }
+
+
+  /**
+   * The two vehicles that say "Jakarta" faster than any building: the orange bajaj and a row
+   * of ojeks waiting at the kerb. Both are parked props for now - they are placed where the
+   * city would put them (a bajaj rank in Glodok and Tanah Abang, ojeks clustered on the
+   * pavement) rather than being driven, so they cost no simulation.
+   */
+  buildIndonesianVehicles() {
+    const rankDistricts = new Set(['glodok', 'tanahabang', 'kampung']);
+    const spots = this.blocks.filter((b) => b.type === 'city' || b.type === 'lot');
+    let bajaj = 0;
+    let ojek = 0;
+    for (const b of spots) {
+      const district = districtAtPoint(b.x, b.z);
+      const half = ((b.size ?? BLOCK) / 2) + 2.6;
+      const yaw = rand(0, Math.PI * 2);
+      if (bajaj < 10 && rankDistricts.has(district) && Math.random() < 0.45) {
+        const jit = rand(-half * 0.5, half * 0.5);
+        const x = b.x + jit;
+        const z = b.z - half + 3.4;   // on the plate, clear of the parked cars on the road
+        const model = new Bajaj({ simple: true });
+        model.root.position.set(x, 0, z);
+        model.root.rotation.y = yaw;
+        this.group.add(model.root);
+        this.colliders.push({ minX: x - 0.9, maxX: x + 0.9, minZ: z - 1.4, maxZ: z + 1.4, h: 1.7 });
+        bajaj++;
+        continue;
+      }
+      // ojeks park in a cluster of three along the kerb
+      if (ojek < 18 && Math.random() < 0.3) {
+        const count = 3;
+        for (let i = 0; i < count; i++) {
+          const x = b.x + rand(-half * 0.6, half * 0.6);
+          const z = b.z - half + 1.8 + i * 1.5;
+          const bike = new Ojek({});
+          bike.group.position.set(x, 0, z);
+          bike.group.rotation.y = yaw + rand(-0.25, 0.25);
+          bike.group.scale.setScalar(0.98);
+          this.group.add(bike.group);
+          ojek++;
+        }
+        this.colliders.push({ minX: b.x - 1.4, maxX: b.x + 1.4, minZ: b.z - half + 1.0, maxZ: b.z - half + 6.0, h: 1.4 });
+      }
+    }
+    this.vehicleCounts = { bajaj, ojek };
   }
 
   // sidewalk plate height (blocks sit ~26cm above the asphalt)
