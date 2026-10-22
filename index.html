@@ -93,6 +93,13 @@
     text-shadow: 0 2px 8px rgba(0,0,0,.8);
   }
   #ammo-wrap small { display: block; font-size: 10px; letter-spacing: .2em; color: rgba(255,255,255,.45); font-weight: 700; }
+  /* weapon silhouette, drawn on a canvas so it scales with the plate */
+  #weapon-icon {
+    display: block; width: 78px; height: 42px; margin: 1px 0 3px auto;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,.9));
+  }
 
   /* crosshair */
   #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%,-50%); opacity: 0; transition: opacity .15s; }
@@ -780,14 +787,18 @@
   body.touch-mode #help-sheet .kb-only { display: none; }
   body.touch-mode #help-sheet .touch-only { display: inline-flex; }
 
+  /* the weapon silhouette scales with the plate; narrow layouts need extra room above the
+     minimap because the toast column ends there */
+  body.hud-short #weapon-icon { width: 52px; height: 28px; margin-bottom: 1px; }
+
   /* bottom-right stack: minimap is the anchor, everything else sits above it */
   #minimap { width: var(--hud-map); height: var(--hud-map); }
   #ammo-wrap { bottom: calc(var(--hud-map) + 18px * var(--s)); right: calc(18px * var(--s)); }
-  #speedo { bottom: calc(var(--hud-map) + 74px * var(--s)); right: calc(18px * var(--s)); }
+  #speedo { bottom: calc(var(--hud-map) + 88px * var(--s)); right: calc(18px * var(--s)); }
   body.hud-narrow #ammo-wrap,
   body.hud-short #ammo-wrap { bottom: calc(var(--hud-map) + 14px * var(--s)); }
   body.hud-narrow #speedo,
-  body.hud-short #speedo { bottom: calc(var(--hud-map) + 66px * var(--s)); }
+  body.hud-short #speedo { bottom: calc(var(--hud-map) + 80px * var(--s)); }
   /* the prompt must never eat more than 40% of the width, whatever the input mode */
   #prompt, body.touch-mode #prompt { max-width: 40vw; }
 
@@ -802,9 +813,9 @@
   body.hud-short #speedo { bottom: calc(var(--t-band) + 118px * var(--s)); }
 
   /* speedo rides above the ammo chip, on every layout mode */
-  #speedo { bottom: calc(var(--hud-map) + 104px * var(--s)); }
-  body.hud-narrow #speedo { bottom: calc(var(--t-band) + 168px * var(--s)); }
-  body.hud-short #speedo { bottom: calc(var(--t-band) + 150px * var(--s)); right: calc(18px * var(--s)); }
+  #speedo { bottom: calc(var(--hud-map) + 122px * var(--s)); }
+  body.hud-narrow #speedo { bottom: calc(var(--t-band) + 182px * var(--s)); }
+  body.hud-short #speedo { bottom: calc(var(--t-band) + 166px * var(--s)); right: calc(18px * var(--s)); }
   body.hud-short #toasts { bottom: calc(var(--t-band) + 96px * var(--s)); }
 
   /* phones: one vertical stack above the touch band, toasts back at the top */
@@ -902,6 +913,11 @@
 
 
   #resume-btn, #help-close, .btn { border-radius: 2px !important; }
+
+
+  /* on the phone stack the plate sits directly under the toast column, so there is no room for
+     a silhouette: the weapon stays text-only there */
+  body.hud-narrow #weapon-icon { display: none; }
 </style>
 </head>
 <body>
@@ -926,7 +942,8 @@
     <div id="health-num">100</div>
   </div>
 
-  <div id="ammo-wrap"><small>AMMO</small><span id="ammo">12 / 12</span></div>
+  <div id="ammo-wrap">
+    <canvas id="weapon-icon" width="104" height="52" aria-hidden="true"></canvas><small>AMMO</small><span id="ammo">12 / 12</span></div>
 
 
 

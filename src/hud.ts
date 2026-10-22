@@ -40,6 +40,7 @@ export class HUD {
   /** last projection used by drawFullMap, so a harness can sample the player marker */
   declare mapProjection: any;
   declare onSettings: ((s: any) => void) | null;
+  declare weaponIconId: string;
   constructor() {
     this.layoutInfo = { mode: 'regular', scale: 1, width: 0, height: 0, minimap: 196 };
     requestAnimationFrame(() => this.layout());
@@ -50,6 +51,7 @@ export class HUD {
       healthNum: document.getElementById('health-num'),
       ammo: document.getElementById('ammo'),
       weaponLabel: document.querySelector('#ammo-wrap small'),
+      weaponIcon: document.getElementById('weapon-icon'),
       prompt: document.getElementById('prompt'),
       toasts: document.getElementById('toasts'),
       objective: document.getElementById('objective'),
@@ -102,6 +104,7 @@ export class HUD {
     this.settingsOpen = false;
     this.mapProjection = null;
     this.onSettings = null;
+    this.weaponIconId = '';
     this.el.helpBtn?.addEventListener('click', () => this.toggleHelp());
     this.el.helpClose?.addEventListener('click', () => this.toggleHelp(false));
     this.el.help?.addEventListener('click', (e: Event) => {
@@ -202,8 +205,82 @@ export class HUD {
     });
   }
 
-  setWeapon(name: string, slot: number, reserve: number) {
+  setWeapon(name: string, slot: number, reserve: number, id?: string) {
     if (this.el.weaponLabel) this.el.weaponLabel.textContent = `${slot} · ${name.toUpperCase()}${reserve >= 0 ? '  +' + reserve : ''}`;
+    if (id && id !== this.weaponIconId) {
+      this.weaponIconId = id;
+      this.drawWeaponIcon(id);
+    }
+  }
+
+  /**
+   * Weapon silhouette in the ammo plate: the reference HUD shows the gun as a picture, and the
+   * San Andreas HUD does the same, so the label no longer has to carry the weapon's name alone.
+   * Drawn as flat shapes on a 104x52 canvas, sized by CSS.
+   */
+  drawWeaponIcon(id: string) {
+    const cv = this.el.weaponIcon as HTMLCanvasElement | null;
+    if (!cv) return;
+    const c = cv.getContext('2d');
+    if (!c) return;
+
+    // 26x14 logical pixels, upscaled by CSS with image-rendering: pixelated. Every shape is an
+    // integer rect, so the result is a real sprite rather than a smoothed vector glyph.
+    const W = 26, H = 14;
+    if (cv.width !== W) { cv.width = W; cv.height = H; }
+    c.clearRect(0, 0, W, H);
+
+    type Rect = [number, number, number, number];
+    // each weapon: light body rects, mid-grey shadow rects, warm grip rects
+    let body: Rect[] = [];
+    let shade: Rect[] = [];
+    let warm: Rect[] = [];
+
+    if (id === 'pistol' || id === 'handgun') {
+      body = [[4, 3, 15, 3], [4, 6, 3, 1]];
+      shade = [[19, 4, 1, 2], [7, 6, 3, 4], [6, 10, 3, 1]];
+      warm = [];
+    } else if (id === 'uzi') {
+      body = [[3, 4, 12, 3], [15, 5, 6, 1], [4, 7, 3, 4]];
+      shade = [[15, 6, 6, 1], [2, 4, 2, 2], [4, 11, 3, 1]];
+      warm = [[8, 9, 3, 3]];
+    } else if (id === 'shotgun') {
+      body = [[2, 5, 20, 2], [6, 7, 6, 2]];
+      shade = [[22, 5, 2, 2], [4, 7, 3, 1]];
+      warm = [[12, 7, 5, 3], [9, 9, 3, 1]];
+    } else if (id === 'ak') {
+      body = [[2, 5, 14, 2], [16, 5, 7, 1], [8, 7, 4, 4]];
+      shade = [[2, 7, 3, 1], [9, 11, 4, 2], [18, 4, 1, 1]];
+      warm = [[11, 8, 4, 3], [6, 7, 3, 2]];
+    } else if (id === 'knife') {
+      body = [[4, 4, 12, 2], [6, 6, 10, 1]];
+      shade = [[16, 3, 2, 2]];
+      warm = [[2, 5, 3, 4]];
+    } else if (id === 'fist') {
+      body = [[7, 4, 9, 7], [16, 5, 3, 2], [16, 8, 3, 2]];
+      shade = [[7, 9, 9, 2], [6, 6, 1, 3]];
+      warm = [];
+    } else {
+      body = [[6, 5, 12, 4]];
+    }
+
+    const paint = (rects: Rect[], color: string) => {
+      c.fillStyle = color;
+      for (const [x, y, w, h] of rects) c.fillRect(x, y, w, h);
+    };
+    // a 1px dark outline around the whole silhouette, the way the SA HUD sprites read on any
+    // background: paint the shape shifted four ways, then the shape itself on top
+    const outline = '#0b0e12';
+    const all = [...body, ...shade, ...warm];
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      c.save();
+      c.translate(dx, dy);
+      paint(all, outline);
+      c.restore();
+    }
+    paint(body, '#e9eff3');
+    paint(shade, '#93a7b4');
+    paint(warm, '#c98b3f');
   }
 
   setAmmo(cur: any, max: any, reloading: any) {
