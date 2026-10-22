@@ -36,6 +36,11 @@ export class AudioSys {
   declare engine: any;
   declare sirenNodes: any;
   declare master: any;
+  declare sfx: any;
+  // mixer levels, 0..1, driven by the persisted settings panel
+  declare masterVol: number;
+  declare sfxVol: number;
+  declare bgmVol: number;
   constructor() {
     this.ctx = null;
     this.buffers = {};
@@ -46,14 +51,22 @@ export class AudioSys {
     this.bgmVolume = 0.28;
     this.engine = null;
     this.sirenNodes = null;
+    this.masterVol = 0.9;
+    this.sfxVol = 1;
+    this.bgmVol = 1;
   }
 
   async init() {
     const AC = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.9;
+    this.master.gain.value = this.muted ? 0 : this.masterVol;
     this.master.connect(this.ctx.destination);
+    // one bus for game SFX, so the settings slider scales every shot/impact
+    // without touching the per-call volumes
+    this.sfx = this.ctx.createGain();
+    this.sfx.gain.value = this.muted ? 0 : this.sfxVol;
+    this.sfx.connect(this.master);
 
     const load = async (url: string) => {
       const res = await fetch(url);
@@ -99,7 +112,7 @@ export class AudioSys {
       node = p;
     }
     src.connect(g);
-    node.connect(this.master);
+    node.connect(this.sfx ?? this.master);
     src.start();
   }
 
@@ -146,7 +159,7 @@ export class AudioSys {
     gain.gain.value = 0;
     src.connect(filter);
     filter.connect(gain);
-    gain.connect(this.master);
+    gain.connect(this.sfx ?? this.master);
     src.start();
     this.engine = { src, filter, gain };
   }
@@ -168,7 +181,7 @@ export class AudioSys {
     if (on && !this.sirenNodes) {
       const g = this.ctx.createGain();
       g.gain.value = 0.0;
-      g.connect(this.master);
+      g.connect(this.sfx ?? this.master);
       const osc = this.ctx.createOscillator();
       osc.type = 'square';
       osc.frequency.value = 720;
@@ -219,13 +232,34 @@ export class AudioSys {
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
     src.connect(bp);
     bp.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfx ?? this.master);
     src.start();
+  }
+
+  /**
+   * Mixer levels, 0..1 each. Safe before init(): values are stored and applied
+   * when the AudioContext exists, which is what lets a restored settings blob be
+   * audible from the first sound instead of only after the player opens the panel.
+   */
+  setVolumes({ master, sfx, bgm }: { master?: number; sfx?: number; bgm?: number } = {}) {
+    const unit = (v: number) => Math.min(1, Math.max(0, v));
+    if (typeof master === 'number') this.masterVol = unit(master);
+    if (typeof sfx === 'number') this.sfxVol = unit(sfx);
+    if (typeof bgm === 'number') this.bgmVol = unit(bgm);
+    if (this.master) this.master.gain.value = this.muted ? 0 : this.masterVol;
+    if (this.sfx) this.sfx.gain.value = this.muted ? 0 : this.sfxVol;
+    this.bgmVolume = 0.28 * this.bgmVol;
+    if (this.bgmMode) {
+      Object.entries(this.bgmEls).forEach(([k, el]) => {
+        if (k === this.bgmMode) el.volume = this.bgmVolume;
+      });
+    }
   }
 
   toggleMute() {
     this.muted = !this.muted;
-    if (this.master) this.master.gain.value = this.muted ? 0 : 0.9;
+    if (this.master) this.master.gain.value = this.muted ? 0 : this.masterVol;
+    if (this.sfx) this.sfx.gain.value = this.muted ? 0 : this.sfxVol;
     Object.values(this.bgmEls).forEach((el) => (el.muted = this.muted));
     return this.muted;
   }
