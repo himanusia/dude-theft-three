@@ -2034,6 +2034,17 @@ window.__game = {
     cinematic(on: boolean) {
       cinematic = !!on;
     },
+    ragdollAt(x: number, y: number, z: number, vx = 0, vz = 0) {
+      // spawn a body with velocity for visual QA of the ragdoll itself
+      ragdolls.push(new Ragdoll(scene, {
+        position: new THREE.Vector3(x, y, z),
+        yaw: 0,
+        velocity: new THREE.Vector3(vx, 2.2, vz),
+        colliders: city.colliders,
+        maxLife: 11,
+      }));
+      return ragdolls.length;
+    },
     lookFrom(px: any, py: any, pz: any, tx: any, ty: any, tz: any) {
       cinematic = true;
       camera.position.set(px, py, pz);
