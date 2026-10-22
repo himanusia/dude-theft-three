@@ -5,6 +5,8 @@ import { Car, driverLook } from './vehicles/car';
 import { loadCarModels } from './vehicles/carmodels';
 import { districtAt } from './world/jakarta';
 import * as JakartaMap from './world/jakartamap';
+import * as JakartaStreets from './world/streets';
+import { terrainHeight } from './world/terrain';
 import { Ragdoll } from './actors/ragdoll';
 import { PedManager } from './actors/npc';
 import { Police } from './systems/police';
@@ -1985,6 +1987,8 @@ window.__game = {
   THREE,
   districtAt,
   jakartaMap: JakartaMap,
+  jakartaStreets: JakartaStreets,
+  terrainHeight,
   scene,
   camera,
   renderer,
