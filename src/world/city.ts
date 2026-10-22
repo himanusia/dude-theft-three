@@ -56,81 +56,71 @@ function fitFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, 
 }
 
 function windowTexture(wall: any, style = 'grid') {
+  // A Jakarta facade is mostly wall: plaster, ceramic tile or painted concrete, with windows
+  // punched into it. The first version painted glass over almost the whole tile, so every
+  // building in the city read as the same dark curtain wall no matter what colour it was
+  // given. One tile is now one floor, and the glass is an accent inside the wall.
   const map = canvasTexture(128, 128, (ctx, w, h) => {
+    const c = typeof wall === 'number' ? `#${wall.toString(16).padStart(6, '0')}` : String(wall);
+    ctx.fillStyle = c;
+    ctx.fillRect(0, 0, w, h);
+
+    // grime and patina, so the wall is not a flat poster colour
+    for (let i = 0; i < 30; i++) {
+      ctx.fillStyle = `rgba(0,0,0,${rand(0.015, 0.05)})`;
+      ctx.fillRect(rand(0, w), rand(0, h), rand(1, 6), rand(4, h));
+    }
+
+    const glass = (x: number, y: number, ww: number, wh: number) => {
+      const g = ctx.createLinearGradient(x, y, x + ww, y + wh);
+      g.addColorStop(0, '#7c9cb4');
+      g.addColorStop(0.45, '#4d6b83');
+      g.addColorStop(1, '#33495c');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, ww, wh);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(x, y, ww, Math.max(1, wh * 0.22));
+    };
+
     if (style === 'bands') {
-      // horizontal ribbon windows, common on the reference city blocks
-      ctx.fillStyle = wall;
-      ctx.fillRect(0, 0, w, h);
-      for (let y = 0; y < h; y += 32) {
-        const g = ctx.createLinearGradient(0, y + 6, 0, y + 26);
-        g.addColorStop(0, '#8fb6d8');
-        g.addColorStop(0.5, '#5c86a8');
-        g.addColorStop(1, '#3f5f7d');
-        ctx.fillStyle = g;
-        ctx.fillRect(4, y + 6, w - 8, 20);
-        ctx.fillStyle = 'rgba(255,255,255,0.35)';
-        for (let x = 6; x < w - 6; x += 16) ctx.fillRect(x, y + 6, 3, 20);
-        ctx.fillStyle = 'rgba(0,0,0,0.16)';
-        ctx.fillRect(0, y + 27, w, 5);
+      // one floor: a narrow ribbon window with a slab line under it
+      for (let row = 0; row < h; row += 32) {
+        glass(6, row + 8, w - 12, 11);
+        ctx.fillStyle = 'rgba(0,0,0,0.10)';
+        ctx.fillRect(0, row + 27, w, 5);
+        ctx.fillStyle = 'rgba(255,255,255,0.07)';
+        ctx.fillRect(0, row + 26, w, 1.5);
       }
       return;
     }
     if (style === 'strips') {
-      // vertical glass strips with concrete piers
-      ctx.fillStyle = wall;
-      ctx.fillRect(0, 0, w, h);
-      for (let x = 8; x < w - 8; x += 24) {
-        const g = ctx.createLinearGradient(x, 0, x + 14, h);
-        g.addColorStop(0, '#9dc4e0');
-        g.addColorStop(0.5, '#5f8aa8');
-        g.addColorStop(1, '#43637f');
-        ctx.fillStyle = g;
-        ctx.fillRect(x, 4, 14, h - 8);
-        ctx.fillStyle = 'rgba(0,0,0,0.12)';
-        for (let y = 6; y < h; y += 18) ctx.fillRect(x, y, 14, 3);
+      // punched vertical windows between wide piers
+      for (let x = 14; x < w - 18; x += 34) {
+        glass(x, 10, 10, h - 22);
       }
+      ctx.fillStyle = 'rgba(0,0,0,0.10)';
+      ctx.fillRect(0, 0, w, 6);
       return;
     }
-    ctx.fillStyle = wall;
-    ctx.fillRect(0, 0, w, h);
-    // subtle vertical grime
-    for (let i = 0; i < 24; i++) {
-      ctx.fillStyle = `rgba(0,0,0,${rand(0.02, 0.07)})`;
-      ctx.fillRect(rand(0, w), 0, rand(1, 5), h);
-    }
-    const cols = 4;
-    const rows = 4;
-    const pad = 6;
+    // grid: small windows in plaster, the common shophouse/office look
+    const cols = 3;
+    const rows = 3;
     const cw = w / cols;
     const ch = h / rows;
     for (let x = 0; x < cols; x++) {
       for (let y = 0; y < rows; y++) {
-        const wx = x * cw + pad;
-        const wy = y * ch + pad;
-        const ww = cw - pad * 2;
-        const wh = ch - pad * 2.2;
-        ctx.fillStyle = '#5c86a8';
-        ctx.fillRect(wx, wy, ww, wh);
-        // glass sheen
-        const g = ctx.createLinearGradient(wx, wy, wx + ww, wy + wh);
-        g.addColorStop(0, 'rgba(195,225,255,0.55)');
-        g.addColorStop(0.5, 'rgba(110,140,170,0.18)');
-        g.addColorStop(1, 'rgba(225,245,255,0.42)');
-        ctx.fillStyle = g;
-        ctx.fillRect(wx, wy, ww, wh);
-        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(wx, wy, ww, wh);
-        if (Math.random() < 0.35) {
-          ctx.fillStyle = 'rgba(255,214,140,0.55)';
-          ctx.fillRect(wx + 1, wy + 1, ww - 2, wh - 2);
-        }
+        const ww = cw * 0.36;
+        const wh = ch * 0.34;
+        glass(x * cw + (cw - ww) / 2, y * ch + ch * 0.26, ww, wh);
+        // frame
+        ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x * cw + (cw - ww) / 2, y * ch + ch * 0.26, ww, wh);
       }
     }
   });
   return map;
 }
-
 function shopTexture(hue: any) {
   return canvasTexture(256, 64, (ctx, w, h) => {
     // facade base
@@ -2058,10 +2048,8 @@ export class City {
               const facade = pick(['strips', 'grid', 'bands'] as const);
               const tex = windowTexture(wall, facade);
               tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-              tex.repeat.set(
-                Math.max(1, w / (facade === 'strips' ? 10 : 6)),
-                Math.max(1, h / (facade === 'strips' ? 9 : 4.5))
-              );
+              // one tile is one floor: ~3.2 m tall, 8 m wide
+              tex.repeat.set(Math.max(1, w / 8), Math.max(1, h / 3.2));
               const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
               const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
               body.position.y = h / 2 + 0.3;
