@@ -11,14 +11,16 @@
 //   d) a `witness` event raises the wanted level by 1
 //   e) `audit().peds` is empty (nobody floats, nobody sinks below the pavement)
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
-const PORT = 8795;
-const URL_BASE = `http://127.0.0.1:${PORT}`;
+const PREFERRED_PORT = Number(process.env.HARNESS_PORT || 8795);
+let PORT = PREFERRED_PORT;
+let URL_BASE = `http://127.0.0.1:${PORT}`;
 const OUT = path.join(ROOT, 'screenshots');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -47,6 +49,55 @@ function check(name, ok, detail) {
 }
 
 // ---------------------------------------------------------------- dev server
+function httpGet(url, timeoutMs = 1500) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (body += c));
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+}
+
+/** Is anything (vite, a dist server, a sibling harness) already answering here? */
+async function portInUse(port) {
+  try {
+    await httpGet(`http://127.0.0.1:${port}/`);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/** 8795 is the harness port, but a sibling worktree may already own it. */
+async function pickPort() {
+  for (let p = PREFERRED_PORT; p < PREFERRED_PORT + 6; p++) {
+    if (!(await portInUse(p))) return p;
+  }
+  throw new Error('no free port in ' + PREFERRED_PORT + '..' + (PREFERRED_PORT + 6));
+}
+
+/** Make sure whoever answers on the port is vite serving *this* working tree. */
+async function assertOwnServer(base) {
+  const res = await httpGet(base + '/tests/npc-behavior.mjs');
+  const ours = res.status === 200 && res.body.includes('NPC behaviour: sidewalk navigation');
+  if (!ours) throw new Error('port ' + PORT + ' is not serving this worktree (status ' + res.status + ')');
+}
+
+/** Worktrees usually share the parent repo's node_modules; find vite by walking up. */
+function viteBin() {
+  let dir = ROOT;
+  for (let i = 0; i < 5; i++) {
+    const p = path.join(dir, 'node_modules/vite/bin/vite.js');
+    if (fs.existsSync(p)) return p;
+    dir = path.dirname(dir);
+  }
+  throw new Error('vite not installed (no node_modules/vite/bin/vite.js above ' + ROOT + ')');
+}
+
 function waitForServer(url, timeoutMs = 30000) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
@@ -79,11 +130,16 @@ function stopServer() {
 }
 
 (async () => {
-  server = spawn(process.execPath, [path.join(ROOT, 'node_modules/vite/bin/vite.js'), '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
+  const preferred = !(await portInUse(PREFERRED_PORT));
+  PORT = preferred ? PREFERRED_PORT : await pickPort();
+  URL_BASE = `http://127.0.0.1:${PORT}`;
+  if (!preferred) console.log('port ' + PREFERRED_PORT + ' busy (sibling worktree?), using ' + PORT);
+  server = spawn(process.execPath, [viteBin(), '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
     cwd: ROOT,
     stdio: 'ignore',
   });
   await waitForServer(URL_BASE + '/index.html');
+  await assertOwnServer(URL_BASE);
   console.log('server ' + URL_BASE);
 
   const b = await puppeteer.launch({
@@ -102,6 +158,31 @@ function stopServer() {
 
   await page.goto(URL_BASE + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+
+  // Shape probe: a stale/foreign game build used to make the first assertion die
+  // with "reading 'length' of undefined"; name the missing fields instead.
+  const shape = await page.evaluate(() => {
+    const g = window.__game;
+    const need = [
+      ['peds', g?.peds],
+      ['peds.peds', g?.peds?.peds],
+      ['peds.strips', g?.peds?.strips],
+      ['peds.crossingLog', g?.peds?.crossingLog],
+      ['peds.stats', g?.peds?.stats],
+      ['city.colliders', g?.city?.colliders],
+      ['traffic.cars', g?.traffic?.cars],
+      ['cityCars', g?.cityCars],
+      ['police.cars', g?.police?.cars],
+      ['ragdolls', g?.ragdolls],
+      ['_test.pedContext', g?._test?.pedContext],
+      ['_test.shoot', g?._test?.shoot],
+      ['_test.audit', g?._test?.audit],
+      ['_test.lookFrom', g?._test?.lookFrom],
+      ['_test.teleport', g?._test?.teleport],
+    ];
+    return need.filter(([, v]) => v === undefined || v === null).map(([k]) => k);
+  });
+  if (shape.length) throw new Error('game API missing: ' + shape.join(', ') + ' (is another build on port ' + PORT + '?)');
   await sleep(1200);
   await page.click('#start-btn');
   await sleep(1800);
@@ -364,7 +445,7 @@ function stopServer() {
       [27.4, -5.2],
       [23.2, -7.6],
       [28.8, -7.4],
-      [26, -9.4],
+      [24.8, -9.8],
     ];
     const alive = g.peds.peds.filter((p) => !p.dead);
     for (let i = 0; i < spots.length && i < alive.length; i++) {
@@ -400,7 +481,7 @@ function stopServer() {
     const cx = sx / n;
     const cz = sz / n;
     // three-quarter front view: the crowd runs away from the shooter, toward this camera
-    g._test.lookFrom(cx - 3.9, 2.4, cz - 3.6, cx, 1.05, cz);
+    g._test.lookFrom(cx - 6.2, 3.1, cz - 5.6, cx, 0.95, cz);
     const cam = g.camera;
     cam.updateMatrixWorld(true);
     cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
