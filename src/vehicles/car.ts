@@ -728,6 +728,12 @@ export class Car {
 
     // airborne, relative to the ground under the car (the city has terrain now)
     const floor = this.groundAt ? this.groundAt(this.pos.x, this.pos.z) : 0;
+    // uphill: a car that ends up below the ground has to be lifted, not left buried. Only the
+    // falling branch used to exist, so driving onto a slope planted the car inside the hill.
+    if (this.y < floor - 0.001 && this.vy <= 0) {
+      this.y = floor;
+      this.vy = 0;
+    }
     if (this.y > floor + 0.001 || this.vy > 0) {
       this.vy -= 26 * dt;
       this.y += this.vy * dt;

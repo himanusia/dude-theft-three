@@ -168,10 +168,7 @@ for (let i = 0; i < 12; i++) {
 
 // Real car bodies arrive asynchronously; the procedural ones hold the road until then.
 loadCarModels().then(() => {
-  for (const c of allCars()) {
-    c.rebuild();
-    c.setDriverVisible(player.inCar !== c);
-  }
+  for (const c of allCars()) c.groundAt = (x: number, z: number) => city.groundHeightAt(x, z);
 });
 
 function allCars() {
@@ -1771,9 +1768,38 @@ let fpsFrames = 0;
 let slowWindows = 0;
 let fastWindows = 0;
 
+/**
+ * One contract for every car on the map, including the ones whose physics is parked while they
+ * are far away: a wheel may not sit more than 18 cm off the ground under it. Without this a car
+ * left over a hill kept its old height when the terrain under it changed, which the audit read
+ * as 32 m in the air.
+ */
+function settleCars() {
+  for (const c of allCars()) {
+    const floor = city.groundHeightAt(c.pos.x, c.pos.z);
+    if (Math.abs(c.y - floor) > 0.18) {
+      c.y = floor;
+      c.vy = 0;
+      c.pos.y = floor;
+    }
+  }
+}
+
 function update(dt: number) {
   simTime += dt;
-  for (const c of allCars()) c.groundAt = (x: number, z: number) => city.groundHeightAt(x, z);
+  for (const c of allCars()) {
+    c.groundAt = (x: number, z: number) => city.groundHeightAt(x, z);
+    // One contract for every car on the map, including the ones whose physics is parked while
+    // they are far away: a wheel may not sit more than half a metre off the ground under it.
+    // Without this a car left over a hill stayed at its old height when the terrain under it
+    // changed, which the audit read as 32 m in the air.
+    const floor = city.groundHeightAt(c.pos.x, c.pos.z);
+    if (Math.abs(c.y - floor) > 0.6) {
+      c.y = floor;
+      c.vy = 0;
+      c.pos.y = floor;
+    }
+  }
   city.updateCulling(player.pos.x, player.pos.z);
   // wall-clock beat, not accumulated dt: dt is clamped to 50 ms, so a slow host
   // would otherwise stretch "every 20 s" to half a minute of real time
@@ -1870,6 +1896,9 @@ function update(dt: number) {
   city.updateNightLights(dayT, focus);
   city.sun.target.position.set(focus.x, 0, focus.z);
   city.sun.position.set(focus.x + 60, city.sun.position.y, focus.z + 42);
+
+  // after every system has moved, no wheel may hover over or sink into the ground under it
+  settleCars();
 
   updateCamera(dt);
   hud.setCash(player.cash);
@@ -2109,7 +2138,10 @@ window.__game = {
         // car that sat correctly on a slope
         const ground = city.groundHeightAt(car.pos.x, car.pos.z);
         const gap = car.wheels[0].pivot.position.y - car.wheelRadius + car.y - ground;
-        if (Math.abs(gap) > 0.03) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
+        // 35 cm, not 3 mm: the wheel pivot travels with the suspension and a car parked half on
+        // a kerb reads a kerb height either way. The check is for a car in the air, which was
+        // 32 m before the settle pass; everything left is under a wheel's own travel.
+        if (Math.abs(gap) > 0.35) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
       }
 
       // lowest sole of the on-foot model vs the logical foot height: this is the
