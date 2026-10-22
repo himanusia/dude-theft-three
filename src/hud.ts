@@ -1,4 +1,5 @@
 import { clamp, formatMoney } from './utils';
+import { WEAPONS, WEAPON_ORDER, WeaponId } from './weapons';
 
 export const WORLD_HALF_MAP = 3 * 52 + 19;
 
@@ -9,6 +10,10 @@ export class HUD {
   declare lastCash: number;
   declare hitTimer: number;
   declare damageTimer: number;
+  declare weaponRows: Map<WeaponId, HTMLElement>;
+  declare lastWeapon: WeaponId | null;
+  declare lastOwned: string;
+  declare lastAmmo: string;
   constructor() {
     this.el = {
       cash: document.getElementById('cash'),
@@ -16,6 +21,9 @@ export class HUD {
       health: document.getElementById('health-fill'),
       healthNum: document.getElementById('health-num'),
       ammo: document.getElementById('ammo'),
+      ammoWrap: document.getElementById('ammo-wrap'),
+      weaponName: document.getElementById('weapon-name'),
+      weaponWheel: document.getElementById('weapon-wheel'),
       prompt: document.getElementById('prompt'),
       toasts: document.getElementById('toasts'),
       objective: document.getElementById('objective'),
@@ -41,6 +49,22 @@ export class HUD {
     this.lastCash = -1;
     this.hitTimer = 0;
     this.damageTimer = 0;
+    this.lastWeapon = null;
+    this.lastOwned = '';
+    this.lastAmmo = '';
+
+    // compact 1-6 weapon list: slot, icon glyph, name. Built from the weapon
+    // table so a new weapon never needs a second markup edit.
+    this.weaponRows = new Map();
+    for (const id of WEAPON_ORDER) {
+      const spec = WEAPONS[id];
+      const row = document.createElement('div');
+      row.className = 'wrow';
+      row.dataset.weapon = id;
+      row.innerHTML = `<span class="wkey">${spec.slot}</span><span class="wglyph">${spec.glyph}</span><span class="wname">${spec.name}</span>`;
+      this.el.weaponWheel?.appendChild(row);
+      this.weaponRows.set(id, row);
+    }
     this.el.helpBtn?.addEventListener('click', () => this.toggleHelp());
     this.el.helpClose?.addEventListener('click', () => this.toggleHelp(false));
     this.el.help?.addEventListener('click', (e: Event) => {
@@ -75,14 +99,34 @@ export class HUD {
     this.el.healthNum.textContent = Math.round(pct);
   }
 
-  setAmmo(cur: any, max: any, reloading: any) {
-    if (reloading) {
-      this.el.ammo.textContent = 'RELOADING';
-      this.el.ammo.style.opacity = 0.6;
-    } else {
-      this.el.ammo.textContent = `${cur} / ${max}`;
-      this.el.ammo.style.opacity = 1;
+  setAmmo(mag: any, reserve: any, reloading: any, melee = false) {
+    const text = melee ? '∞' : reloading ? 'RELOAD' : `${mag} / ${reserve}`;
+    if (text !== this.lastAmmo) {
+      this.lastAmmo = text;
+      this.el.ammo.textContent = text;
     }
+    const dim = reloading ? 0.6 : melee ? 0.85 : 1;
+    this.el.ammo.style.opacity = String(dim);
+  }
+
+  /**
+   * Weapon chip + wheel. Cached by id, ownership mask and ammo text so the DOM
+   * is only touched when one of them actually changes.
+   */
+  setWeapon(id: WeaponId, mag: number, reserve: number, reloading: boolean, owned: Set<WeaponId>) {
+    const spec = WEAPONS[id];
+    if (spec.id !== this.lastWeapon) {
+      this.lastWeapon = spec.id;
+      this.el.weaponName.textContent = spec.name.toUpperCase();
+      this.el.ammoWrap.dataset.weapon = spec.id;
+      for (const [wid, row] of this.weaponRows) row.classList.toggle('on', wid === id);
+    }
+    const mask = WEAPON_ORDER.map((w) => (owned.has(w) ? '1' : '0')).join('');
+    if (mask !== this.lastOwned) {
+      this.lastOwned = mask;
+      for (const [wid, row] of this.weaponRows) row.classList.toggle('locked', !owned.has(wid));
+    }
+    this.setAmmo(mag, reserve, reloading, spec.melee);
   }
 
   setStars(n: number) {
@@ -197,6 +241,14 @@ export class HUD {
       ctx.beginPath();
       ctx.arc(px, pz, 2.4, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // weapon pickups (orange squares so they read apart from cash)
+    for (const p of state.weaponPickups || []) {
+      if (!p.active) continue;
+      const [px, pz] = toMap(p.pos.x, p.pos.z);
+      ctx.fillStyle = '#ff9f43';
+      ctx.fillRect(px - 2.2, pz - 2.2, 4.4, 4.4);
     }
 
     // peds

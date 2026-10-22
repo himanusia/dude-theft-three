@@ -92,6 +92,31 @@
     text-shadow: 0 2px 8px rgba(0,0,0,.8);
   }
   #ammo-wrap small { display: block; font-size: 10px; letter-spacing: .2em; color: rgba(255,255,255,.45); font-weight: 700; }
+  #weapon-name { color: var(--accent); }
+  #ammo-wrap { pointer-events: none; }
+  body.touch-mode #ammo-wrap { pointer-events: auto; cursor: pointer; }
+
+  /* weapon wheel: compact 1-6 list above the ammo chip */
+  #weapon-wheel {
+    position: absolute; right: 18px; bottom: 292px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  }
+  #weapon-wheel .wrow {
+    display: grid; grid-template-columns: 12px 17px auto; gap: 6px; align-items: center;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+    color: rgba(255,255,255,.34); text-shadow: 0 1px 6px rgba(0,0,0,.7);
+  }
+  #weapon-wheel .wrow .wkey { font-size: 9px; color: rgba(255,255,255,.24); text-align: right; }
+  #weapon-wheel .wrow .wglyph {
+    display: inline-flex; width: 17px; height: 17px; align-items: center; justify-content: center;
+    border-radius: 3px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+    font-size: 10px; letter-spacing: 0;
+  }
+  #weapon-wheel .wrow.on { color: var(--accent); }
+  #weapon-wheel .wrow.on .wglyph { background: rgba(255,204,51,.24); border-color: rgba(255,204,51,.8); color: #fff; }
+  #weapon-wheel .wrow.on .wkey { color: var(--accent); }
+  #weapon-wheel .wrow.locked { opacity: .42; }
+  body.touch-mode #weapon-wheel { display: none; }
 
   /* crosshair */
   #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%,-50%); opacity: 0; transition: opacity .15s; }
@@ -333,9 +358,10 @@
     <div id="health-num">100</div>
   </div>
 
-  <div id="ammo-wrap"><small>AMMO</small><span id="ammo">12 / 12</span></div>
+  <div id="ammo-wrap"><small id="weapon-name">9MM</small><span id="ammo">12 / 96</span></div>
+  <div id="weapon-wheel"></div>
 
-  <div id="hints"><b>F</b> enter / exit car &nbsp;·&nbsp; <b>Q</b> punch &nbsp;·&nbsp; <b>R</b> reload &nbsp;·&nbsp; <b>T</b> skip time &nbsp;·&nbsp; <b>M</b> mute</div>
+  <div id="hints"><b>F</b> enter / exit car &nbsp;·&nbsp; <b>1-6 / wheel</b> switch weapon &nbsp;·&nbsp; <b>Q</b> punch &nbsp;·&nbsp; <b>R</b> reload &nbsp;·&nbsp; <b>T</b> skip time &nbsp;·&nbsp; <b>M</b> mute</div>
 
   <div id="speedo"><div id="speed-val">0</div><span class="unit">KM/H</span></div>
   <div id="prompt"></div>
@@ -379,7 +405,8 @@
       <kbd>Mouse</kbd><span>Look around (click to lock pointer)</span>
       <kbd>Shift</kbd><span>Sprint / brake</span>
       <kbd>Space</kbd><span>Jump / handbrake</span>
-      <kbd>Left click</kbd><span>Shoot (aim with right mouse)</span>
+      <kbd>Left click</kbd><span>Fire / swing (aim with right mouse)</span>
+      <kbd>1-6</kbd><span>Switch weapon (or mouse wheel)</span>
       <kbd>F</kbd><span>Enter / exit vehicle</span>
       <kbd>Q</kbd><span>Punch</span>
       <kbd>R</kbd><span>Reload</span>
@@ -402,6 +429,7 @@
     <button id="resume-btn" style="margin-bottom:18px">Resume</button>
     <div class="keys" style="text-align:left">
       <kbd>F</kbd><span>Enter / exit vehicle</span>
+      <kbd>1-6</kbd><span>Switch weapon</span>
       <kbd>Q</kbd><span>Punch</span>
       <kbd>R</kbd><span>Reload</span>
       <kbd>M</kbd><span>Mute audio</span>
