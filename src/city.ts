@@ -780,29 +780,31 @@ export class City {
    */
   planBlockSites() {
     const sites: { x: number; z: number; size: number }[] = [];
-    const step = 25;
-    for (let gx = -7; gx <= 7; gx++) {
-      for (let gz = -7; gz <= 7; gz++) {
-        const x = gx * step + rand(-7, 7);
-        const z = gz * step + rand(-7, 7);
+    const step = 40;
+    for (let gx = -5; gx <= 5; gx++) {
+      for (let gz = -5; gz <= 5; gz++) {
+        // small jitter only: big jitter plus a spacing rule is what emptied the map
+        const x = gx * step + rand(-3.5, 3.5);
+        const z = gz * step + rand(-3.5, 3.5);
         if (Math.abs(x) > 186 || Math.abs(z) > 186) continue;
         if (isWater(x, z)) continue;
         let blocked = false;
         for (const a of ARTERIALS) {
-          if (this.distToPath(x, z, a.path) < a.width / 2 + 10) { blocked = true; break; }
+          if (this.distToPath(x, z, a.path) < a.width / 2 + 4) { blocked = true; break; }
         }
         if (blocked) continue;
-        if (this.distToPath(x, z, RING_ROAD) < 13) continue;
+        if (this.distToPath(x, z, RING_ROAD) < 10) continue;
         for (const r of RIVERS) {
-          if (this.distToPath(x, z, r.path) < r.width / 2 + 9) { blocked = true; break; }
+          if (this.distToPath(x, z, r.path) < r.width / 2 + 3) { blocked = true; break; }
         }
         if (blocked) continue;
         for (const lm of LANDMARKS) {
-          if (Math.hypot(x - lm.x, z - lm.z) < 26) { blocked = true; break; }
+          if (Math.hypot(x - lm.x, z - lm.z) < 24) { blocked = true; break; }
         }
         if (blocked) continue;
-        const size = rand(20, 28);
-        if (sites.some((o) => Math.hypot(o.x - x, o.z - z) < (o.size + size) / 2 + 6)) continue;
+        // squarish lots that leave an 8-12 m street between neighbours; the variety comes from
+        // size and district, not from scattering them apart
+        const size = rand(26, 32);
         sites.push({ x, z, size });
       }
     }
