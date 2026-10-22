@@ -1542,6 +1542,8 @@ function mapState() {
   return {
     blocks: city.blocks,
     roadLines: city.roadLines,
+    mapRoads: [...JakartaMap.ARTERIALS.map((a) => ({ path: a.path, width: a.width })), { path: JakartaMap.RING_ROAD, width: 20 }],
+    shoreZ: JakartaMap.SHORE_Z,
     shops: city.shopDoors,
     police: police.cars,
     cars: [...cityCars, ...traffic.cars.map((e) => e.car)],
@@ -1758,6 +1760,7 @@ let fastWindows = 0;
 
 function update(dt: number) {
   simTime += dt;
+  city.updateCulling(player.pos.x, player.pos.z);
   // wall-clock beat, not accumulated dt: dt is clamped to 50 ms, so a slow host
   // would otherwise stretch "every 20 s" to half a minute of real time
   if (performance.now() - lastAutosaveAt >= AUTOSAVE_SECONDS * 1000) {

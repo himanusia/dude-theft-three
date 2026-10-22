@@ -461,48 +461,49 @@ export class HUD {
     ctx.fillStyle = '#080a0d';
     ctx.fillRect(0, 0, w, h);
 
-    const half = WORLD_HALF_MAP + 8;
+    // A local map, the way the minimap in this genre works: about 460 m across, centred on
+    // the player. The city is 2.5 km now, so a whole-city view would draw every block as a
+    // dot; the player needs the next few streets.
+    const SPAN = 460;
     const size = Math.max(160, Math.min(w, h) - 96);
-    const scale = size / (half * 2);
+    const scale = size / SPAN;
     const cx = w / 2;
     const cy = h / 2;
-    const mx = (x: number) => cx + x * scale;
-    const my = (z: number) => cy + z * scale;
-    const blockSide = MAP_BLOCK * scale;
+    const ox = state.playerPos.x;
+    const oz = state.playerPos.z;
+    const mx = (x: number) => cx + (x - ox) * scale;
+    const my = (z: number) => cy + (z - oz) * scale;
+    const blockSide = Math.max(2, MAP_BLOCK * scale);
 
-    // road bands first: the asphalt is what makes the street grid readable
-    ctx.strokeStyle = '#161b22';
-    ctx.lineWidth = 14 * scale;
-    ctx.lineCap = 'butt';
-    for (const line of state.roadLines || []) {
-      const a = line.axis === 'x' ? [mx(line.coord), my(-half)] : [mx(-half), my(line.coord)];
-      const b = line.axis === 'x' ? [mx(line.coord), my(half)] : [mx(half), my(line.coord)];
+    // roads: the arterials and the ring, as polylines from the map itself
+    ctx.strokeStyle = '#39424f';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const road of state.mapRoads || []) {
+      ctx.lineWidth = Math.max(2, road.width * scale * 0.8);
       ctx.beginPath();
-      ctx.moveTo(a[0], a[1]);
-      ctx.lineTo(b[0], b[1]);
+      road.path.forEach(([x, z]: [number, number], i: number) => {
+        const X = mx(x);
+        const Y = my(z);
+        if (i) ctx.lineTo(X, Y);
+        else ctx.moveTo(X, Y);
+      });
       ctx.stroke();
     }
-    // lane dashes, dim so they never compete with the markers
-    ctx.strokeStyle = 'rgba(120,132,148,0.28)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([6, 8]);
-    for (const line of state.roadLines || []) {
-      const a = line.axis === 'x' ? [mx(line.coord), my(-half)] : [mx(-half), my(line.coord)];
-      const b = line.axis === 'x' ? [mx(line.coord), my(half)] : [mx(half), my(line.coord)];
-      ctx.beginPath();
-      ctx.moveTo(a[0], a[1]);
-      ctx.lineTo(b[0], b[1]);
-      ctx.stroke();
+    // water: the bay and the canals
+    ctx.fillStyle = '#12303c';
+    if (state.shoreZ !== undefined && my(state.shoreZ) > 0) {
+      ctx.fillRect(0, 0, w, my(state.shoreZ));
     }
-    ctx.setLineDash([]);
-
     // blocks
     for (const b of state.blocks || []) {
+      if (Math.abs(b.x - ox) > SPAN || Math.abs(b.z - oz) > SPAN) continue;
+      const side = Math.max(3, (b.size ?? MAP_BLOCK) * scale);
       ctx.fillStyle = b.type === 'park' ? '#274b31' : b.type === 'lot' ? '#1d2229' : '#333a45';
-      ctx.fillRect(mx(b.x) - blockSide / 2, my(b.z) - blockSide / 2, blockSide, blockSide);
+      ctx.fillRect(mx(b.x) - side / 2, my(b.z) - side / 2, side, side);
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.lineWidth = 1;
-      ctx.strokeRect(mx(b.x) - blockSide / 2, my(b.z) - blockSide / 2, blockSide, blockSide);
+      ctx.strokeRect(mx(b.x) - side / 2, my(b.z) - side / 2, side, side);
     }
 
     // shop doors
@@ -582,7 +583,7 @@ export class HUD {
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`${Math.round(size)} px · ${state.blocks?.length ?? 0} blocks`, w - 32, h - 26);
+    ctx.fillText(`${(SPAN / 1000).toFixed(1)} km across · ${state.blocks?.length ?? 0} blocks`, w - 32, h - 26);
   }
 
   drawMinimap(state: any) {

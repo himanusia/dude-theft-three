@@ -93,10 +93,13 @@ function check(name, ok, detail) {
   // sidewalk step-up
   const step = await page.evaluate(() => {
     const g = window.__game;
-    g._test.teleport(26, 0);
-    const hRoad = g.city.groundHeightAt(26, 0);
-    const hWalk = g.city.groundHeightAt(0, 17);
-    return { hRoad, hWalk };
+    // measured on a real block now, not on a lattice coordinate: the kerb is wherever a
+    // plate exists, so ask the city for a block centre and a road point next to it
+    const b = g.city.blocks.find((b) => b.type === 'city') ?? g.city.blocks[0];
+    const hWalk = g.city.groundHeightAt(b.x, b.z);
+    const hRoad = g.city.groundHeightAt(b.x + 400, b.z + 400);
+    g._test.teleport(b.x + 3, b.z + 3);
+    return { hRoad, hWalk, at: [+b.x.toFixed(0), +b.z.toFixed(0)] };
   });
   check('sidewalk height differs from road', step.hWalk > step.hRoad, step);
 
@@ -165,12 +168,15 @@ function check(name, ok, detail) {
       const g = window.__game;
       // re-place the target in the same tick as the shot: an idle ped still gets stepped by
       // the crowd system, and a player that walked off its spot fired at empty road
+      // stand on the spawn road and put the ped down the street: hard-coded coordinates
+      // land inside a building now that the blocks follow the map
+      const spawn = g.city.getSpawn();
       const ped = g.peds.peds.find(p => !p.dead);
       if (ped) {
-        ped.pos.set(26 + off, g.city.groundHeightAt(26 + off, -32), -32);
+        ped.pos.set(spawn.x + off, g.city.groundHeightAt(spawn.x + off, spawn.z + 9), spawn.z + 9);
         ped.target = ped.pos.clone();
         ped.speed = 0.0001;
-        g._test.lookFrom(26 + off, 2.4, -40, ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
+        g._test.lookFrom(spawn.x + off, 2.4, spawn.z, ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
       }
       const magBefore = g.player.mag;
       const ragBefore = g.ragdolls.length;

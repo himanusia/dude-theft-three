@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
-import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater } from './jakartamap';
+import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater, pointInPoly } from './jakartamap';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 import { Car, driverLook } from '../vehicles/car';
 
@@ -197,6 +197,7 @@ type InstancedAdder = (
 export class City {
   declare scene: any;
   declare colliders: any[];
+  declare blockGroups: { x: number; z: number; group: any }[];
   declare blocks: any[];
   declare roadLines: any[];
   declare jumpPads: any[];
@@ -242,6 +243,7 @@ export class City {
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.colliders = [];
+    this.blockGroups = [];
     this.blocks = [];
     this.roadLines = [];
     this.jumpPads = [];
@@ -447,9 +449,16 @@ export class City {
     // sites are generated on a coarse scatter, then rejected if they land in the bay, on a
     // river, in a road corridor or on top of a landmark.
     const sites = this.planBlockSites();
+    const blockLayer = this.group;
     for (const site of sites) {
       const { x: cx, z: cz, size } = site;
       const district = districtAtPoint(cx, cz);
+      // One group per block: a 2.5 km city cannot draw every block, so each block toggles by
+      // distance (see updateCulling). Everything the block owns goes into its own group.
+      const blockGroup = new THREE.Group();
+      blockLayer.add(blockGroup);
+      this.group = blockGroup;
+      this.blockGroups.push({ x: cx, z: cz, group: blockGroup });
       const isPark = Math.random() < 0.13;
       const isLot = !isPark && Math.random() < 0.18;
 
@@ -484,6 +493,7 @@ export class City {
 
       this.decorateBlockEdge(cx, cz);
       this.collectDistrictProps(district, cx, cz);
+      this.group = blockLayer;
     }
 
     // Landmarks sit exactly where the map puts them
@@ -498,6 +508,7 @@ export class City {
       this.blocks.push({ x: lm.x, z: lm.z, type: 'landmark', landmark: lm.id, size: 40 });
     }
 
+    this.buildFrontage();
     this.buildRoadRibbons();
     this.buildWater();
     this.buildDistrictProps();
@@ -809,32 +820,51 @@ export class City {
    * block has, not the 30 m road that made the old 380 m city look like a village.
    */
   planBlockSites() {
+    // Fill each district, not the whole map on one lattice. A global grid leaves holes wherever
+    // a site is rejected (and the player could stand 180 m from the nearest building); tiling
+    // inside the district polygon keeps the street wall continuous.
     const sites: { x: number; z: number; size: number }[] = [];
-    for (let gx = -GRID; gx <= GRID; gx++) {
-      for (let gz = -GRID; gz <= GRID; gz++) {
-        // small jitter only: big jitter plus a spacing rule is what emptied the map
-        const x = gx * PITCH + rand(-7, 7);
-        const z = gz * PITCH + rand(-7, 7);
-        if (Math.abs(x) > WORLD_HALF - 40 || Math.abs(z) > WORLD_HALF - 40) continue;
-        if (isWater(x, z)) continue;
-        const size = rand(110, 150);
-        const half = size / 2;
-        let blocked = false;
-        // the block's *edge* has to clear the asphalt, so the corridor is measured from half
-        for (const a of ARTERIALS) {
-          if (this.distToPath(x, z, a.path) < a.width / 2 + half * 0.62) { blocked = true; break; }
+    const PITCH_BLOCK = 112;
+    const SIZE = 92;
+    for (const d of JKT_DISTRICTS) {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const [x, z] of d.poly) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
+      }
+      for (let x = minX + SIZE / 2; x <= maxX; x += PITCH_BLOCK) {
+        for (let z = minZ + SIZE / 2; z <= maxZ; z += PITCH_BLOCK) {
+          const jx = x + rand(-4, 4);
+          const jz = z + rand(-4, 4);
+          // the block centre has to be inside the district, and its corners too, so a block
+          // never spills into the bay or the next district's park
+          if (!pointInPoly(jx, jz, d.poly)) continue;
+          if (!pointInPoly(jx - SIZE * 0.45, jz - SIZE * 0.45, d.poly)) continue;
+          if (!pointInPoly(jx + SIZE * 0.45, jz + SIZE * 0.45, d.poly)) continue;
+          if (isWater(jx, jz)) continue;
+          let blocked = false;
+          // the roads come first: a block may not sit on an arterial, or the street the player
+          // spawns on has a building in the middle of it
+          for (const a of ARTERIALS) {
+            if (this.distToPath(jx, jz, a.path) < a.width / 2 + SIZE * 0.5 + 3) { blocked = true; break; }
+          }
+          if (blocked) continue;
+          if (this.distToPath(jx, jz, RING_ROAD) < 12 + SIZE * 0.5 + 3) continue;
+          for (const lm of LANDMARKS) {
+            if (Math.hypot(jx - lm.x, jz - lm.z) < SIZE / 2 + 34) { blocked = true; break; }
+          }
+          if (blocked) continue;
+          for (const r of RIVERS) {
+            if (this.distToPath(jx, jz, r.path) < r.width / 2 + SIZE * 0.42) { blocked = true; break; }
+          }
+          if (blocked) continue;
+          sites.push({ x: jx, z: jz, size: SIZE + rand(-6, 8) });
         }
-        if (blocked) continue;
-        if (this.distToPath(x, z, RING_ROAD) < half * 0.62 + 4) continue;
-        for (const r of RIVERS) {
-          if (this.distToPath(x, z, r.path) < r.width / 2 + half * 0.7) { blocked = true; break; }
-        }
-        if (blocked) continue;
-        for (const lm of LANDMARKS) {
-          if (Math.hypot(x - lm.x, z - lm.z) < half + 45) { blocked = true; break; }
-        }
-        if (blocked) continue;
-        sites.push({ x, z, size });
       }
     }
     return sites;
@@ -1824,6 +1854,84 @@ export class City {
     const [bx, bz] = spine[2];
     const t = 0.55;
     return new THREE.Vector3(ax + (bx - ax) * t + 3, 0, az + (bz - az) * t);
+  }
+
+  /**
+   * Show only the blocks near the player. The city is 2.5 km across, so drawing all of it
+   * costs ~2k draw calls; at street level the player sees a 400 m bubble anyway.
+   */
+  updateCulling(x: number, z: number, radius = 430) {
+    const r2 = radius * radius;
+    for (const b of this.blockGroups) {
+      const dx = b.x - x;
+      const dz = b.z - z;
+      b.group.visible = dx * dx + dz * dz < r2;
+    }
+  }
+
+
+  /**
+   * Street frontage: buildings that line the roads, facing them.
+   *
+   * Square blocks on a lattice always leave a ~60 m empty margin along a road (the corridor
+   * the block centre has to clear), which is what made the city read as a wide empty plain
+   * with buildings in the distance. A city is a wall of buildings with a road in front, so
+   * the rows are laid along each road here: depth behind, facade toward the asphalt.
+   */
+  buildFrontage() {
+    const roads = [...ARTERIALS.map((a) => ({ path: a.path, width: a.width })), { path: RING_ROAD, width: 20 }];
+    for (const road of roads) {
+      for (let i = 0; i < road.path.length - 1; i++) {
+        const [x1, z1] = road.path[i];
+        const [x2, z2] = road.path[i + 1];
+        const len = Math.hypot(x2 - x1, z2 - z1);
+        const dx = (x2 - x1) / len;
+        const dz = (z2 - z1) / len;
+        const nx = -dz;
+        const nz = dx;
+        for (const side of [-1, 1]) {
+          let t = 6;
+          while (t < len - 6) {
+            const w = rand(11, 22);       // frontage width along the street
+            const d = rand(12, 20);       // depth behind the facade
+            const h = rand(7, 26);
+            const px = x1 + dx * (t + w / 2) + nx * side * (road.width / 2 + 2.2 + d / 2);
+            const pz = z1 + dz * (t + w / 2) + nz * side * (road.width / 2 + 2.2 + d / 2);
+            const district = districtAtPoint(px, pz);
+            const styleKey = (district === 'gambir' ? 'monas' : district) as keyof typeof DISTRICTS;
+            const style = DISTRICTS[styleKey] || DISTRICTS.kampung;
+            if (!isWater(px, pz)) {
+              const group = new THREE.Group();
+              group.position.set(px, 0, pz);
+              group.rotation.y = Math.atan2(dx, dz);
+              const wall = pick(style.walls);
+              const tex = windowTexture(wall, 'strips');
+              tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+              tex.repeat.set(Math.max(1, w / 8), Math.max(1, h / 6));
+              const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
+              const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+              body.position.y = h / 2 + 0.3;
+              body.castShadow = true;
+              body.receiveShadow = true;
+              group.add(body);
+              // a shopfront band at street level so the row is not one blank slab
+              const base = new THREE.Mesh(
+                new THREE.BoxGeometry(w + 0.2, 3.2, 0.3),
+                new THREE.MeshStandardMaterial({ color: pick(['#2a3038', '#3a2f28', '#26343a']), roughness: 0.8 })
+              );
+              base.position.set(0, 1.9, -d / 2 - 0.16);
+              group.add(base);
+              this.group.add(group);
+              // collider in world space (axis-aligned box around the rotated footprint)
+              const halfX = (Math.abs(Math.cos(group.rotation.y)) * w + Math.abs(Math.sin(group.rotation.y)) * d) / 2;
+              const halfZ = (Math.abs(Math.sin(group.rotation.y)) * w + Math.abs(Math.cos(group.rotation.y)) * d) / 2;
+              this.colliders.push({ minX: px - halfX, maxX: px + halfX, minZ: pz - halfZ, maxZ: pz + halfZ, h });
+            }
+            t += w + rand(1.5, 4.5);
+          }
+        }
+      }
+    }
   }
 
   // sidewalk plate height (blocks sit ~26cm above the asphalt)
