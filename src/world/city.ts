@@ -529,6 +529,7 @@ export class City {
     }
 
     this.buildFrontage();
+    this.buildTerrainFeatures();
     this.buildRoadRibbons();
     this.buildWater();
     this.buildDistrictProps();
@@ -1959,6 +1960,57 @@ export class City {
             t += w + rand(1.5, 4.5);
           }
         }
+      }
+    }
+  }
+
+
+  /**
+   * The landforms that make the horizon read as Jakarta: the Bogor foothills sitting behind
+   * the southern edge of the map, and the raised tanggul that run along every flood canal.
+   *
+   * The heightfield in src/world/terrain.ts gives the ground its shape, but a displaced plane
+   * is still a plane: at 18 m per quad the rise is invisible. These are real geometry with
+   * silhouettes, and they are what tells the eye the city sits on land that goes somewhere.
+   */
+  buildTerrainFeatures() {
+    // 1. the foothills: low, wide ridges beyond the last row of blocks
+    const hillMat = new THREE.MeshStandardMaterial({ color: 0x4a5f45, roughness: 1, flatShading: true });
+    const hillMatFar = new THREE.MeshStandardMaterial({ color: 0x51657f, roughness: 1, flatShading: true });
+    const edge = WORLD_HALF;
+    for (let i = 0; i < 9; i++) {
+      const x = -edge + 200 + i * (edge * 2 - 400) / 8 + rand(-70, 70);
+      const z = edge - rand(40, 260);
+      const r = rand(220, 420);
+      const h = rand(55, 130);
+      const geo = new THREE.ConeGeometry(r, h, 7, 1);
+      const hill = new THREE.Mesh(geo, i % 3 === 0 ? hillMatFar : hillMat);
+      hill.position.set(x, terrainHeight(x, z) + h / 2 - 8, z);
+      hill.rotation.y = rand(0, Math.PI);
+      hill.scale.set(1, 1, rand(0.6, 1.1));
+      this.group.add(hill);
+    }
+
+    // 2. tanggul: a raised bank on each side of every canal, following its polyline
+    const bankMat = new THREE.MeshStandardMaterial({ color: 0x6e6a5e, roughness: 0.98 });
+    for (const river of RIVERS) {
+      for (const side of [-1, 1]) {
+        const offsets: [number, number][] = [];
+        const pts = river.path;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const [x1, z1] = pts[i];
+          const [x2, z2] = pts[i + 1];
+          const len = Math.hypot(x2 - x1, z2 - z1) || 1;
+          const nx = -(z2 - z1) / len;
+          const nz = (x2 - x1) / len;
+          const off = river.width / 2 + 3.2;
+          offsets.push([x1 + nx * off * side, z1 + nz * off * side]);
+          offsets.push([x2 + nx * off * side, z2 + nz * off * side]);
+        }
+        const band = new THREE.Mesh(this.ribbon(offsets, 6.4, 0.9), bankMat);
+        band.receiveShadow = true;
+        band.castShadow = true;
+        this.group.add(band);
       }
     }
   }

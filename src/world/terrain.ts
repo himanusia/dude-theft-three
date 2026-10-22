@@ -69,10 +69,14 @@ export function terrainHeight(x: number, z: number): number {
   h += (valueNoise(x / 240, z / 240) - 0.5) * 2.6;
   h += (valueNoise(x / 70, z / 70) - 0.5) * 0.5;
 
-  // tanggul: a raised bank either side of every canal, crest about 9 m off the water
+  // canals cut into the ground, with a raised bank (tanggul) either side
   for (const r of RIVERS) {
     const d = distToPath(x, z, r.path) - r.width / 2;
-    if (d > -3 && d < 30) {
+    if (d < 0) {
+      // inside the channel: dig it out so the water plane sits in a visible cut
+      const depth = 2.6 * smoothstep(-8, 0, d);
+      h -= depth;
+    } else if (d < 30) {
       const crest = 1 - Math.abs(d - 9) / 14;
       if (crest > 0) h += crest * 3.2;
     }
