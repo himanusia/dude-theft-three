@@ -24,6 +24,8 @@ function orient(mesh: any, a: THREE.Vector3, b: THREE.Vector3, sx: number, sz: n
  * 8 relaxation passes per step, ground friction and building pushes.
  */
 export class Ragdoll {
+  /** where the ground is under a point; set by main from city.groundHeightAt */
+  groundAt: ((x: number, z: number) => number) | null = null;
   declare scene: any;
   declare life: number;
   declare maxLife: any;
@@ -54,6 +56,7 @@ export class Ragdoll {
     this.scene = scene;
     this.life = 0;
     this.maxLife = opts.maxLife ?? 11;
+    this.groundAt = opts.groundAt ?? null;
     this.scale = opts.scale ?? 1;
     this.group = new THREE.Group();
     scene.add(this.group);
@@ -219,10 +222,12 @@ export class Ragdoll {
 
     }
 
-    // ground: clamp, then scrub horizontal speed once per step so a body slides to a stop
+    // ground: clamp to the terrain under each point (not to y = 0), then scrub horizontal
+    // speed once per step so a body slides to a stop
     for (const pt of Object.values(this.points)) {
-      if (pt.p.y < pt.r) {
-        pt.p.y = pt.r;
+      const floor = (this.groundAt ? this.groundAt(pt.p.x, pt.p.z) : 0) + pt.r;
+      if (pt.p.y < floor) {
+        pt.p.y = floor;
         pt.prev.x += (pt.p.x - pt.prev.x) * 0.12;
         pt.prev.z += (pt.p.z - pt.prev.z) * 0.12;
       }

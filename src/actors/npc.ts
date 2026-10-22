@@ -28,7 +28,7 @@ const ANIM_LOD = 55; // stop animating limbs beyond this range
 const HIDE_LOD = 110;
 const CROSS_CHANCE = 0.45;
 const CROSS_SPEED = 2.35; // brisk, but still a walk
-const STREET_REACH = 12; // a car this close to the crossing line stops the crossing
+const STREET_REACH = 10; // a car this close along the crossing line holds me at the kerb
 
 const _footV = new THREE.Vector3();
 const _scratch: any[] = [];
@@ -498,8 +498,8 @@ export class Ped {
       const rz = c.pos.z - mz;
       const along = rx * this.crossDx + rz * this.crossDz;
       const across = rx * px + rz * pz;
-      if (Math.abs(along) > STREET_REACH + 3) continue;
-      if (Math.abs(across) > 11) continue; // 11 m of road either side of the crossing
+      if (Math.abs(along) > STREET_REACH) continue;
+      if (Math.abs(across) > 8) continue; // 8 m of road either side of the crossing
       return true;
     }
     return false;
@@ -612,11 +612,14 @@ export class Ped {
         this.crossBack = false;
         this.samples.length = 0;
       } else if (this.waitT > 12) {
-        // nobody is letting me through; walk on instead
+        // nobody is letting me through, and I have stood here long enough: cross anyway.
+        // People step out and hurry; the car-on-top abort still pulls them back if one comes.
         this.waiting = false;
-        this.mode = 'walk';
-        this.crossed = true;
-        this.plan();
+        this.mode = 'cross';
+        this.crossT = 0;
+        this.crossSampleT = 0;
+        this.crossBack = false;
+        this.samples.length = 0;
       }
       return;
     }
@@ -1304,7 +1307,7 @@ export class PedManager {
       all.push(i);
       // a lane that reaches a zebra soon: the crowd belongs at the corners, not on a
       // 300 m stretch of boulevard in the middle of nowhere
-      if (L.cross >= 0 && Math.min(Math.abs(t - L.cf), Math.abs(t - L.ct)) <= 30) nearCrossing.push(i);
+      if (L.cross >= 0 && Math.min(Math.abs(t - L.cf), Math.abs(t - L.ct)) <= 16) nearCrossing.push(i);
     }
     const pool = nearCrossing.length ? nearCrossing : all;
     if (!pool.length) return null;

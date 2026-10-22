@@ -1055,6 +1055,7 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
       velocity: v,
       colliders: city.colliders,
       maxLife: 11,
+      groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
     }));
     hud.hitmarker();
     addCash(25);
@@ -1185,6 +1186,7 @@ function ragdollPed(ped: any, velocity: any) {
     velocity: velocity.clone().setY(Math.max(velocity.y, 1.5)),
     colliders: city.colliders,
     maxLife: 11,
+    groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
   });
   ragdolls.push(r);
 }
@@ -2139,6 +2141,7 @@ window.__game = {
         velocity: new THREE.Vector3(vx, 2.2, vz),
         colliders: city.colliders,
         maxLife: 11,
+        groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
       }));
       return ragdolls.length;
     },
