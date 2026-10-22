@@ -210,6 +210,9 @@ export class City {
   declare clouds: THREE.Group;
   declare starMat: THREE.PointsMaterial;
   declare lampPositions: THREE.Vector3[];
+  declare lanternMats: THREE.Matrix4[];
+  declare washMats: THREE.Matrix4[];
+  declare lanternWireMats: THREE.Matrix4[];
   declare dayT: any;
   declare hemi: any;
   declare fill: any;
@@ -417,6 +420,9 @@ export class City {
     this.lampPositions = [];
     this.lampArms = [];
     this.lampHeads = [];
+    this.lanternMats = [];
+    this.washMats = [];
+    this.lanternWireMats = [];
 
     for (let i = -GRID; i <= GRID; i++) {
       for (let j = -GRID; j <= GRID; j++) {
@@ -465,8 +471,11 @@ export class City {
         }
 
         this.decorateBlockEdge(cx, cz);
+        this.collectDistrictProps(districtAt(cx, cz), cx, cz);
       }
     }
+
+    this.buildDistrictProps();
 
     // road markings (instanced)
     const half = GRID * PITCH;
@@ -622,6 +631,75 @@ export class City {
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
       this.group.add(mesh);
+    }
+  }
+
+  /** Street dressing that makes a district legible at ground level, batched into one mesh
+   *  per prop type so the draw-call budget survives it. */
+  collectDistrictProps(id: string, cx: number, cz: number) {
+    const m = new THREE.Matrix4();
+    const half = BLOCK / 2 - 1.2;
+    if (id === 'glodok') {
+      // red lanterns strung along the shopfronts of the Chinese quarter
+      for (let i = 0; i < 5; i++) {
+        const x = cx - half + (i / 4) * (half * 2);
+        const z = cz - half - 0.6;
+        this.lanternMats.push(m.clone().makeTranslation(x, 4.1 + rand(-0.1, 0.1), z));
+        this.lanternMats.push(m.clone().makeTranslation(cx + half + 0.6, 4.1, cz - half + (i / 4) * (half * 2)));
+      }
+      // the cord they hang from, so they read as strung lanterns and not floating boxes
+      this.lanternWireMats.push(m.clone().makeTranslation(cx, 4.4, cz - half - 0.6));
+      const rot = new THREE.Matrix4().makeRotationY(Math.PI / 2);
+      this.lanternWireMats.push(new THREE.Matrix4().makeTranslation(cx + half + 0.6, 4.4, cz).multiply(rot));
+    } else if (id === 'kampung') {
+      // laundry lines between the tight houses
+      for (let i = 0; i < 2; i++) {
+        const z = cz + (i ? 7 : -7);
+        this.washMats.push(m.clone().makeTranslation(cx, 3.1 + i * 0.2, z));
+      }
+    }
+  }
+
+  buildDistrictProps() {
+    if (this.lanternMats.length) {
+      const mat = new THREE.MeshStandardMaterial({ color: 0xd8352a, emissive: 0x7a120c, emissiveIntensity: 0.5, roughness: 0.7 });
+      const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.5, 0.34), mat, this.lanternMats.length);
+      this.lanternMats.forEach((mm, i) => mesh.setMatrixAt(i, mm));
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = true;
+      mesh.frustumCulled = false;
+      this.group.add(mesh);
+
+      if (this.lanternWireMats.length) {
+        const wireMat = new THREE.MeshStandardMaterial({ color: 0x2a2320, roughness: 0.9 });
+        const wire = new THREE.InstancedMesh(new THREE.BoxGeometry(BLOCK - 2, 0.035, 0.035), wireMat, this.lanternWireMats.length);
+        this.lanternWireMats.forEach((mm, i) => wire.setMatrixAt(i, mm));
+        wire.instanceMatrix.needsUpdate = true;
+        wire.frustumCulled = false;
+        this.group.add(wire);
+      }
+    }
+    if (this.washMats.length) {
+      const line = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.9 });
+      const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(BLOCK - 12, 0.06, 0.06), line, this.washMats.length);
+      this.washMats.forEach((mm, i) => mesh.setMatrixAt(i, mm));
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.frustumCulled = false;
+      this.group.add(mesh);
+      // the washing itself: a row of small cloths under each line
+      const cloth = new THREE.MeshStandardMaterial({ color: 0xdcd6c2, roughness: 0.95 });
+      const cloths = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 0.6, 0.05), cloth, this.washMats.length * 4);
+      let k = 0;
+      for (const mm of this.washMats) {
+        const base = new THREE.Vector3().setFromMatrixPosition(mm);
+        for (let i = 0; i < 4; i++) {
+          const t = new THREE.Matrix4().makeTranslation(base.x - 8 + i * 5.4 + rand(-0.4, 0.4), base.y - 0.36, base.z + rand(-0.1, 0.1));
+          cloths.setMatrixAt(k++, t);
+        }
+      }
+      cloths.instanceMatrix.needsUpdate = true;
+      cloths.frustumCulled = false;
+      this.group.add(cloths);
     }
   }
 
