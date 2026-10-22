@@ -156,10 +156,12 @@ await sleep(400);
 note('muzzle flash', flash);
 note('shake settled', await p.evaluate(() => window.__game.state.shake));
 
-// 4. five stars + chase, measure police distance over 12s
+// 4. five stars + chase: poll until cruisers actually spawn, then measure the closest
+const paused = await p.evaluate(() => window.__game.state.paused);
+if (paused) { await p.click('#resume-btn'); await sleep(500); }
 await p.evaluate(() => { window.__game.police.wanted = 5; window.__game.police.starCount = 5; });
 let closest = 999, cops = 0;
-for (let i = 0; i < 12; i++) {
+for (let i = 0; i < 24; i++) {
   await sleep(1000);
   const s = await p.evaluate(() => ({
     cops: window.__game.police.cars.length,
