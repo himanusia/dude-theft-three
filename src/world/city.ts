@@ -5,10 +5,13 @@ import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS 
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 import { Car, driverLook } from '../vehicles/car';
 
-export const PITCH = 52;
-export const BLOCK = 38;
+// City-block scale. A block is 140 m and the pitch is 170 m, so the street between two
+// blocks is 30 m of asphalt and pavement - close to a real Jakarta block, and wide enough
+// that a 22 m arterial no longer looks like a motorway through a village.
+export const PITCH = 170;
+export const BLOCK = 140;
 export const ROAD = PITCH - BLOCK;
-export const GRID = 3; // blocks from -3..3 on each axis
+export const GRID = 7; // blocks from -7..7 on each axis: a 2.5 km city
 export const WORLD_HALF = GRID * PITCH + BLOCK * 0.5;
 
 // light panels + blue glass, like the reference city blocks
@@ -384,7 +387,22 @@ export class City {
     asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
     asphaltTex.repeat.set(70, 70);
     const asphalt = new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.96 });
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), asphalt);
+    // The plane is the *pavement*, not the road: asphalt is drawn on top as a ribbon with the
+    // real width of each road, so the strip between the kerb and the asphalt reads as sidewalk
+    // instead of one 30 m sheet of tarmac.
+    const concreteTex = canvasTexture(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#b7b2a8';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 900; i++) {
+        const g = Math.round(176 + Math.random() * 26);
+        ctx.fillStyle = `rgba(${g},${g - 3},${g - 9},0.5)`;
+        ctx.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 3, 1 + Math.random() * 2);
+      }
+    });
+    concreteTex.wrapS = concreteTex.wrapT = THREE.RepeatWrapping;
+    concreteTex.repeat.set(90, 90);
+    const pavement = new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0.97 });
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_HALF * 2 + 900, WORLD_HALF * 2 + 900), pavement);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.group.add(ground);
@@ -484,20 +502,26 @@ export class City {
     this.buildWater();
     this.buildDistrictProps();
 
-    // road markings (instanced)
-    const half = GRID * PITCH;
+    // road markings (instanced): dashed centre lines along the roads the map defines
     const mtx = new THREE.Matrix4();
-    for (let i = -GRID; i < GRID; i++) {
-      const rc = (i + 0.5) * PITCH;
-      for (let t = -half; t <= half; t += 7) {
-        // skip intersections
-        const nearCross = Math.abs(((t / PITCH) % 1 + 1) % 1 - 0.5) < 0.2;
-        if (nearCross) continue;
-        this.dashMatrices.push(mtx.clone().makeTranslation(rc, 0.02, t));
-        this.dashMatrices.push(mtx.clone().makeTranslation(t, 0.02, rc));
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const dashRoads = [...ARTERIALS.map((a) => ({ pts: a.path, width: a.width })), { pts: RING_ROAD, width: 20 }];
+    for (const road of dashRoads) {
+      for (let i = 0; i < road.pts.length - 1; i++) {
+        const [x1, z1] = road.pts[i];
+        const [x2, z2] = road.pts[i + 1];
+        const len = Math.hypot(x2 - x1, z2 - z1);
+        const yaw = Math.atan2(x2 - x1, z2 - z1);
+        const steps = Math.floor(len / 9);
+        for (let k = 0; k < steps; k++) {
+          const t = (k + 0.5) / steps;
+          const x = x1 + (x2 - x1) * t;
+          const z = z1 + (z2 - z1) * t;
+          q.setFromAxisAngle(up, yaw);
+          this.dashMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0.02, z), q, new THREE.Vector3(1, 1, 1)));
+        }
       }
-      this.roadLines.push({ axis: 'x', coord: rc });
-      this.roadLines.push({ axis: 'z', coord: rc });
     }
     const dashMesh = new THREE.InstancedMesh(dashGeo, dashMat, this.dashMatrices.length);
     this.dashMatrices.forEach((m, i) => dashMesh.setMatrixAt(i, m));
@@ -778,33 +802,38 @@ export class City {
    * corridor, no landmark footprint. The result is a city that follows the arterials and the
    * ring instead of sitting on a lattice.
    */
+  /**
+   * Candidate block sites on a city-block pitch, jittered a little, then filtered against
+   * water, the road corridors and the landmark footprints. A block is 110-150 m, so the
+   * streets between them are 20-60 m of asphalt and pavement - the width a real Jakarta
+   * block has, not the 30 m road that made the old 380 m city look like a village.
+   */
   planBlockSites() {
     const sites: { x: number; z: number; size: number }[] = [];
-    const step = 40;
-    for (let gx = -5; gx <= 5; gx++) {
-      for (let gz = -5; gz <= 5; gz++) {
+    for (let gx = -GRID; gx <= GRID; gx++) {
+      for (let gz = -GRID; gz <= GRID; gz++) {
         // small jitter only: big jitter plus a spacing rule is what emptied the map
-        const x = gx * step + rand(-3.5, 3.5);
-        const z = gz * step + rand(-3.5, 3.5);
-        if (Math.abs(x) > 186 || Math.abs(z) > 186) continue;
+        const x = gx * PITCH + rand(-7, 7);
+        const z = gz * PITCH + rand(-7, 7);
+        if (Math.abs(x) > WORLD_HALF - 40 || Math.abs(z) > WORLD_HALF - 40) continue;
         if (isWater(x, z)) continue;
+        const size = rand(110, 150);
+        const half = size / 2;
         let blocked = false;
+        // the block's *edge* has to clear the asphalt, so the corridor is measured from half
         for (const a of ARTERIALS) {
-          if (this.distToPath(x, z, a.path) < a.width / 2 + 4) { blocked = true; break; }
+          if (this.distToPath(x, z, a.path) < a.width / 2 + half * 0.62) { blocked = true; break; }
         }
         if (blocked) continue;
-        if (this.distToPath(x, z, RING_ROAD) < 10) continue;
+        if (this.distToPath(x, z, RING_ROAD) < half * 0.62 + 4) continue;
         for (const r of RIVERS) {
-          if (this.distToPath(x, z, r.path) < r.width / 2 + 3) { blocked = true; break; }
+          if (this.distToPath(x, z, r.path) < r.width / 2 + half * 0.7) { blocked = true; break; }
         }
         if (blocked) continue;
         for (const lm of LANDMARKS) {
-          if (Math.hypot(x - lm.x, z - lm.z) < 24) { blocked = true; break; }
+          if (Math.hypot(x - lm.x, z - lm.z) < half + 45) { blocked = true; break; }
         }
         if (blocked) continue;
-        // squarish lots that leave an 8-12 m street between neighbours; the variety comes from
-        // size and district, not from scattering them apart
-        const size = rand(26, 32);
         sites.push({ x, z, size });
       }
     }
@@ -835,8 +864,8 @@ export class City {
   }
 
   buildRoadRibbons() {
-    const asphalt = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.95 });
-    const ring = new THREE.MeshStandardMaterial({ color: 0x343a42, roughness: 0.95 });
+    const asphalt = new THREE.MeshStandardMaterial({ color: 0x33383f, roughness: 0.95 });
+    const ring = new THREE.MeshStandardMaterial({ color: 0x2e333a, roughness: 0.95 });
     const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });
     for (const a of ARTERIALS) {
       const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.035), asphalt);
@@ -855,9 +884,9 @@ export class City {
 
   buildWater() {
     const shape = new THREE.Shape();
-    shape.moveTo(-260, -260);
+    shape.moveTo(-WORLD_HALF - 900, -WORLD_HALF - 900);
     COASTLINE.forEach(([x, z], i) => (i ? shape.lineTo(x, -z) : shape.lineTo(x, -z)));
-    shape.lineTo(260, -260);
+    shape.lineTo(WORLD_HALF + 900, -WORLD_HALF - 900);
     shape.closePath();
     const geo = new THREE.ShapeGeometry(shape);
     const sea = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x24505f, roughness: 0.15, metalness: 0.45 }));
@@ -892,8 +921,11 @@ export class City {
       this.buildKampungRow(cx, cz, style);
       return;
     }
-    const count = Math.random() < 0.35 ? style.lots[0] : randInt(style.lots[0], style.lots[1]);
     const area = size - 9;
+    // a 140 m block is four or five city lots, not one: scale the lot count with the block so
+    // the street wall stays dense instead of turning into a few warehouses
+    const wanted = Math.round(area / 24);
+    const count = clamp(wanted, style.lots[0], style.lots[1] + 12);
     const cells = count === 1 ? [[0, 0, area, area]] : this.splitLots(area, count, cx, cz);
     for (const [ox, oz, w, d] of cells) {
       const [lo, hi] = style.heights;
