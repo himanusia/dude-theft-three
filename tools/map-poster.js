@@ -645,12 +645,7 @@
     // islands are reclaimed slabs: flat fill, no hillshade (they sit at sea level)
     for (const isl of M.ISLANDS) {
       const p = polyPath(view, isl);
-      c.save();
-      c.strokeStyle = 'rgba(207,226,231,.28)';
-      c.lineWidth = 9;
-      c.stroke(p);
-      c.restore();
-      c.fillStyle = '#d5cdb6';
+      c.fillStyle = '#d9d2ba';
       c.fill(p);
       // fine hatch: these are land under reclamation, not finished city
       c.save();
@@ -768,6 +763,16 @@
     }
 
     // ---------------- built blocks, straight from city.blocks
+    // Built-up fabric, computed once: the roads below use it to stop drawing streets through
+    // empty ground, and the blocks use it to fill themselves with buildings.
+    const FP = ((G.city && G.city.colliders) || []).filter((b) => (b.h || 0) > 3);
+    const built = (x, z) => {
+      for (const b of FP) {
+        if (x > b.minX - 40 && x < b.maxX + 40 && z > b.minZ - 40 && z < b.maxZ + 40) return true;
+      }
+      return false;
+    };
+
     const BLOCKS = (G.city && G.city.blocks) || [];
     c.save();
     c.clip(land);
@@ -786,7 +791,7 @@
     // Real building footprints. A block drawn as an empty rectangle reads as a hole in the
     // city; the colliders already carry every footprint the generator placed, so the map can
     // show the built-up fabric instead of guessing at it.
-    const FOOTPRINTS = ((G.city && G.city.colliders) || []).filter((b) => (b.h || 0) > 3);
+    const FOOTPRINTS = FP;
     for (const b of FOOTPRINTS) {
       const q = polyPath(view, [
         [b.minX, b.minZ], [b.maxX, b.minZ], [b.maxX, b.maxZ], [b.minX, b.maxZ],
@@ -820,7 +825,11 @@
     c.restore();
 
     // ---------------- local streets (8 m)
-    const localRuns = STREETS.map((st) => [linePath(view, st.path), st.width]);
+    // A street with nothing on it is a line on paper, not a road: keep the runs that pass
+    // through built fabric, so the grid stops spilling into empty ground at the sheet edges.
+    const localRuns = STREETS
+      .filter((st) => st.path.filter(([x, z]) => built(x, z)).length >= 2)
+      .map((st) => [linePath(view, st.path), st.width]);
     c.save();
     c.lineJoin = 'round';
     c.lineCap = 'butt';
