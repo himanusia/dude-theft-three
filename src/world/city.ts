@@ -1814,8 +1814,16 @@ export class City {
     });
   }
 
+  /**
+   * Start on the Thamrin-Sudirman spine just north of Bundaran HI: a real street in the
+   * dense part of the map, so the first thing the player sees is the city, not a field.
+   */
   getSpawn() {
-    return new THREE.Vector3(PITCH * 0.5, 0, PITCH * 0.5 + 4);
+    const spine = ARTERIALS[0].path;
+    const [ax, az] = spine[1];
+    const [bx, bz] = spine[2];
+    const t = 0.55;
+    return new THREE.Vector3(ax + (bx - ax) * t + 3, 0, az + (bz - az) * t);
   }
 
   // sidewalk plate height (blocks sit ~26cm above the asphalt)

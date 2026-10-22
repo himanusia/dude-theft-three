@@ -20,7 +20,13 @@ const dataUrl = await page.evaluate(() => {
   const M = window.__game.jakartaMap;
   const S = 1600;
   const PAD = 70;
-  const EXT = 210;                       // world extends to +/- 210
+  // auto-fit: the map is authored in sketch space and scaled into world metres, so read the
+  // extent from the geometry instead of hard-coding the old 210 m sketch
+  const all = [];
+  for (const d of M.DISTRICTS) for (const pt of d.poly) all.push(pt);
+  for (const a of M.ARTERIALS) for (const pt of a.path) all.push(pt);
+  for (const pt of M.RING_ROAD) all.push(pt);
+  const EXT = Math.max(...all.map((p) => Math.max(Math.abs(p[0]), Math.abs(p[1])))) * 1.06;
   const scale = (S - PAD * 2) / (EXT * 2);
   const X = (x) => S / 2 + x * scale;
   const Y = (z) => S / 2 + z * scale;
@@ -158,6 +164,11 @@ const dataUrl = await page.evaluate(() => {
   c.font = '500 13px -apple-system, system-ui, sans-serif';
   c.fillStyle = '#93a1ad';
   c.fillText('versi disederhanakan · 9 distrik · 8 landmark · bukan 1:1', PAD, 88);
+  c.textAlign = 'right';
+  c.font = '500 12px -apple-system, system-ui, sans-serif';
+  c.fillStyle = '#93a1ad';
+  c.fillText(`${(EXT * 2 / 1000).toFixed(1)} km across`, S - PAD, 88);
+  c.textAlign = 'left';
   c.textAlign = 'right';
   c.font = '800 15px -apple-system, system-ui, sans-serif';
   c.fillStyle = '#cfd8e0';

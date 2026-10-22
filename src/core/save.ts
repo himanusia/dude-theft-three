@@ -12,7 +12,10 @@
 
 export const SAVE_KEY = 'dta.save.v1';
 export const SETTINGS_KEY = 'dta.settings.v1';
-export const SAVE_VERSION = 1;
+// 2: the world was rescaled from 380 m to 2.5 km, so a save made in the old city would drop
+// the player into an empty field. Bumping the version discards the position (and only the
+// position that matters: settings live under their own key).
+export const SAVE_VERSION = 2;
 export const SETTINGS_VERSION = 1;
 
 /** Objective progress, same shape as the `flags` record in main.ts. */
