@@ -82,7 +82,12 @@ const check = (n, ok, d) => { results.push({ n, ok }); console.log((ok ? 'PASS '
     await sleep(400);
   }
 
+  const failed = results.filter(r => !r.ok);
   console.log('errors:', JSON.stringify(errs.slice(0, 5)));
-  console.log('SUMMARY', JSON.stringify({ pass: results.filter(r => r.ok).length, total: results.length }));
+  console.log('SUMMARY', JSON.stringify({ pass: results.length - failed.length, total: results.length }));
   await b.close();
+  if (failed.length) {
+    console.error(`interior: ${failed.length}/${results.length} checks failed`);
+    process.exitCode = 1;
+  }
 })().catch(e => { console.error('FAIL', e.message); process.exit(1); });

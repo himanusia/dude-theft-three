@@ -184,7 +184,12 @@ function check(name, ok, detail) {
   check('perf budget', Number(perf.calls) < 1600, perf);
 
   check('no console/page errors', errs.length === 0, errs.slice(0, 6));
-  console.log('SUMMARY ' + JSON.stringify({ pass: results.filter(r => r.ok).length, total: results.length }));
-  console.log('FAILED ' + JSON.stringify(results.filter(r => !r.ok)));
+  const failed = results.filter(r => !r.ok);
+  console.log('SUMMARY ' + JSON.stringify({ pass: results.length - failed.length, total: results.length }));
+  console.log('FAILED ' + JSON.stringify(failed));
   await b.close();
+  if (failed.length) {
+    console.error(`qa: ${failed.length}/${results.length} checks failed`);
+    process.exitCode = 1;
+  }
 })().catch(e => { console.error('HARNESS FAIL', e.message); process.exit(1); });
