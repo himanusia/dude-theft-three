@@ -25,6 +25,29 @@ python3 serve.py   # serve the built dist/ (threaded, IPv4 + IPv6 loopback)
 `file://` does not work (ES modules + audio fetch); always serve over HTTP.
 Desktop Chrome/Safari/Firefox with WebGL2.
 
+## Theme: Indonesia (parody, no real brands)
+
+Shop names, billboards and interiors are Indonesian **plesetan**, deliberately not the real
+brands: `ALFAMURTI`, `INDOMERET`, `MARTABAK MART`, `WARTEG BAHARI`, `WARTEG SIAP JIWO`,
+`BENGKEL AHOS`, `KOPI TUBRUK`, `WARKOP MELAYU`, `PULSA PERDANU`, `MIE GACUAN`, `SATE SENAYUN`,
+`NASI PADANG SELONGSOR`, `JAMU GENDONG`, `TOKO EMAS MULYA`.
+
+## Interiors (build once, reuse)
+
+`src/interior.ts` is a config-driven kit: one room shell (floor, walls with a doorway, ceiling,
+fluorescent panels, point light, door frame, exit pad) plus a per-kind layout.
+
+| Kind | Layout |
+|---|---|
+| `minimarket` | 3 gondola rows with priced stock, glass drink coolers, counter + register + ATM, promo posters, baskets |
+| `warteg` | glass display case with trays, menu board, tables + stools |
+| `bengkel` | car lift, tool bench, tyre stacks, oil drums, service poster |
+| `kopi` | bar counter, cup shelves, stools, chalkboard menu, hanging sachets |
+
+Four rooms are built once and **all 72 shop doors reuse them** — walking into any minimarket
+anywhere in the city drops you into the same shop. Enter/exit with `E`; while indoors the world
+sim pauses and collisions switch to the room's own colliders.
+
 ## Controls
 
 | Key | Action |
@@ -35,6 +58,7 @@ Desktop Chrome/Safari/Firefox with WebGL2.
 | Right mouse (hold) | Aim — shoulder cam, character hidden |
 | `Shift` | Sprint / brake |
 | `Space` | Jump / handbrake |
+| `E` | Enter / exit a shop interior |
 | `F` | Enter / exit the nearest vehicle |
 | `Q` | Punch |
 | `R` | Reload |
@@ -76,10 +100,18 @@ the pendulum lift, so the planted foot always touches the ground — works for L
 
 Automated harness (`puppeteer-core`) drives the real page and asserts **state**, not screenshots:
 
+```bash
+npm run test:qa        # 19/19 gameplay assertions
+npm run test:interior  # 11/11 interior assertions
+npm run test:audit     # floating-geometry audit
 ```
-19/19 checks pass — boot, walk, sprint, jump+land, sidewalk step-up, enter/exit vehicle,
+
+```
+19/19 gameplay checks pass — boot, walk, sprint, jump+land, sidewalk step-up, enter/exit vehicle,
 acceleration, shooting + ammo, punch, ragdoll settle, police spawn/approach, death respawn,
 cash pickup, night lighting, pause/resume, perf budget, zero console errors
+11/11 interior checks pass — doors registered, 4 reusable rooms, prompt, enter, walk inside,
+exit, all four kinds reachable, audit clean indoors
 audit: 0 floating actors, 0 floating props
 ```
 
