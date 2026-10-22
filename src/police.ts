@@ -30,7 +30,18 @@ interface CopEntry {
   aimX: number;
   aimZ: number;
   lastBump?: number;
+  /** true once this cruiser has dropped its two officers on foot */
+  crew?: boolean;
   lastRam?: number;
+}
+
+export interface Officer {
+  group: any;
+  pos: THREE.Vector3;
+  yaw: number;
+  fireCd: number;
+  phase: number;
+  dead: boolean;
 }
 
 export class Police {
@@ -44,6 +55,7 @@ export class Police {
   declare arrestProgress: number;
   declare maxCars: number;
   declare nav: RoadNav;
+  declare officers: Officer[];
 
   constructor(scene: THREE.Scene, city: any, audio: any) {
     this.scene = scene;
@@ -56,6 +68,7 @@ export class Police {
     this.arrestProgress = 0;
     this.maxCars = 5;
     this.nav = new RoadNav(city.colliders);
+    this.officers = [];
   }
 
   get starCount() {
@@ -207,6 +220,61 @@ export class Police {
     return CRUISE;
   }
 
+  /** Build one officer: navy shirt, cap, boots — four draws, cheap enough for a squad. */
+  makeOfficer(x: number, z: number, yaw: number): Officer {
+    const g = new THREE.Group();
+    const navy = new THREE.MeshStandardMaterial({ color: 0x22304f, roughness: 0.85, flatShading: true });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xd8a273, roughness: 0.85, flatShading: true });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.9, flatShading: true });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.74, 0.28), navy);
+    body.position.y = 1.03;
+    body.castShadow = true;
+    g.add(body);
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.68, 0.26), dark);
+    legs.position.y = 0.34;
+    legs.castShadow = true;
+    g.add(legs);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), skin);
+    head.position.y = 1.55;
+    head.castShadow = true;
+    g.add(head);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.34), navy);
+    cap.position.y = 1.73;
+    g.add(cap);
+    const y = this.city.groundHeightAt ? this.city.groundHeightAt(x, z) : 0;
+    g.position.set(x, y, z);
+    this.scene.add(g);
+    const officer: Officer = { group: g, pos: new THREE.Vector3(x, y, z), yaw, fireCd: 1.2 + Math.random(), phase: Math.random() * 6, dead: false };
+    this.officers.push(officer);
+    return officer;
+  }
+
+  /** Nearest officer along a shot ray, so the player can actually hit them. */
+  raycastOfficer(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number): { officer: Officer; dist: number } | null {
+    let best: { officer: Officer; dist: number } | null = null;
+    for (const o of this.officers) {
+      if (o.dead) continue;
+      const cx = o.pos.x - origin.x;
+      const cy = o.pos.y + 1.1 - origin.y;
+      const cz = o.pos.z - origin.z;
+      const t = cx * dir.x + cy * dir.y + cz * dir.z;
+      if (t < 1.5 || t > maxDist) continue;
+      const px = origin.x + dir.x * t - o.pos.x;
+      const py = origin.y + dir.y * t - (o.pos.y + 1.1);
+      const pz = origin.z + dir.z * t - o.pos.z;
+      if (Math.hypot(px, py, pz) > 0.5) continue;
+      if (!best || t < best.dist) best = { officer: o, dist: t };
+    }
+    return best;
+  }
+
+  killOfficer(o: Officer) {
+    o.dead = true;
+    this.scene.remove(o.group);
+    const i = this.officers.indexOf(o);
+    if (i >= 0) this.officers.splice(i, 1);
+  }
+
   update(dt: number, ctx: any) {
     const { playerPos, onFoot, camYaw = 0 } = ctx;
 
@@ -239,6 +307,27 @@ export class Police {
       if (car.wrecked) {
         car.update(dt, { throttle: 0, steer: 0, brake: true }, this.city.colliders, 220);
         continue;
+      }
+
+      // Dismount: once the cruiser has stopped near a player on foot, two officers get out and
+      // come for them, GTA-style, instead of the fight happening through the windscreen.
+      const stopped = Math.abs(car.speed) < 3.5;
+      const canDeploy = this.wanted >= 2 && onFoot && dist < 28 && stopped && !entry.crew;
+      if (canDeploy) {
+        entry.crew = true;
+        const rx = Math.cos(car.yaw);
+        const rz = -Math.sin(car.yaw);
+        for (const side of [-1, 1]) {
+          this.makeOfficer(car.pos.x + rx * side * 1.7, car.pos.z + rz * side * 1.7, car.yaw);
+        }
+      } else if (entry.crew && (!onFoot || dist > 80 || this.wanted === 0)) {
+        // the chase moved on: officers jog back and the cruiser takes over again
+        entry.crew = false;
+        // only pull back the ones still standing beside this cruiser; anyone already running
+        // at the player stays in the fight
+        for (const o of [...this.officers]) {
+          if (Math.hypot(o.pos.x - car.pos.x, o.pos.z - car.pos.z) < 4.5) this.killOfficer(o);
+        }
       }
 
       // straight chase when the target is close or in plain sight, otherwise follow
@@ -311,6 +400,43 @@ export class Police {
           this.audio.play('crash', { vol: clamp(hit.impact / 40, 0.1, 0.7), pan: this.panFor(car.pos, playerPos) });
         }
         if (hit.impact > 4) entry.stuck += 0.35;
+      }
+    }
+
+    // officers leave the street when the heat dies, or when the chase has long moved on
+    for (const o of [...this.officers]) {
+      const far = Math.hypot(o.pos.x - playerPos.x, o.pos.z - playerPos.z);
+      if (this.wanted === 0 || far > 90) this.killOfficer(o);
+    }
+
+    // officers on foot: close the gap, then shoot from cover distance
+    for (const o of [...this.officers]) {
+      if (o.dead) continue;
+      const dx = playerPos.x - o.pos.x;
+      const dz = playerPos.z - o.pos.z;
+      const d = Math.hypot(dx, dz);
+      o.yaw = Math.atan2(dx, dz);
+      if (d > 11) {
+        const step = 3.6 * dt;
+        o.pos.x += (dx / d) * step;
+        o.pos.z += (dz / d) * step;
+        o.phase += dt * 9;
+      } else {
+        o.phase += dt * 1.5;
+      }
+      if (this.city.groundHeightAt) o.pos.y = this.city.groundHeightAt(o.pos.x, o.pos.z);
+      o.group.position.copy(o.pos);
+      o.group.rotation.y = o.yaw;
+      o.group.position.y += Math.abs(Math.sin(o.phase)) * 0.05;
+
+      if (d < 26 && this.nav.clear(o.pos.x, o.pos.z, playerPos.x, playerPos.z, 0.6)) {
+        o.fireCd -= dt;
+        if (o.fireCd <= 0) {
+          o.fireCd = clamp(1.9 - this.wanted * 0.15, 0.7, 1.9);
+          const dmg = 3 + this.wanted * 0.8;
+          ctx.onCopShoot?.(o.pos.clone(), dmg);
+          ctx.onCopFire?.(o.pos.clone(), playerPos.clone());
+        }
       }
     }
 

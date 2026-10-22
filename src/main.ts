@@ -989,6 +989,16 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
     }
   }
 
+  // officers on foot
+  let hitOfficer = null;
+  const copHit = police.raycastOfficer(origin, dir, bestDist);
+  if (copHit) {
+    bestDist = copHit.dist;
+    hitPoint = origin.clone().addScaledVector(dir, copHit.dist);
+    hitKind = 'cop';
+    hitOfficer = copHit.officer;
+  }
+
   // vehicles
   let hitCar = null;
   const carsAll = allCars();
@@ -1003,7 +1013,27 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
     }
   }
 
-  if (hitKind === 'ped') {
+  if (hitKind === 'cop' && hitOfficer) {
+    const v = dir.clone().multiplyScalar(10);
+    v.y = Math.max(2.2, v.y + 3.4);
+    const pos = hitOfficer.pos.clone();
+    police.killOfficer(hitOfficer);
+    ragdolls.push(new Ragdoll(scene, {
+      position: pos,
+      yaw: hitOfficer.yaw,
+      skin: 0xd8a273,
+      shirt: 0x22304f,
+      pants: 0x14161c,
+      velocity: v,
+      colliders: city.colliders,
+      maxLife: 11,
+    }));
+    hud.hitmarker();
+    addCash(25);
+    police.addWanted(1);
+    audio.play('bodyfall', { vol: 0.5 });
+    flags.chaos = true;
+  } else if (hitKind === 'ped') {
     const v = dir.clone().multiplyScalar(11);
     v.y = Math.max(2.5, v.y + 4);
     ragdollPed(hitPed, v);
@@ -1729,6 +1759,10 @@ function update(dt: number) {
     onFoot: !player.inCar,
     onArrest: busted,
     onCopShoot: copShoot,
+    onCopFire: (from: any, to: any) => {
+      addTracer(from.clone().setY(from.y + 1.3), to.clone().setY(to.y + 1.1));
+      audio.play('shot_pistol', { vol: 0.32, pan: 0 });
+    },
     camYaw,
   });
   updateObjectives();
