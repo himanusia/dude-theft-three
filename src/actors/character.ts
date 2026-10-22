@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { rand, pick, shadowBlob, roundedBox, canvasTexture } from './utils';
+import { rand, pick, shadowBlob, roundedBox, canvasTexture } from '../core/utils';
 
 // Proportions measured off real Dude Theft Wars screenshots:
 // 1.84 m tall, head 0.42 (≈4.4 heads), torso 0.54×0.58×0.31, arms 0.62, legs 0.72, no neck.

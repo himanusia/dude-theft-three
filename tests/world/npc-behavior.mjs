@@ -16,9 +16,11 @@ import http from 'node:http';
 import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = new URL('../..', import.meta.url).pathname;   // tests/<group>/ -> repo root
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
-const PREFERRED_PORT = Number(process.env.HARNESS_PORT || 8795);
+// 87xx is crowded with leftover serve.py and vite processes from worktrees; sit above that
+// range so a stale listener can never answer for this run
+const PREFERRED_PORT = Number(process.env.HARNESS_PORT || 9410);
 let PORT = PREFERRED_PORT;
 let URL_BASE = `http://127.0.0.1:${PORT}`;
 const OUT = path.join(ROOT, 'screenshots');
@@ -74,7 +76,7 @@ async function portInUse(port) {
 
 /** 8795 is the harness port, but a sibling worktree may already own it. */
 async function pickPort() {
-  for (let p = PREFERRED_PORT; p < PREFERRED_PORT + 6; p++) {
+  for (let p = PREFERRED_PORT; p < PREFERRED_PORT + 10; p++) {
     if (!(await portInUse(p))) return p;
   }
   throw new Error('no free port in ' + PREFERRED_PORT + '..' + (PREFERRED_PORT + 6));
@@ -82,7 +84,7 @@ async function pickPort() {
 
 /** Make sure whoever answers on the port is vite serving *this* working tree. */
 async function assertOwnServer(base) {
-  const res = await httpGet(base + '/tests/npc-behavior.mjs');
+  const res = await httpGet(base + '/tests/world/npc-behavior.mjs');
   const ours = res.status === 200 && res.body.includes('NPC behaviour: sidewalk navigation');
   if (!ours) throw new Error('port ' + PORT + ' is not serving this worktree (status ' + res.status + ')');
 }

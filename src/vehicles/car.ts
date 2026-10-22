@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, rand, pick, resolveCircleBox, shadowBlob, roundedBox, canvasTexture } from './utils';
+import { clamp, lerp, rand, pick, resolveCircleBox, shadowBlob, roundedBox, canvasTexture } from '../core/utils';
 import { MODELS, TYPE_TO_MODEL, instantiateModel } from './carmodels';
 
 // saturated toy-car palette from the reference screenshots

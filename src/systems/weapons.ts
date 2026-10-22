@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roundedBox } from './utils';
+import { roundedBox } from '../core/utils';
 
 /**
  * San Andreas style weapon set.

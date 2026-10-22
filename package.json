@@ -8,10 +8,14 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --port 8765 --strictPort",
-    "test:qa": "node tests/qa.mjs",
-    "test:interior": "node tests/interior.mjs",
-    "test:audit": "node tests/audit.mjs",
-    "test:persistence": "node tests/persistence.mjs"
+    "test:qa": "node tests/gameplay/qa.mjs",
+    "test:interior": "node tests/ui/interior.mjs",
+    "test:audit": "node tests/world/audit.mjs",
+    "test:persistence": "node tests/ui/persistence.mjs",
+    "test": "node tests/run-all.mjs",
+    "test:gameplay": "node tests/run-all.mjs gameplay",
+    "test:world": "node tests/run-all.mjs world",
+    "test:ui": "node tests/run-all.mjs ui"
   },
   "repository": {
     "type": "git",

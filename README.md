@@ -4,13 +4,45 @@ Fan-made, browser-based demake of the *Dude Theft Wars* formula: open-world city
 ragdoll pedestrians, shooting, wanted level and police chase. Everything 3D is **generated in code**
 (no model files: buildings, cars, characters and textures are built procedurally at runtime).
 
-Repo: https://github.com/himanusia/dude-theft-three (private)
+Repo: https://github.com/himanusia/dude-theft-three (public)
 
 ![street](screenshots/hero-street.png)
 
+## Repository layout
+
+Source is grouped by domain, not by file type. One folder = one job.
+
+```
+src/
+  main.ts          entry: loop, input, camera, combat, driving, economy
+  core/            utils, save/settings, audio, touch input, pathfinding
+  world/           city generator, Jakarta map data + districts, interiors
+  actors/          character rig, pedestrians, ragdoll
+  vehicles/        car, GLB car models, traffic AI
+  systems/         police (wanted, chase, officers), weapons
+  ui/              HUD, minimap, prompts, pause
+tests/
+  run-all.mjs      one entry point: npm test / npm run test:world ...
+  gameplay/        qa, playtest, weapons, frame rate
+  world/           geometry audit, floats, drivers, drift, police routing, NPCs
+  ui/              interiors, touch, responsive layout, saved settings
+  visual/          screenshot proofs and audio checks (opt-in)
+tools/             asset viewers, GLB exporter, map renderer
+docs/              design notes, sourcing, comparison sheets
+public/audio/      SFX and music served as-is
+```
+
+Run one suite, one group, or everything:
+
+```bash
+npm test               # gameplay + world + ui
+npm run test:world     # the city: geometry, traffic, pedestrians, police
+node tests/world/audit.mjs
+```
+
 ## Stack
 
-**TypeScript (strict) + Vite.** No JS source left: `src/*.ts`, `tsc --noEmit` clean under
+**TypeScript (strict) + Vite.** No JS source left: `src/**/*.ts`, `tsc --noEmit` clean under
 `"strict": true`. Three.js comes from npm (no vendored copy).
 
 ```bash
@@ -124,7 +156,7 @@ Automated harness (`puppeteer-core`) drives the real page and asserts **state**,
 npm run test:qa        # 19/19 gameplay assertions
 npm run test:interior  # 11/11 interior assertions
 npm run test:audit     # floating-geometry audit
-node tests/npc-behavior.mjs  # 13/13 pedestrian AI assertions (starts its own server on :8795)
+node tests/world/npc-behavior.mjs  # 13/13 pedestrian AI assertions (starts its own server on :8795)
 ```
 
 ```
@@ -144,8 +176,8 @@ required jobs:
 - **typecheck + build** on `ubuntu-latest` — Node 20, cached npm, `npm ci`, `npm run typecheck`,
   `npm run build`.
 - **headless qa + interior + audit** on `macos-latest` — the Chrome build `puppeteer-core` pins
-  (`CHROME_PATH`), `dist/` served on `:8765`, then `tests/qa.mjs`, `tests/interior.mjs` and
-  `tests/audit.mjs`.
+  (`CHROME_PATH`), `dist/` served on `:8765`, then `tests/gameplay/qa.mjs`, `tests/ui/interior.mjs` and
+  `tests/world/audit.mjs`.
 
 The browser suites need a GPU. A CPU-only Linux runner falls back to software WebGL: measured on
 `ubuntu-latest` the same build runs at **4 fps** (SwiftShader) and **14 fps** (Mesa llvmpipe at

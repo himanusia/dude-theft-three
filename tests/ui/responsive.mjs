@@ -21,7 +21,7 @@ import fs from 'node:fs';
 
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const BASE = process.env.DTA_URL || 'http://localhost:8765';
-const OUT = new URL('../screenshots', import.meta.url).pathname;
+const OUT = new URL('../../screenshots', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const VIEWPORTS = [

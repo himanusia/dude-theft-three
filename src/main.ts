@@ -1,20 +1,20 @@
 import * as THREE from 'three';
-import { City, PITCH, WORLD_HALF } from './city';
-import { Character } from './character';
-import { Car, driverLook } from './car';
-import { loadCarModels } from './carmodels';
-import { districtAt } from './jakarta';
-import * as JakartaMap from './jakartamap';
-import { Ragdoll } from './ragdoll';
-import { PedManager } from './npc';
-import { Police } from './police';
-import { Traffic } from './traffic';
-import { PlacedInterior, InteriorKind } from './interior';
-import { HUD } from './hud';
-import { AudioSys } from './audio';
-import { loadSave, writeSave, clearSave, loadSettings, writeSettings, SaveData, Settings } from './save';
-import { TouchControls } from './touch';
-import { WEAPONS, WEAPON_ORDER, weaponBySlot, buildWeaponModel, STARTING_WEAPONS, WeaponId } from './weapons';
+import { City, PITCH, WORLD_HALF } from './world/city';
+import { Character } from './actors/character';
+import { Car, driverLook } from './vehicles/car';
+import { loadCarModels } from './vehicles/carmodels';
+import { districtAt } from './world/jakarta';
+import * as JakartaMap from './world/jakartamap';
+import { Ragdoll } from './actors/ragdoll';
+import { PedManager } from './actors/npc';
+import { Police } from './systems/police';
+import { Traffic } from './vehicles/traffic';
+import { PlacedInterior, InteriorKind } from './world/interior';
+import { HUD } from './ui/hud';
+import { AudioSys } from './core/audio';
+import { loadSave, writeSave, clearSave, loadSettings, writeSettings, SaveData, Settings } from './core/save';
+import { TouchControls } from './core/touch';
+import { WEAPONS, WEAPON_ORDER, weaponBySlot, buildWeaponModel, STARTING_WEAPONS, WeaponId } from './systems/weapons';
 import {
   clamp,
   lerp,
@@ -25,7 +25,7 @@ import {
   resolveCircleBox,
   formatMoney,
   canvasTexture,
-} from './utils';
+} from './core/utils';
 
 // ---------------------------------------------------------------- renderer
 const canvas = document.getElementById('game') as HTMLCanvasElement;

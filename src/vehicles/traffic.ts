@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Car, driverLook } from './car';
-import { PITCH, GRID } from './city';
-import { clamp, angleDelta, pick, rand } from './utils';
+import { PITCH, GRID } from '../world/city';
+import { clamp, angleDelta, pick, rand } from '../core/utils';
 
 // Ambient traffic: each car follows intersection-to-intersection waypoints on the lane grid.
 const LANE = 2.6;

@@ -1,4 +1,4 @@
-import { clamp, formatMoney } from './utils';
+import { clamp, formatMoney } from '../core/utils';
 
 export const WORLD_HALF_MAP = 3 * 52 + 19;
 const MAP_BLOCK = 38; // city block plate size in metres (matches BLOCK in city.ts)

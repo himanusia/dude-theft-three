@@ -1,4 +1,4 @@
-import { BLOCK, GRID, PITCH } from './city';
+import { BLOCK, GRID, PITCH } from '../world/city';
 
 // ---------------------------------------------------------------- road waypoint graph
 //

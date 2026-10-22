@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from './city';
-import { canvasTexture, rand, pick } from './utils';
+import { canvasTexture, rand, pick } from '../core/utils';
 
 /** shrink a label until it fits the drawn width */
 function fitFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, startSize: number) {

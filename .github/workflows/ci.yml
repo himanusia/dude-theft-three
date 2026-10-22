@@ -97,14 +97,14 @@ jobs:
         run: |
           set -euo pipefail
           # each harness must exit non-zero on a failed check; that is what makes this gate real
-          node tests/qa.mjs 2>&1 | tee qa.log
-          node tests/interior.mjs 2>&1 | tee interior.log
-          node tests/audit.mjs 2>&1 | tee audit.log
-          node tests/playtest.mjs 2>&1 | tee playtest.log
-          node tests/touch.mjs 2>&1 | tee touch.log
-          node tests/police-path.mjs 2>&1 | tee police.log
+          node tests/gameplay/qa.mjs 2>&1 | tee qa.log
+          node tests/ui/interior.mjs 2>&1 | tee interior.log
+          node tests/world/audit.mjs 2>&1 | tee audit.log
+          node tests/gameplay/playtest.mjs 2>&1 | tee playtest.log
+          node tests/ui/touch.mjs 2>&1 | tee touch.log
+          node tests/world/police-path.mjs 2>&1 | tee police.log
           # persistence runs against the same built dist: DTA_URL is set by the job
-          node tests/persistence.mjs 2>&1 | tee persistence.log
+          node tests/ui/persistence.mjs 2>&1 | tee persistence.log
 
       - name: Upload failure evidence
         if: failure()
