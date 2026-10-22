@@ -1617,9 +1617,12 @@ export class City {
     const frontWheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 12);
     frontWheelGeo.rotateZ(Math.PI / 2);
     const becakSpots = [
-      { x: anchors[0].x - 3.4, z: anchors[0].z + BLOCK / 2 - 3.2, yaw: Math.PI / 2 },
-      { x: anchors[1].x + 5.2, z: anchors[1].z + BLOCK / 2 - 3.2, yaw: Math.PI / 2 },
-    ];
+      { x: anchors[0].x - 3.4, z: anchors[0].z + ((anchors[0].size ?? BLOCK) / 2) - 3.2, yaw: Math.PI / 2 },
+      { x: anchors[1].x + 5.2, z: anchors[1].z + ((anchors[1].size ?? BLOCK) / 2) - 3.2, yaw: Math.PI / 2 },
+    ].map((sp) => {
+      const n = this.nudgeOntoKerb(sp.x, sp.z);
+      return { x: n.x, z: n.z, yaw: sp.yaw };
+    });
     const bFrame: THREE.Matrix4[] = [], bSeat: THREE.Matrix4[] = [], bBack: THREE.Matrix4[] = [];
     const bHood: THREE.Matrix4[] = [], bPost: THREE.Matrix4[] = [], bBoard: THREE.Matrix4[] = [];
     const bRear: THREE.Matrix4[] = [], bFront: THREE.Matrix4[] = [];
