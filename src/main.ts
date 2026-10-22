@@ -154,6 +154,9 @@ for (let i = 0; i < 12; i++) {
   const spot = city.randomParkingSpot();
   const type = pick(['sedan', 'sedan', 'muscle', 'van', 'taxi', 'angkot']);
   const c = new Car(scene, { type, position: spot.pos, yaw: spot.yaw, simple: true });
+  // the spot may sit on a kerb plate, so take the height from the city, not from zero
+  c.y = city.groundHeightAt(spot.pos.x, spot.pos.z);
+  c.pos.y = c.y;
   c.addDriver(...driverLook());
   cityCars.push(c);
 }
@@ -715,14 +718,20 @@ function nearestCar(maxDist = 4.6) {
 }
 
 function nearestShopDoor(maxDist = 3.6) {
+  // Standing outside matters, not just distance: two shopfronts can be close enough that
+  // "nearest door" would put you in the neighbour's shop. A door only counts when the player
+  // is on its outward side.
   let best: { x: number; z: number; kind: InteriorKind; name: string } | null = null;
   let bd = maxDist;
   for (const d of city.shopDoors) {
-    const dist = Math.hypot(d.x - player.pos.x, d.z - player.pos.z);
-    if (dist < bd) {
-      bd = dist;
-      best = d;
-    }
+    const dx = player.pos.x - d.x;
+    const dz = player.pos.z - d.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist >= bd || dist < 1e-4) continue;
+    const side = (dx / dist) * (d.nx ?? 0) + (dz / dist) * (d.nz ?? 1);
+    if (side < 0.2) continue;                 // player is behind the shopfront
+    bd = dist;
+    best = d;
   }
   return best;
 }

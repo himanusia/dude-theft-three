@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
+import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater } from './jakartamap';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 import { Car, driverLook } from '../vehicles/car';
 
@@ -424,65 +425,63 @@ export class City {
     this.washMats = [];
     this.lanternWireMats = [];
 
-    for (let i = -GRID; i <= GRID; i++) {
-      for (let j = -GRID; j <= GRID; j++) {
-        const cx = i * PITCH;
-        const cz = j * PITCH;
-        const landmark = landmarkAt(cx, cz);
-        const isPark = !landmark && Math.random() < 0.13;
-        const isLot = !landmark && !isPark && Math.random() < 0.16;
+    // Blocks follow the road network from the Jakarta map instead of a lattice: candidate
+    // sites are generated on a coarse scatter, then rejected if they land in the bay, on a
+    // river, in a road corridor or on top of a landmark.
+    const sites = this.planBlockSites();
+    for (const site of sites) {
+      const { x: cx, z: cz, size } = site;
+      const district = districtAtPoint(cx, cz);
+      const isPark = Math.random() < 0.13;
+      const isLot = !isPark && Math.random() < 0.18;
 
-        const plate = new THREE.Mesh(new THREE.BoxGeometry(BLOCK, 0.26, BLOCK), sidewalkMat);
-        plate.position.set(cx, 0.13, cz);
-        plate.receiveShadow = true;
-        plate.castShadow = false;
-        this.group.add(plate);
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(size, 0.26, size), sidewalkMat);
+      plate.position.set(cx, 0.13, cz);
+      plate.receiveShadow = true;
+      this.group.add(plate);
 
-        // curb ring
-        const curb = new THREE.Mesh(new THREE.BoxGeometry(BLOCK + 0.9, 0.16, BLOCK + 0.9), curbMat);
-        curb.position.set(cx, 0.08, cz);
-        curb.receiveShadow = true;
-        this.group.add(curb);
+      const curb = new THREE.Mesh(new THREE.BoxGeometry(size + 0.9, 0.16, size + 0.9), curbMat);
+      curb.position.set(cx, 0.08, cz);
+      curb.receiveShadow = true;
+      this.group.add(curb);
 
-        if (landmark) {
-          if (!this.propAudit) this.propAudit = [];
-          const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
-          if (landmark === 'monas') buildMonas(ctx, cx, cz);
-          else if (landmark === 'bundaran') buildBundaran(ctx, cx, cz);
-          else buildKotaTua(ctx, cx, cz);
-          this.blocks.push({ x: cx, z: cz, type: 'landmark', landmark });
-        } else if (isPark) {
-          const lawn = new THREE.Mesh(new THREE.BoxGeometry(BLOCK - 6, 0.12, BLOCK - 6), parkMat);
-          lawn.position.set(cx, 0.28, cz);
-          lawn.receiveShadow = true;
-          this.group.add(lawn);
-          this.decoratePark(cx, cz);
-          this.blocks.push({ x: cx, z: cz, type: 'park' });
-        } else if (isLot) {
-          const lot = new THREE.Mesh(new THREE.BoxGeometry(BLOCK - 6, 0.1, BLOCK - 6), lotMat);
-          lot.position.set(cx, 0.28, cz);
-          lot.receiveShadow = true;
-          this.group.add(lot);
-          this.decorateLot(cx, cz);
-          this.blocks.push({ x: cx, z: cz, type: 'lot' });
-        } else {
-          this.buildBuildings(cx, cz);
-          this.blocks.push({ x: cx, z: cz, type: 'city' });
-        }
-
-        this.decorateBlockEdge(cx, cz);
-        this.collectDistrictProps(districtAt(cx, cz), cx, cz);
-        // the Glodok gateway arches over the road at the entrance to the quarter
-        if (districtAt(cx, cz) === 'glodok' && cx === -52 && cz === -104) {
-          buildGlodokGate({ group: this.group, colliders: this.colliders, audit: this.propAudit }, cx, cz - BLOCK / 2 - 7);
-        }
-        // Ancol is the waterfront: sand, sea, pier and flags along the northern edge
-        if (districtAt(cx, cz) === 'ancol' && cz === -GRID * PITCH) {
-          buildAncolShore({ group: this.group, colliders: this.colliders, audit: this.propAudit }, cx, cz, BLOCK / 2 + 2);
-        }
+      if (isPark) {
+        const lawn = new THREE.Mesh(new THREE.BoxGeometry(size - 6, 0.12, size - 6), parkMat);
+        lawn.position.set(cx, 0.28, cz);
+        lawn.receiveShadow = true;
+        this.group.add(lawn);
+        this.decoratePark(cx, cz);
+        this.blocks.push({ x: cx, z: cz, type: 'park', size });
+      } else if (isLot) {
+        const lot = new THREE.Mesh(new THREE.BoxGeometry(size - 6, 0.1, size - 6), lotMat);
+        lot.position.set(cx, 0.28, cz);
+        lot.receiveShadow = true;
+        this.group.add(lot);
+        this.decorateLot(cx, cz);
+        this.blocks.push({ x: cx, z: cz, type: 'lot', size });
+      } else {
+        this.buildBuildings(cx, cz, size, district);
+        this.blocks.push({ x: cx, z: cz, type: 'city', size });
       }
+
+      this.decorateBlockEdge(cx, cz);
+      this.collectDistrictProps(district, cx, cz);
     }
 
+    // Landmarks sit exactly where the map puts them
+    for (const lm of LANDMARKS) {
+      if (!this.propAudit) this.propAudit = [];
+      const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+      if (lm.id === 'monas') buildMonas(ctx, lm.x, lm.z);
+      else if (lm.id === 'bundaran-hi') buildBundaran(ctx, lm.x, lm.z);
+      else if (lm.id === 'stadhuis') buildKotaTua(ctx, lm.x, lm.z);
+      else if (lm.id === 'glodok-gate') buildGlodokGate(ctx, lm.x, lm.z);
+      else if (lm.id === 'ancol-beach') buildAncolShore(ctx, lm.x, lm.z, 40);
+      this.blocks.push({ x: lm.x, z: lm.z, type: 'landmark', landmark: lm.id, size: 40 });
+    }
+
+    this.buildRoadRibbons();
+    this.buildWater();
     this.buildDistrictProps();
 
     // road markings (instanced)
@@ -741,12 +740,152 @@ export class City {
     this.group.add(headMesh);
   }
 
-  buildBuildings(cx: any, cz: any) {
+
+
+  /** Pull a point onto the nearest block plate, so street props always have a kerb. */
+  nudgeOntoKerb(x: number, z: number) {
+    let best = null as any;
+    let bd = Infinity;
+    for (const b of this.blocks) {
+      const d = Math.hypot(b.x - x, b.z - z);
+      if (d < bd) { bd = d; best = b; }
+    }
+    if (!best) return { x, z };
+    const half = ((best.size ?? BLOCK) / 2) - 2.4;
+    return {
+      x: clamp(x, best.x - half, best.x + half),
+      z: clamp(z, best.z - half, best.z + half),
+    };
+  }
+
+  /** Distance from a point to a polyline, in world metres. */
+  distToPath(x: number, z: number, pts: [number, number][]): number {
+    let best = Infinity;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x1, z1] = pts[i];
+      const [x2, z2] = pts[i + 1];
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const len2 = dx * dx + dz * dz || 1;
+      const t = clamp(((x - x1) * dx + (z - z1) * dz) / len2, 0, 1);
+      best = Math.min(best, Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)));
+    }
+    return best;
+  }
+
+  /**
+   * Candidate block sites. A jittered scatter, then a filter: no water, no river, no road
+   * corridor, no landmark footprint. The result is a city that follows the arterials and the
+   * ring instead of sitting on a lattice.
+   */
+  planBlockSites() {
+    const sites: { x: number; z: number; size: number }[] = [];
+    const step = 40;
+    for (let gx = -5; gx <= 5; gx++) {
+      for (let gz = -5; gz <= 5; gz++) {
+        // small jitter only: big jitter plus a spacing rule is what emptied the map
+        const x = gx * step + rand(-3.5, 3.5);
+        const z = gz * step + rand(-3.5, 3.5);
+        if (Math.abs(x) > 186 || Math.abs(z) > 186) continue;
+        if (isWater(x, z)) continue;
+        let blocked = false;
+        for (const a of ARTERIALS) {
+          if (this.distToPath(x, z, a.path) < a.width / 2 + 4) { blocked = true; break; }
+        }
+        if (blocked) continue;
+        if (this.distToPath(x, z, RING_ROAD) < 10) continue;
+        for (const r of RIVERS) {
+          if (this.distToPath(x, z, r.path) < r.width / 2 + 3) { blocked = true; break; }
+        }
+        if (blocked) continue;
+        for (const lm of LANDMARKS) {
+          if (Math.hypot(x - lm.x, z - lm.z) < 24) { blocked = true; break; }
+        }
+        if (blocked) continue;
+        // squarish lots that leave an 8-12 m street between neighbours; the variety comes from
+        // size and district, not from scattering them apart
+        const size = rand(26, 32);
+        sites.push({ x, z, size });
+      }
+    }
+    return sites;
+  }
+
+  /** One flat ribbon per road and river: quad strips merged into a single geometry each. */
+  ribbon(points: [number, number][], width: number, y: number): THREE.BufferGeometry {
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const [x1, z1] = points[i];
+      const [x2, z2] = points[i + 1];
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const len = Math.hypot(dx, dz) || 1;
+      const nx = (-dz / len) * (width / 2);
+      const nz = (dx / len) * (width / 2);
+      const base = pos.length / 3;
+      pos.push(x1 + nx, y, z1 + nz, x1 - nx, y, z1 - nz, x2 + nx, y, z2 + nz, x2 - nx, y, z2 - nz);
+      idx.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }
+
+  buildRoadRibbons() {
+    const asphalt = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.95 });
+    const ring = new THREE.MeshStandardMaterial({ color: 0x343a42, roughness: 0.95 });
+    const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });
+    for (const a of ARTERIALS) {
+      const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.035), asphalt);
+      m.receiveShadow = true;
+      this.group.add(m);
+    }
+    const r = new THREE.Mesh(this.ribbon(RING_ROAD, 20, 0.04), ring);
+    r.receiveShadow = true;
+    this.group.add(r);
+    for (const rv of RIVERS) {
+      const m = new THREE.Mesh(this.ribbon(rv.path, rv.width, 0.05), water);
+      m.receiveShadow = true;
+      this.group.add(m);
+    }
+  }
+
+  buildWater() {
+    const shape = new THREE.Shape();
+    shape.moveTo(-260, -260);
+    COASTLINE.forEach(([x, z], i) => (i ? shape.lineTo(x, -z) : shape.lineTo(x, -z)));
+    shape.lineTo(260, -260);
+    shape.closePath();
+    const geo = new THREE.ShapeGeometry(shape);
+    const sea = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x24505f, roughness: 0.15, metalness: 0.45 }));
+    sea.rotation.x = Math.PI / 2;
+    sea.position.y = 0.02;
+    sea.receiveShadow = true;
+    this.group.add(sea);
+    // reclaimed islands as low slabs
+    const islMat = new THREE.MeshStandardMaterial({ color: 0x4a5560, roughness: 0.9 });
+    for (const poly of ISLANDS) {
+      const sp = new THREE.Shape();
+      poly.forEach(([x, z], i) => (i ? sp.lineTo(x, -z) : sp.moveTo(x, -z)));
+      sp.closePath();
+      const slab = new THREE.Mesh(new THREE.ExtrudeGeometry(sp, { depth: 1.6, bevelEnabled: false }), islMat);
+      slab.rotation.x = Math.PI / 2;
+      slab.position.y = 1.6;
+      slab.receiveShadow = true;
+      this.group.add(slab);
+    }
+  }
+
+  buildBuildings(cx: any, cz: any, size = BLOCK, district = null as any) {
     // A block belongs to a Jakarta district, and the district decides how tall, how dense and
     // what colour it is: Thamrin towers, a kampung is single storey with tiled roofs, Kota Tua
     // is white plaster under red clay, Tanah Abang is a wall of awnings.
-    const id = districtAt(cx, cz);
-    const style = DISTRICTS[id];
+    const id = district || districtAtPoint(cx, cz);
+    const styleKey = (id === 'gambir' ? 'monas' : id) as keyof typeof DISTRICTS;
+    const style = DISTRICTS[styleKey] || DISTRICTS.kampung;
     // A kampung is not a lot with one big box on it: it is houses packed along a narrow gang,
     // which is the shape you actually walk through in Jakarta.
     if (id === 'kampung') {
@@ -754,7 +893,7 @@ export class City {
       return;
     }
     const count = Math.random() < 0.35 ? style.lots[0] : randInt(style.lots[0], style.lots[1]);
-    const area = BLOCK - 9;
+    const area = size - 9;
     const cells = count === 1 ? [[0, 0, area, area]] : this.splitLots(area, count, cx, cz);
     for (const [ox, oz, w, d] of cells) {
       const [lo, hi] = style.heights;
@@ -987,11 +1126,16 @@ export class City {
       new THREE.Matrix4().makeTranslation(doorX + tx * 0.45 + nx * 0.14, 1.35, doorZ + tz * 0.45 + nz * 0.14)
     );
     // remember this entrance as an enterable shop
-    if (w > 8 && d > 8) {
+    if (w > 6.5 && d > 6.5) {
       const kind = SHOP_KINDS[this.shopDoorKindCursor++ % SHOP_KINDS.length];
       const room = this.roomFor(kind);
       if (room) {
-        this.shopDoors.push({ x: doorX + nx * 1.1, z: doorZ + nz * 1.1, nx, nz, kind, name: room.name });
+        // two doors inside a few metres make "nearest shop" ambiguous, so only the first one
+        // becomes enterable; the shopfront sign still goes up either way
+        const ex = doorX + nx * 1.1;
+        const ez = doorZ + nz * 1.1;
+        const crowded = this.shopDoors.some((dd) => Math.hypot(dd.x - ex, dd.z - ez) < 8);
+        if (!crowded) this.shopDoors.push({ x: ex, z: ez, nx, nz, kind, name: room.name });
         // physical shop sign above the door so the street reads Indonesian
         const boardTex = canvasTexture(512, 96, (ctx, cw, ch) => {
           ctx.fillStyle = KIND_SIGN[kind];
@@ -1222,13 +1366,31 @@ export class City {
         const cx = i * PITCH + BLOCK / 2 - 1.2;
         const cz = j * PITCH + BLOCK / 2 - 1.2;
         lightBaseM.push(new THREE.Matrix4().makeTranslation(cx, 3.9, cz));
-        lightM.push(new THREE.Matrix4().makeTranslation(cx, 2.26, cz));    // 0.26 (kerb top) → 4.26
+        lightM.push(new THREE.Matrix4().makeTranslation(cx, 2.0, cz));     // road surface → 4.0
         lightArmM.push(new THREE.Matrix4().makeTranslation(cx, 4.24, cz)); // arm on top
         lightLampM.push(new THREE.Matrix4().makeTranslation(cx, 3.58, cz + 0.17));
       }
     }
     this.propAudit = [];
-    const addInstanced = (geo: any, material: any, matrices: THREE.Matrix4[], cast = true, name = 'prop', audit = true) => {
+    // Ground props used to assume a kerb wherever the old grid said there was one. With
+    // organic blocks a kerb exists only on real plates, so drop the instances that land on
+    // asphalt and lift the rest onto the plate they actually stand on.
+    const ON_KERB = new Set(['bin', 'hydrant', 'bench', 'bench-leg', 'traffic-mast', 'traffic-arm', 'traffic-lens', 'traffic-housing']);
+    const addInstanced = (geo: any, material: any, rawMatrices: THREE.Matrix4[], cast = true, name = 'prop', audit = true) => {
+      let matrices = rawMatrices;
+      if (ON_KERB.has(name)) {
+        const kept: THREE.Matrix4[] = [];
+        for (const m of rawMatrices) {
+          const pos = new THREE.Vector3().setFromMatrixPosition(m);
+          if (this.groundHeightAt(pos.x, pos.z) <= 0) continue;
+          // traffic lights were modelled from the road surface (0), everything else already
+          // assumed a 0.26 kerb: only the lights need the lift
+          const lifted = m.clone();
+          if (name.startsWith('traffic-')) lifted.elements[13] += 0.26;
+          kept.push(lifted);
+        }
+        matrices = kept;
+      }
       if (!matrices.length) return null;
       const mesh = new THREE.InstancedMesh(geo, material, matrices.length);
       matrices.forEach((m: THREE.Matrix4, i: number) => mesh.setMatrixAt(i, m));
@@ -1364,10 +1526,16 @@ export class City {
     const stallAlong = [-7, 2.5, 8];
     for (let i = 0; i < Math.min(3, anchors.length); i++) {
       const b = anchors[i];
-      const px = b.x + stallAlong[i % stallAlong.length];
-      const pz = b.z + BLOCK / 2 - 2.7;
+      let px = b.x + stallAlong[i % stallAlong.length];
+      let pz = b.z + ((b.size ?? BLOCK) / 2) - 2.7;
       const yaw = 0; // faces the street (+z)
-      const g = this.groundHeightAt(px, pz);
+      // a stall needs a kerb under it: if the spot landed on asphalt, pull it onto the nearest
+      // block instead of dropping it, so the street keeps its warungs
+      const nudged = this.nudgeOntoKerb(px, pz);
+      const g = this.groundHeightAt(nudged.x, nudged.z);
+      if (g <= 0) continue;
+      px = nudged.x;
+      pz = nudged.z;
       this.dressingSpots.push({ type: 'warung', x: px, z: pz, yaw });
       for (const [lx, lz] of [[-1.55, -1.15], [1.55, -1.15], [-1.55, 1.15], [1.55, 1.15]]) {
         stallLegs.push(place(px, pz, yaw, lx, g + 1.05, lz));
@@ -1449,9 +1617,12 @@ export class City {
     const frontWheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 12);
     frontWheelGeo.rotateZ(Math.PI / 2);
     const becakSpots = [
-      { x: anchors[0].x - 3.4, z: anchors[0].z + BLOCK / 2 - 3.2, yaw: Math.PI / 2 },
-      { x: anchors[1].x + 5.2, z: anchors[1].z + BLOCK / 2 - 3.2, yaw: Math.PI / 2 },
-    ];
+      { x: anchors[0].x - 3.4, z: anchors[0].z + ((anchors[0].size ?? BLOCK) / 2) - 3.2, yaw: Math.PI / 2 },
+      { x: anchors[1].x + 5.2, z: anchors[1].z + ((anchors[1].size ?? BLOCK) / 2) - 3.2, yaw: Math.PI / 2 },
+    ].map((sp) => {
+      const n = this.nudgeOntoKerb(sp.x, sp.z);
+      return { x: n.x, z: n.z, yaw: sp.yaw };
+    });
     const bFrame: THREE.Matrix4[] = [], bSeat: THREE.Matrix4[] = [], bBack: THREE.Matrix4[] = [];
     const bHood: THREE.Matrix4[] = [], bPost: THREE.Matrix4[] = [], bBoard: THREE.Matrix4[] = [];
     const bRear: THREE.Matrix4[] = [], bFront: THREE.Matrix4[] = [];
@@ -1617,8 +1788,10 @@ export class City {
 
   // sidewalk plate height (blocks sit ~26cm above the asphalt)
   groundHeightAt(x: number, z: number) {
-    const half = BLOCK / 2 - 0.6;
+    // measured against the plates that actually exist, not the old lattice: with organic
+    // blocks a point can be on a kerb that is nowhere near a grid cell centre
     for (const b of this.blocks) {
+      const half = (b.size ?? BLOCK) / 2 + 1.2; // props stand at the plate edge, not the centre
       if (Math.abs(x - b.x) < half && Math.abs(z - b.z) < half) return 0.26;
     }
     return 0;
@@ -1640,31 +1813,39 @@ export class City {
   }
 
   randomParkingSpot() {
-    // A spot has to be clear of kerbs, stalls and landmarks: a car spawned wedged against a
-    // collider cannot move, which showed up as "vehicle accelerates :: 0 km/h".
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const axis = Math.random() < 0.5 ? 'x' : 'z';
-      const line = pick(this.roadLines.filter((l) => l.axis === axis));
-      const along = rand(-GRID * PITCH + 12, GRID * PITCH - 12);
+    // Park along the roads that exist (the arterials and the ring), not the retired grid.
+    // A spot has to sit on asphalt and stay clear of kerbs, stalls and landmarks: a car
+    // spawned wedged against a collider cannot move, which showed up as
+    // "vehicle accelerates :: 0 km/h" and as cars hanging 26 cm over a kerb plate.
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const road = pick([...ARTERIALS, { path: RING_ROAD, width: 20 } as any]);
+      const pts: [number, number][] = road.path;
+      const seg = randInt(0, pts.length - 2);
+      const [x1, z1] = pts[seg];
+      const [x2, z2] = pts[seg + 1];
+      const t = rand(0.12, 0.88);
+      const bx = x1 + (x2 - x1) * t;
+      const bz = z1 + (z2 - z1) * t;
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const len = Math.hypot(dx, dz) || 1;
+      const nx = -dz / len;
+      const nz = dx / len;
       const side = Math.random() < 0.5 ? -1 : 1;
-      const off = 4.2;
-      const pos =
-        axis === 'x'
-          ? new THREE.Vector3(line.coord + side * off, 0, along)
-          : new THREE.Vector3(along, 0, line.coord + side * off);
-      const yaw = axis === 'x' ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : side > 0 ? Math.PI : 0;
+      const off = road.width / 2 - 2.6;
+      const pos = new THREE.Vector3(bx + nx * off * side, 0, bz + nz * off * side);
+      if (this.distToPath(pos.x, pos.z, pts) > road.width / 2 - 1.6) continue;
+      if (this.groundHeightAt(pos.x, pos.z) > 0) continue;      // must be on the road
+      const yaw = Math.atan2(dx, dz) + (side > 0 ? 0 : Math.PI);
       const clear = this.colliders.every((b) => {
         const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
         const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
-        return Math.hypot(pos.x - cx, pos.z - cz) > 3.2;
+        return Math.hypot(pos.x - cx, pos.z - cz) > 3.0;
       });
       if (clear) return { pos, yaw };
     }
-    // no clear spot found: fall back to the middle of a lane, which is always drivable
-    const line = pick(this.roadLines);
-    const along = rand(-GRID * PITCH + 12, GRID * PITCH - 12);
-    const pos = line.axis === 'x' ? new THREE.Vector3(line.coord, 0, along) : new THREE.Vector3(along, 0, line.coord);
-    return { pos, yaw: line.axis === 'x' ? -Math.PI / 2 : 0 };
+    // last resort: middle of the spine, which is always drivable
+    return { pos: new THREE.Vector3(0, 0, rand(-70, 90)), yaw: Math.PI };
   }
 
   randomSidewalkPointAround(centre: any, minR = 14, maxR = 48) {
@@ -1675,7 +1856,9 @@ export class City {
     });
     if (!candidates.length) return this.randomSidewalkPointNear(maxR + 20);
     const b = pick(candidates);
-    const half = BLOCK / 2 - 2.2;
+    // every block has its own footprint now, so the sidewalk ring has to follow it instead of
+    // assuming the old 38 m cell
+    const half = ((b.size ?? BLOCK) / 2) - 2.2;
     const t = rand(-half, half);
     const side = randInt(0, 3);
     if (side === 0) return new THREE.Vector3(b.x + t, 0, b.z - half);
@@ -1695,8 +1878,9 @@ export class City {
   randomSidewalkPoint() {
     const b = pick(this.blocks);
     const edge = Math.floor(rand(0, 4));
-    const off = BLOCK / 2 - 2.2;
-    const t = rand(-BLOCK / 2 + 2, BLOCK / 2 - 2);
+    const size = b.size ?? BLOCK;
+    const off = size / 2 - 2.2;
+    const t = rand(-size / 2 + 2, size / 2 - 2);
     if (edge === 0) return new THREE.Vector3(b.x + t, 0, b.z - off);
     if (edge === 1) return new THREE.Vector3(b.x + t, 0, b.z + off);
     if (edge === 2) return new THREE.Vector3(b.x - off, 0, b.z + t);

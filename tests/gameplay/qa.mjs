@@ -33,21 +33,31 @@ function check(name, ok, detail) {
   let st = await page.evaluate(() => window.__game.state);
   check('start unpauses', st.paused === false && st.started === true, { paused: st.paused });
 
-  const hold = async (key, ms) => { await page.keyboard.down(key); await sleep(ms); await page.keyboard.up(key); await sleep(150); };
+  // Hold a key for a span of *game* seconds. A busy machine stretches wall time without
+  // advancing the simulation any further, which is what made this suite flaky under load.
+  // Hold a key for a span of *game* seconds. A busy machine stretches wall time without
+  // advancing the simulation any further, which is what made this suite flaky under load.
+  const hold = async (key, simSeconds) => {
+    const t0 = await page.evaluate(() => window.__game.state.simTime);
+    await page.keyboard.down(key);
+    await page.waitForFunction((t) => window.__game.state.simTime >= t, { polling: 'raf' }, t0 + simSeconds, { timeout: 20000 });
+    await page.keyboard.up(key);
+    await sleep(150);
+  };
 
   // walking
   await page.evaluate(() => { const g = window.__game; g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.1); });
   await sleep(400);
   const p0 = await page.evaluate(() => window.__game.player.pos.toArray());
-  await hold('w', 1400);
+  await hold('w', 1.4);
   const p1 = await page.evaluate(() => window.__game.player.pos.toArray());
   const walked = Math.hypot(p1[0]-p0[0], p1[2]-p0[2]);
   check('walk moves player', walked > 2.5, { walked: +walked.toFixed(2) });
 
   // sprint faster than walk (retry once: headless frame rate dips under load)
-  const measureRun = async (ms) => {
+  const measureRun = async (simSeconds) => {
     const a = await page.evaluate(() => window.__game.player.pos.toArray());
-    await hold('w', ms);
+    await hold('w', simSeconds);
     const b = await page.evaluate(() => window.__game.player.pos.toArray());
     return Math.hypot(b[0]-a[0], b[2]-a[2]);
   };
@@ -56,7 +66,7 @@ function check(name, ok, detail) {
     await page.evaluate(() => { const g = window.__game; g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.1); });
     await sleep(400);
     await page.keyboard.down('Shift');
-    sprinted = Math.max(sprinted, await measureRun(1600));
+    sprinted = Math.max(sprinted, await measureRun(1.6));
     await page.keyboard.up('Shift');
     if (sprinted > walked * 1.15) break;
   }

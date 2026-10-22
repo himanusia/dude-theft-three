@@ -211,12 +211,18 @@ const layout = (page) => page.evaluate(() => {
   const shop = await page.evaluate(() => {
     const g = window.__game;
     const d = g.city.shopDoors.reduce((a, b) => (Math.hypot(b.x, b.z) < Math.hypot(a.x, a.z) ? b : a));
-    g._test.teleport(d.x + 2.4, d.z + 0.6);
+    // stand on the shopfront's own outward side: a door only counts when the player is in
+    // front of it, so a fixed offset lands behind half the doors
+    const nx = d.nx ?? 0;
+    const nz = d.nz ?? 1;
+    g._test.teleport(d.x + nx * 2.2, d.z + nz * 2.2);
     g._test.face(d.x, d.z);
     g._test.setTime(0.36);
     return { name: d.name, x: +d.x.toFixed(1), z: +d.z.toFixed(1) };
   });
-  await sleep(900);
+  await page
+    .waitForFunction(() => document.getElementById('prompt').classList.contains('show'), { timeout: 4000 })
+    .catch(() => {});
   const promptNow = await page.evaluate(() => ({
     text: document.getElementById('prompt').textContent,
     shown: document.getElementById('prompt').classList.contains('show'),

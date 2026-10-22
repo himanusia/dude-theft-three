@@ -37,22 +37,38 @@ const t1 = await p.evaluate(() => window.__game.player.pos.toArray());
 note('walk distance 1.6s', +Math.hypot(t1[0]-t0[0], t1[2]-t0[2]).toFixed(2));
 await sleep(300);
 
-// 2. sedan throttle sweep on a cleared straight (x = 26 is the centre of the
-// north-south road, the corridor is emptied so the run is never interrupted)
+// 2. sedan throttle sweep on a cleared straight: the Thamrin-Sudirman spine from
+// src/world/jakartamap.ts, which is a real 22 m arterial in the city and runs south
+// for 200 m without a junction
 const car = await p.evaluate(() => {
   const g = window.__game;
   const park = (c) => { c.pos.set(130, 0, 130); c.speed = 0; c.y = 0; c.mesh.position.copy(c.pos); };
   for (const c of [...g.cityCars, ...g.traffic.cars.map(e => e.car)]) park(c);
   const c = g.cityCars.find(x => x.type === 'sedan' && !x.wrecked) ?? g.cityCars[0];
-  c.pos.set(26, 0, -170); c.yaw = 0; c.speed = 0; c.y = 0;
-  c.mesh.position.copy(c.pos); c.mesh.rotation.y = 0;
-  g._test.teleport(28.2, -169.6);
+  c.pos.set(0, 0, -88); c.yaw = Math.PI; c.speed = 0; c.y = 0;   // facing +z, down the spine
+  c.mesh.position.copy(c.pos); c.mesh.rotation.y = Math.PI;
   return { type: c.type, maxSpeed: c.maxSpeed, accel: c.accel };
 });
 await sleep(400);
-await p.keyboard.press('f');
-await sleep(600);
-const inCar = await p.evaluate(() => !!window.__game.player.inCar);
+// stand next to wherever the car actually settled: a parked car can be nudged off its
+// spot by the physics step, and the enter prompt is measured from the real position
+await p.evaluate(() => {
+  const g = window.__game;
+  const c = g.cityCars.find((x) => x.type === 'sedan' && !x.wrecked) ?? g.cityCars[0];
+  g._test.teleport(c.pos.x + 2.2, c.pos.z + 2.0);
+});
+await sleep(250);
+// give the enter prompt a few tries to catch up
+let inCar = false;
+for (let i = 0; i < 6 && !inCar; i++) {
+  await p.keyboard.press('f');
+  try {
+    await p.waitForFunction(() => !!window.__game.player.inCar, { timeout: 1200 });
+    inCar = true;
+  } catch {
+    inCar = false;
+  }
+}
 note('entered car', { inCar, type: car.type });
 
 const samples = [];
