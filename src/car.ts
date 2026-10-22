@@ -8,6 +8,8 @@ const SPECS = {
   sedan: { maxSpeed: 30, accel: 12, brake: 22, turn: 1.5, mass: 1, grip: 7 },
   muscle: { maxSpeed: 38, accel: 16, brake: 20, turn: 1.35, mass: 1.1, grip: 6 },
   van: { maxSpeed: 23, accel: 9, brake: 18, turn: 1.2, mass: 1.4, grip: 8 },
+  // angkot: a Colt L300 / Carry minibus — 4.2 m long, 1.7 m wide, 1.9 m tall, 2.6 m wheelbase
+  angkot: { maxSpeed: 21, accel: 8, brake: 17, turn: 1.15, mass: 1.5, grip: 8.5 },
   police: { maxSpeed: 34, accel: 15, brake: 24, turn: 1.6, mass: 1.05, grip: 8 },
   taxi: { maxSpeed: 31, accel: 13, brake: 22, turn: 1.55, mass: 1, grip: 7.5 },
 };
@@ -84,9 +86,9 @@ export class Car {
     this.health = 100;
     this.wrecked = false;
     this.honk = 0;
-    this.wheelRadius = this.type === 'van' ? 0.46 : 0.4;
-    this.length = this.type === 'van' ? 5.4 : this.type === 'muscle' ? 4.7 : 4.6;
-    this.width = this.type === 'van' ? 2.05 : 1.85;
+    this.wheelRadius = this.type === 'van' ? 0.46 : this.type === 'angkot' ? 0.35 : 0.4;
+    this.length = this.type === 'van' ? 5.4 : this.type === 'angkot' ? 4.2 : this.type === 'muscle' ? 4.7 : 4.6;
+    this.width = this.type === 'van' ? 2.05 : this.type === 'angkot' ? 1.74 : 1.85;
     this.radius = Math.max(this.width, this.length) * 0.42;
     this.aiPaused = false;
 
@@ -144,7 +146,7 @@ export class Car {
     const hubGeo = new THREE.CylinderGeometry(this.wheelRadius * 0.5, this.wheelRadius * 0.5, 0.36, 10);
     const hubMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.75 });
     this.wheels = [];
-    const wz = L * 0.33;
+    const wz = L * (this.type === 'angkot' ? 0.31 : 0.33);
     const wx = W * 0.5 + 0.05;
     const wheelOffsets: [number, number, boolean][] = [[-1, 1, true], [1, 1, true], [-1, -1, false], [1, -1, false]];
     for (const [sx, sz, front] of wheelOffsets) {
@@ -169,7 +171,127 @@ export class Car {
       g.add(flare);
     }
 
-    if (isVan) {
+    if (this.type === 'angkot') {
+      const angkotGlass = new THREE.MeshStandardMaterial({ color: 0x1b2430, roughness: 0.18, metalness: 0.35, transparent: true, opacity: 0.72 });
+      const routeTex = canvasTexture(512, 96, (c, cw, ch) => {
+        c.fillStyle = '#f7f4e8';
+        c.fillRect(0, 0, cw, ch);
+        c.fillStyle = '#1f3f7a';
+        c.fillRect(0, ch - 14, cw, 14);
+        c.fillStyle = '#1d2a3a';
+        c.font = '700 44px system-ui, sans-serif';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText('M26  KAMPUNG MELAYU', cw / 2, ch / 2 - 4);
+      });
+      const routeMat = new THREE.MeshStandardMaterial({ map: routeTex, roughness: 0.65 });
+      // Angkot, matched to the reference photos of a Colt L300 / Carry minibus conversion:
+      // a one-box body 4.2 m long, 1.74 m wide, 1.88 m tall on a 2.6 m wheelbase, short nose,
+      // steep windscreen, a tall dark glass band of three windows a side and a sliding door.
+      const bodyTop = 1.86;
+      const shell = new THREE.Mesh(rb(W * 0.96, bodyTop - 0.42, L * 0.94, 0.08, 2), paint);
+      shell.position.set(0, 0.42 + (bodyTop - 0.42) / 2, -L * 0.02);
+      shell.castShadow = true;
+      shell.receiveShadow = true;
+      g.add(shell);
+
+      // short bonnet and the steeply raked windscreen above it
+      const nose = new THREE.Mesh(rb(W * 0.9, 0.42, L * 0.16, 0.08, 1), paint);
+      nose.position.set(0, 0.78, L * 0.45);
+      nose.castShadow = true;
+      g.add(nose);
+      const windshield = new THREE.Mesh(rb(W * 0.86, 0.78, 0.06, 0.02, 1), angkotGlass);
+      windshield.position.set(0, 1.44, L * 0.41);
+      windshield.rotation.x = -0.28;
+      g.add(windshield);
+
+      // roof, slightly crowned, with the route sign over the cab
+      const roof = new THREE.Mesh(rb(W * 0.98, 0.09, L * 0.92, 0.04, 1), paint);
+      roof.position.set(0, bodyTop + 0.03, -L * 0.02);
+      roof.castShadow = true;
+      g.add(roof);
+      const signTex = canvasTexture(256, 96, (c, cw, ch) => {
+        c.fillStyle = '#f6f4ea';
+        c.fillRect(0, 0, cw, ch);
+        c.fillStyle = '#1d2a3a';
+        c.font = '700 42px system-ui, sans-serif';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText('ANGKOT', cw / 2, ch / 2);
+      });
+      const sign = new THREE.Mesh(
+        new THREE.BoxGeometry(0.72, 0.2, 0.26),
+        new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.6, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.1 })
+      );
+      sign.position.set(0, bodyTop + 0.18, L * 0.22);
+      g.add(sign);
+
+      // three windows a side: front door, sliding door, rear quarter
+      for (const sx of [-1, 1]) {
+        const win = (z: number, len: number, h = 0.6, y = 1.5) => {
+          const m = new THREE.Mesh(rb(0.06, h, len, 0.015, 1), angkotGlass);
+          m.position.set(sx * W * 0.49, y, z);
+          g.add(m);
+        };
+        win(L * 0.27, L * 0.17);
+        win(L * 0.02, L * 0.24);
+        // door shut lines and the sliding-door rail
+        const seam = (z: number) => {
+          const m = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.3, 0.03), trim);
+          m.position.set(sx * W * 0.495, 1.15, z);
+          g.add(m);
+        };
+        seam(L * 0.37);
+        seam(L * 0.14);
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, L * 0.4), trim);
+        rail.position.set(sx * W * 0.497, 1.18, L * 0.06);
+        g.add(rail);
+        // handle + running step under the sliding door
+        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.07, 0.18), trim);
+        handle.position.set(sx * W * 0.5, 1.16, L * 0.14);
+        g.add(handle);
+        const step = new THREE.Mesh(rb(0.16, 0.08, L * 0.3, 0.02, 1), trim);
+        step.position.set(sx * W * 0.52, 0.44, L * 0.04);
+        g.add(step);
+        // mirror on a short stalk
+        const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.12), trim);
+        mirror.position.set(sx * W * 0.58, 1.4, L * 0.4);
+        g.add(mirror);
+      }
+
+      // rear: vertical hatch with glass and two tall tail lights
+      const rearGlass = new THREE.Mesh(rb(W * 0.8, 0.5, 0.04, 0.02, 1), angkotGlass);
+      rearGlass.position.set(0, 1.48, -L * 0.47);
+      g.add(rearGlass);
+      for (const sx of [-1, 1]) {
+        const tail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.42, 0.05), new THREE.MeshStandardMaterial({ color: 0xd0342c, emissive: 0x5a0f0a, emissiveIntensity: 0.35, roughness: 0.5 }));
+        tail.position.set(sx * W * 0.38, 1.0, -L * 0.475);
+        g.add(tail);
+      }
+      // route board and the painted band with the trayek name along both flanks
+      for (const sx of [-1, 1]) {
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(L * 0.42, 0.24), routeMat);
+        board.position.set(sx * W * 0.495, 1.1, -L * 0.05);
+        board.rotation.y = (sx * Math.PI) / 2;
+        g.add(board);
+        const band = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, L * 0.9), new THREE.MeshStandardMaterial({ color: 0x1f3f7a, roughness: 0.7 }));
+        band.position.set(sx * W * 0.49, 1.0, 0);
+        g.add(band);
+      }
+
+      // front fascia: black grille, rectangular headlights, body-colour bumper
+      const grille = new THREE.Mesh(new THREE.BoxGeometry(W * 0.5, 0.16, 0.06), trim);
+      grille.position.set(0, 0.92, L * 0.475);
+      g.add(grille);
+      for (const sx of [-1, 1]) {
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.06), new THREE.MeshStandardMaterial({ color: 0xf7f2d8, roughness: 0.35 }));
+        lamp.position.set(sx * W * 0.31, 0.92, L * 0.472);
+        g.add(lamp);
+      }
+      const bumper = new THREE.Mesh(rb(W * 0.96, 0.2, 0.14, 0.05, 1), paint);
+      bumper.position.set(0, 0.62, L * 0.47);
+      g.add(bumper);
+    } else if (isVan) {
       const cabin = new THREE.Mesh(rb(W * 0.84, 0.78, L * 0.5, 0.1, 2), darkGlass);
       cabin.position.set(0, 1.55, L * 0.18);
       g.add(cabin);
@@ -408,16 +530,9 @@ export class Car {
       g.add(m);
       return m;
     };
-    bx(shirtMat, 0.38, 0.44, 0.26, 0, 0.2, 0);        // torso against the seat back
-    bx(skinMat, 0.3, 0.3, 0.3, 0, 0.56, 0.02);         // head
-    bx(hairMat, 0.32, 0.09, 0.31, 0, 0.72, 0.02);      // hair cap
-    // arms reaching for the wheel
-    const armL = bx(shirtMat, 0.11, 0.11, 0.4, -0.17, 0.32, 0.2);
-    armL.rotation.x = -0.35;
-    const armR = bx(shirtMat, 0.11, 0.11, 0.4, 0.17, 0.32, 0.2);
-    armR.rotation.x = -0.35;
-    bx(skinMat, 0.1, 0.1, 0.1, -0.17, 0.3, 0.4);
-    bx(skinMat, 0.1, 0.1, 0.1, 0.17, 0.3, 0.4);
+    bx(shirtMat, 0.42, 0.52, 0.28, 0, 0.26, 0);   // torso and arms as one block
+    bx(skinMat, 0.3, 0.3, 0.3, 0, 0.62, 0.02);     // head
+    bx(hairMat, 0.32, 0.09, 0.31, 0, 0.78, 0.02);  // hair cap
     // left-hand drive, sitting where the steering wheel is
     g.position.set(-0.4, 0.98, -0.22);
     this.mesh.add(g);

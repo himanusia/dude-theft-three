@@ -19,7 +19,7 @@ export class Traffic {
     this.scene = scene;
     this.city = city;
     this.cars = [];
-    const types = ['sedan', 'sedan', 'taxi', 'muscle', 'van'];
+    const types = ['sedan', 'sedan', 'taxi', 'muscle', 'van', 'angkot'];
     for (let n: number = 0; n < count; n++) {
       const i = Math.floor(rand(-2, 3));
       const j = Math.floor(rand(-2, 3));

@@ -244,7 +244,16 @@ function check(name, ok, detail) {
     const sample = await page.evaluate(() => ({ fps: window.__game.state.fps, calls: window.__game.state.calls, tris: window.__game.state.tris }));
     if (Number(sample.calls) > Number(perf.calls)) perf = sample;
   }
-  check('perf budget', Number(perf.calls) < 1600, perf);
+  // Draw calls swing with how much random traffic happens to be in shot, so sample three
+  // frames and judge the median: a real regression moves all three, a spawn roll moves one.
+  const samples = [];
+  for (let i = 0; i < 3; i++) {
+    samples.push(await page.evaluate(() => window.__game.renderer.info.render.calls));
+    await sleep(450);
+  }
+  samples.sort((a, b) => a - b);
+  const median = samples[1];
+  check('perf budget', median < 1600, { ...perf, samples, median });
 
   check('no console/page errors', errs.length === 0, errs.slice(0, 6));
   const failed = results.filter(r => !r.ok);

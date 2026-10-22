@@ -31,7 +31,8 @@ const census = await page.evaluate(() => {
   return { total: cars.length, withDriver, drivers: g.cityCars[0].driver?.children.length ?? 0 };
 });
 check('every parked and traffic car has a visible driver', census.withDriver === census.total && census.total > 10, census);
-check('the driver is built from head, hair, torso and arms', census.drivers >= 7, { parts: census.drivers });
+// three boxes: torso+arms, head, hair (kept lean because draw calls are the budget)
+check('the driver is built from head, hair and torso+arms', census.drivers >= 3, { parts: census.drivers });
 
 const seat = await page.evaluate(async () => {
   const g = window.__game;

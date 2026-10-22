@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from './utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls } from './jakarta';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
-import { Car } from './car';
+import { Car, driverLook } from './car';
 
 export const PITCH = 52;
 export const BLOCK = 38;
@@ -672,7 +672,7 @@ export class City {
     // market districts get tarpaulin stalls spilled onto the pavement
     if (id === 'tanahabang' || id === 'glodok') {
       if (!this.propAudit) this.propAudit = [];
-      buildMarketStalls({ group: this.group, colliders: this.colliders, audit: this.propAudit }, cx, cz, 5);
+      buildMarketStalls({ group: this.group, colliders: this.colliders, audit: this.propAudit }, cx, cz, 2);
     }
   }
 
@@ -1281,15 +1281,16 @@ export class City {
       const pz = b.z + BLOCK / 2 + 3.6; // first lane against the curb
       const yaw = Math.PI / 2;
       const g = this.groundHeightAt(px, pz);
-      const angkot = new Car(this.scene, { type: 'van', color: i === 0 ? 0x2f6fd0 : 0x2fa89a, position: new THREE.Vector3(px, g, pz), yaw });
+      const angkot = new Car(this.scene, { type: 'angkot', color: i === 0 ? 0x2f6fd0 : 0x2fa89a, position: new THREE.Vector3(px, g, pz), yaw });
+      angkot.addDriver(...driverLook());
       for (const sx of [-1, 1]) {
-        const decal = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.6), angkotMat);
-        decal.position.set(sx * 0.96, 1.02, 0.1);
+        const decal = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.44), angkotMat);
+        decal.position.set(sx * 0.87, 0.95, 0.05);
         decal.rotation.y = (sx * Math.PI) / 2;
         angkot.mesh.add(decal);
       }
       this.propAudit.push({ name: 'angkot', x: px, z: pz, bottom: g });
-      this.colliders.push({ minX: px - 2.9, maxX: px + 2.9, minZ: pz - 1.2, maxZ: pz + 1.2, h: 2.2 });
+      this.colliders.push({ minX: px - 2.3, maxX: px + 2.3, minZ: pz - 1.1, maxZ: pz + 1.1, h: 2.1 });
       this.dressingSpots.push({ type: 'angkot', x: px, z: pz, yaw });
     }
 

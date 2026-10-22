@@ -54,3 +54,13 @@ Police siren and tyre screech are generated with the WebAudio API at runtime (no
 ## Trademark note
 This is a non-commercial fan prototype inspired by *Dude Theft Wars* (Poxel Studios).
 It is not affiliated with, endorsed by, or distributed by Poxel Studios.
+
+## Reference photography (shape study, not shipped)
+
+- **Angkot body** — modelled after photos of a Suzuki Carry minibus conversion on Wikimedia
+  Commons, *New Suzuki Carry angkot karoseri Panca Tunggal* by Haysnawri10, CC BY-SA 4.0
+  (https://commons.wikimedia.org/wiki/File:New_Suzuki_Carry_angkot_karoseri_Panca_Tunggal.jpg)
+  and *Mikrotrans* by Baqotun0023, CC BY-SA 4.0
+  (https://commons.wikimedia.org/wiki/File:Mikrotrans.jpg). Used to match the one-box body,
+  short nose, raked windscreen, three-window glass band, sliding door and running board.
+  The 3D geometry is generated in code; no photograph is redistributed.

@@ -203,8 +203,8 @@ export function buildMonas(ctx: Ctx, cx: number, cz: number) {
   // flag poles and hedges so the square is not an empty plate
   const poleMat = new THREE.MeshStandardMaterial({ color: 0xd9d5cb, roughness: 0.6 });
   const hedge = new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 0.95 });
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
     const px = cx + Math.cos(a) * 13.5;
     const pz = cz + Math.sin(a) * 13.5;
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 7, 6), poleMat);
@@ -259,8 +259,8 @@ export function buildBundaran(ctx: Ctx, cx: number, cz: number) {
   solid(ctx, 9, 9, cx, cz, 20);
 
   // a low ring of jets around the pool
-  for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * Math.PI * 2;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
     const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.1, 5), water);
     jet.position.set(cx + Math.cos(a) * 10.5, 1.4, cz + Math.sin(a) * 10.5);
     ctx.group.add(jet);
@@ -337,7 +337,7 @@ export function buildKotaTua(ctx: Ctx, cx: number, cz: number) {
 }
 
 /** Market tarpaulins for Tanah Abang and Glodok: cheap awnings over a dense block. */
-export function buildMarketStalls(ctx: Ctx, cx: number, cz: number, count = 6) {
+export function buildMarketStalls(ctx: Ctx, cx: number, cz: number, count = 2) {
   const tarp = [0xd94f4f, 0x2f6fd0, 0xf2b134, 0x39b54a, 0xe07b2a];
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x8a8a86, roughness: 0.8 });
   for (let i = 0; i < count; i++) {
@@ -346,11 +346,8 @@ export function buildMarketStalls(ctx: Ctx, cx: number, cz: number, count = 6) {
     const m = new THREE.MeshStandardMaterial({ color: pick(tarp), roughness: 0.92 });
     const roof = block(ctx, m, rand(3, 5), 0.16, rand(2.6, 4), x, 2.4, z);
     roof.rotation.y = rand(-0.3, 0.3);
-    for (const [ox, oz] of [[-1.4, -1.2], [1.4, -1.2], [-1.4, 1.2], [1.4, 1.2]]) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.4, 4), poleMat);
-      pole.position.set(x + ox, 1.2, z + oz);
-      ctx.group.add(pole);
-    }
+    const table = block(ctx, poleMat, 2.4, 0.9, 1.8, x, 0.3, z);
+    table.castShadow = true;
     ctx.audit.push({ name: 'stall', x, z, bottom: 0.3 });
   }
 }
