@@ -2092,7 +2092,9 @@ export class City {
     const b = pick(candidates);
     // every block has its own footprint now, so the sidewalk ring has to follow it instead of
     // assuming the old 38 m cell
-    const half = ((b.size ?? BLOCK) / 2) - 2.2;
+    // the pavement ring runs *outside* the block: frontage buildings line the block edge,
+    // so a ring at size/2 - 2.2 walks pedestrians through the shop row
+    const half = ((b.size ?? BLOCK) / 2) + 3.4;
     const t = rand(-half, half);
     const side = randInt(0, 3);
     if (side === 0) return new THREE.Vector3(b.x + t, 0, b.z - half);
@@ -2113,7 +2115,7 @@ export class City {
     const b = pick(this.blocks);
     const edge = Math.floor(rand(0, 4));
     const size = b.size ?? BLOCK;
-    const off = size / 2 - 2.2;
+    const off = size / 2 + 3.4;
     const t = rand(-size / 2 + 2, size / 2 - 2);
     if (edge === 0) return new THREE.Vector3(b.x + t, 0, b.z - off);
     if (edge === 1) return new THREE.Vector3(b.x + t, 0, b.z + off);

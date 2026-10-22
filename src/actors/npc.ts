@@ -1,3 +1,4 @@
+import { ARTERIALS, RING_ROAD } from '../world/jakartamap';
 import * as THREE from 'three';
 import { Character } from './character';
 import { clamp, rand, angleDelta } from '../core/utils';
@@ -876,6 +877,20 @@ export class Ped {
 }
 
 // ---------------------------------------------------------------- manager
+export /** Where two road segments cross, or null. */
+function segmentCross(p1: number[], p2: number[], p3: number[], p4: number[]): [number, number] | null {
+  const d1x = p2[0] - p1[0];
+  const d1z = p2[1] - p1[1];
+  const d2x = p4[0] - p3[0];
+  const d2z = p4[1] - p3[1];
+  const den = d1x * d2z - d1z * d2x;
+  if (Math.abs(den) < 1e-6) return null;
+  const t = ((p3[0] - p1[0]) * d2z - (p3[1] - p1[1]) * d2x) / den;
+  const u = ((p3[0] - p1[0]) * d1z - (p3[1] - p1[1]) * d1x) / den;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return [p1[0] + d1x * t, p1[1] + d1z * t];
+}
+
 export class PedManager {
   declare scene: any;
   declare city: any;
@@ -922,19 +937,33 @@ export class PedManager {
     this.flowTimer = 0;
   }
 
-  /** Zebra bands just outside every junction box, on the carriageway. */
+  /**
+   * Zebra bands at the junctions the map actually has.
+   *
+   * They used to sit on every crossing of a lattice that no longer exists, so pedestrians
+   * aimed at crosswalks in empty fields. Now the junctions come from the arterial and ring
+   * polylines: wherever two roads cross, a crossing is placed just outside the junction box.
+   */
   buildCrosswalkStrips() {
     const strips: any[] = [];
-    for (let i = -GRID; i < GRID; i++) {
-      for (let j = -GRID; j < GRID; j++) {
-        const x0 = (i + 0.5) * PITCH;
-        const z0 = (j + 0.5) * PITCH;
-        // crossings of the north-south road (walk east-west) sit north and south of the box
-        strips.push({ minX: x0 - HALF_ROAD, maxX: x0 + HALF_ROAD, minZ: z0 + HALF_ROAD, maxZ: z0 + HALF_ROAD + STRIP_DEPTH });
-        strips.push({ minX: x0 - HALF_ROAD, maxX: x0 + HALF_ROAD, minZ: z0 - HALF_ROAD - STRIP_DEPTH, maxZ: z0 - HALF_ROAD });
-        // crossings of the east-west road (walk north-south) sit east and west of the box
-        strips.push({ minX: x0 + HALF_ROAD, maxX: x0 + HALF_ROAD + STRIP_DEPTH, minZ: z0 - HALF_ROAD, maxZ: z0 + HALF_ROAD });
-        strips.push({ minX: x0 - HALF_ROAD - STRIP_DEPTH, maxX: x0 - HALF_ROAD, minZ: z0 - HALF_ROAD, maxZ: z0 + HALF_ROAD });
+    const roads = [...ARTERIALS.map((a) => ({ path: a.path, width: a.width })), { path: RING_ROAD, width: 20 }];
+    for (let a = 0; a < roads.length; a++) {
+      for (let b = a + 1; b < roads.length; b++) {
+        const pa = roads[a].path;
+        const pb = roads[b].path;
+        for (let i = 0; i < pa.length - 1; i++) {
+          for (let j = 0; j < pb.length - 1; j++) {
+            const hit = segmentCross(pa[i], pa[i + 1], pb[j], pb[j + 1]);
+            if (!hit) continue;
+            const half = Math.max(roads[a].width, roads[b].width) / 2;
+            const boxX = hit[0];
+            const boxZ = hit[1];
+            strips.push({ minX: boxX - half, maxX: boxX + half, minZ: boxZ + half, maxZ: boxZ + half + STRIP_DEPTH });
+            strips.push({ minX: boxX - half, maxX: boxX + half, minZ: boxZ - half - STRIP_DEPTH, maxZ: boxZ - half });
+            strips.push({ minX: boxX + half, maxX: boxX + half + STRIP_DEPTH, minZ: boxZ - half, maxZ: boxZ + half });
+            strips.push({ minX: boxX - half - STRIP_DEPTH, maxX: boxX - half, minZ: boxZ - half, maxZ: boxZ + half });
+          }
+        }
       }
     }
     return strips;
