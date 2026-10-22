@@ -213,8 +213,17 @@ const SHOTS = [
     for (const shot of SHOTS) {
       await shot.setup(page);
       const file = path.join(SHOT_DIR, `palette-${shot.name}-r${round}.png`);
-      await page.screenshot({ path: file });
-      const s = stats(decodePNG(fs.readFileSync(file)));
+      // A frame can come back black when the headless tab was throttled while the scene
+      // compiled (first capture of a round). That is a capture failure, not a dark scene:
+      // retake until the canvas has actually painted instead of averaging 14 into the band.
+      let s = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await page.screenshot({ path: file });
+        s = stats(decodePNG(fs.readFileSync(file)));
+        if (s.brightness >= 60) break;
+        console.log(`  retake ${shot.name} r${round} (blank frame, brightness ${s.brightness})`);
+        await sleep(900);
+      }
       if (!all.has(shot.name)) all.set(shot.name, []);
       all.get(shot.name).push(s);
       console.log(`round ${round} ${shot.name.padEnd(8)} rgb=${JSON.stringify(s.rgb)} bright ${s.brightness} sat ${s.sat} spread ${s.spread}`);
