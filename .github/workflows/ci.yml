@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -40,7 +42,7 @@ jobs:
     # game clamps dt to 50 ms, so time-based assertions (walk, jump, accelerate)
     # cannot pass. The macOS runner exposes a paravirtual Metal GPU and holds 60 fps
     # at the harness viewport, so the browser suites run there.
-    name: headless qa + interior + audit
+    name: headless gameplay, interior, audit, playtest, touch, police
     needs: static
     runs-on: macos-latest
     timeout-minutes: 25
@@ -91,12 +93,16 @@ jobs:
           cat server.log
           exit 1
 
-      - name: Headless gameplay + interior + audit suites
+      - name: Headless suites (all six)
         run: |
           set -euo pipefail
-          npm run test:qa 2>&1 | tee qa.log
-          npm run test:interior 2>&1 | tee interior.log
-          npm run test:audit 2>&1 | tee audit.log
+          # each harness must exit non-zero on a failed check; that is what makes this gate real
+          node tests/qa.mjs 2>&1 | tee qa.log
+          node tests/interior.mjs 2>&1 | tee interior.log
+          node tests/audit.mjs 2>&1 | tee audit.log
+          node tests/playtest.mjs 2>&1 | tee playtest.log
+          node tests/touch.mjs 2>&1 | tee touch.log
+          node tests/police-path.mjs 2>&1 | tee police.log
 
       - name: Upload failure evidence
         if: failure()
@@ -107,6 +113,9 @@ jobs:
             qa.log
             interior.log
             audit.log
+            playtest.log
+            touch.log
+            police.log
             server.log
             screenshots/
           if-no-files-found: ignore
