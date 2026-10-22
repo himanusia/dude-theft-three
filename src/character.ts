@@ -24,8 +24,6 @@ const GEO = {
   collar: roundedBox(0.42, 0.08, 0.3, 0.02, 1),
   cuff: roundedBox(0.18, 0.12, 0.19, 0.02, 1),
   face: new THREE.PlaneGeometry(0.375, 0.35),
-  grip: new THREE.BoxGeometry(0.075, 0.19, 0.1),
-  slide: new THREE.BoxGeometry(0.08, 0.09, 0.33),
 };
 
 const MATS = new Map();
@@ -45,7 +43,6 @@ function mat(color: number, opts: any = {}) {
   return MATS.get(key);
 }
 const SHOE_MAT = mat(0x14141a, { roughness: 0.8 });
-const GUN_MAT = mat(0x2a2c31, { roughness: 0.4, metalness: 0.6, flat: false });
 
 // simple painted faces (eyes + brows + mouth), one crisp canvas per expression
 const FACE_TEX = new Map();
@@ -136,7 +133,6 @@ export class Character {
   declare scale: any;
   declare height: number;
   declare face: any;
-  declare gun: any;
   declare group: any;
   declare torso: any;
   declare head: any;
@@ -256,20 +252,6 @@ export class Character {
     make(GEO.leg, pantsMat, 0, -0.36, 0, legR);
     make(GEO.shoe, SHOE_MAT, 0, -0.725, 0.03, legR);
 
-    // pistol held in the right hand
-    const gun = new THREE.Group();
-    const grip = new THREE.Mesh(GEO.grip, GUN_MAT);
-    grip.position.set(0, -0.02, 0.02);
-    gun.add(grip);
-    const slide = new THREE.Mesh(GEO.slide, GUN_MAT);
-    slide.position.set(0, 0.08, 0.14);
-    gun.add(slide);
-    gun.position.set(0, -0.68, 0.08);
-    gun.rotation.x = -0.15;
-    armR.add(gun);
-    this.gun = gun;
-    gun.visible = false;
-
     const blob = shadowBlob(1.15, 1.15, 0.3);
     blob.position.y = 0.02;
     root.add(blob);
@@ -293,11 +275,6 @@ export class Character {
 
   setDetail(on: boolean) {
     for (const d of this.detail) d.visible = on;
-    if (on) this.gun.visible = this.gun.userData.armed === true;
-  }
-
-  setArmed(on: boolean) {
-    this.gun.visible = on;
   }
 
   setPos(x: number, y: number, z: number) {
