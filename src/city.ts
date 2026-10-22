@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from './utils';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
+import { Car } from './car';
 
 export const PITCH = 52;
 export const BLOCK = 38;
@@ -11,6 +12,39 @@ export const WORLD_HALF = GRID * PITCH + BLOCK * 0.5;
 // light panels + blue glass, like the reference city blocks
 const WALLS = ['#e9e7ef', '#dfe6ee', '#f2e7d8', '#d9e4e6', '#efe3ea', '#e6ecdf'];
 const NIGHT = 0x0a0d18;
+
+// Every interior kind is built once; shop doors cycle through this pool, so all
+// seven rooms are reachable no matter how the city is randomised.
+const SHOP_KINDS: InteriorKind[] = ['minimarket', 'warteg', 'kopi', 'bengkel', 'apotek', 'laundry', 'salon'];
+
+const KIND_SIGN: Record<InteriorKind, string> = {
+  minimarket: '#c0392b',
+  warteg: '#2f5d3a',
+  bengkel: '#2f5d3a',
+  kopi: '#3f2a1d',
+  apotek: '#1f7a55',
+  laundry: '#2f6f9f',
+  salon: '#8a4a5f',
+};
+
+const KIND_MAT: Record<InteriorKind, number> = {
+  minimarket: 0xc0392b,
+  warteg: 0x3f6b4a,
+  bengkel: 0x4a4f55,
+  kopi: 0x5d4037,
+  apotek: 0x2f8f6a,
+  laundry: 0x2f6f9f,
+  salon: 0x8a4a5f,
+};
+
+function fitFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, startSize: number) {
+  let size = startSize;
+  ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
+  while (size > 10 && ctx.measureText(text).width > maxWidth) {
+    size -= 2;
+    ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
+  }
+}
 
 function windowTexture(wall: any, style = 'grid') {
   const map = canvasTexture(128, 128, (ctx, w, h) => {
@@ -146,6 +180,15 @@ function emissiveTexture() {
   });
 }
 
+type InstancedAdder = (
+  geo: THREE.BufferGeometry,
+  material: THREE.Material,
+  matrices: THREE.Matrix4[],
+  cast?: boolean,
+  name?: string,
+  audit?: boolean
+) => THREE.InstancedMesh | null;
+
 export class City {
   declare scene: any;
   declare colliders: any[];
@@ -161,7 +204,7 @@ export class City {
   declare focusTarget: THREE.Vector3;
   declare daylight: number;
   declare propAudit: { name: string; x: number; z: number; bottom: number }[];
-  declare shopDoors: { x: number; z: number; kind: InteriorKind; name: string }[];
+  declare shopDoors: { x: number; z: number; nx: number; nz: number; kind: InteriorKind; name: string }[];
   declare interiors: PlacedInterior[];
   declare clouds: THREE.Group;
   declare starMat: THREE.PointsMaterial;
@@ -173,6 +216,12 @@ export class City {
   declare skyTop: THREE.Color;
   declare skyBottom: THREE.Color;
   declare dashMatrices: any[];
+  declare doorMatrices: THREE.Matrix4[];
+  declare handleMatrices: THREE.Matrix4[];
+  declare stepMatrices: { m: THREE.Matrix4; scale: number }[];
+  declare shopDoorKindCursor: number;
+  declare facades: { x: number; z: number; w: number; d: number; faceX: boolean; dir: number }[];
+  declare dressingSpots: { type: string; x: number; z: number; yaw: number }[];
   declare treeTrunks: any[];
   declare treeCrowns: any[];
   declare lampPoles: any[];
@@ -196,6 +245,9 @@ export class City {
 
     this.shopDoors = [];
     this.interiors = [];
+    this.facades = [];
+    this.dressingSpots = [];
+    this.shopDoorKindCursor = randInt(0, SHOP_KINDS.length - 1);
     this.buildInteriors();
     this.dayT = 0.32; // 0..1, 0.25 = sunrise, 0.5 = noon
     this.buildLights();
@@ -233,8 +285,7 @@ export class City {
   }
 
   buildInteriors() {
-    const kinds: InteriorKind[] = ['minimarket', 'warteg', 'bengkel', 'kopi'];
-    kinds.forEach((kind, i) => {
+    SHOP_KINDS.forEach((kind, i) => {
       const room = buildInterior(kind);
       const origin = new THREE.Vector3(600 + i * 60, 0, 0);
       room.group.position.copy(origin);
@@ -601,7 +652,7 @@ export class City {
     const cells = count === 1 ? [[0, 0, area, area]] : this.splitLots(area, count, cx, cz);
     for (const [ox, oz, w, d] of cells) {
       const h = count === 1 ? rand(14, 46) : rand(7, 24);
-      this.makeBuilding(cx + ox, cz + oz, w, d, h);
+      this.makeBuilding(cx + ox, cz + oz, w, d, h, cx, cz);
     }
   }
 
@@ -629,7 +680,7 @@ export class City {
     ].slice(0, count);
   }
 
-  makeBuilding(x: number, z: number, w: number, d: number, h: number) {
+  makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z) {
     const chromeLike = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
     const wall = pick(WALLS);
     const style = pick(['grid', 'bands', 'strips']);
@@ -680,7 +731,7 @@ export class City {
         ctx.fillStyle = 'rgba(0,0,0,0.18)';
         ctx.fillRect(0, ch - 12, cw, 12);
         ctx.fillStyle = '#fff8e7';
-        ctx.font = 'bold 52px ui-sans-serif, system-ui, sans-serif';
+        fitFont(ctx, word, cw - 24, 52);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(word, cw / 2, ch / 2);
@@ -747,28 +798,40 @@ export class City {
       ctx.fillStyle = 'rgba(0,0,0,0.12)';
       ctx.fillRect(0, ch - 7, cw, 7);
       ctx.fillStyle = '#241f1a';
-      ctx.font = 'bold 34px ui-sans-serif, system-ui, sans-serif';
+      fitFont(ctx, word, cw - 16, 34);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(word, cw / 2, ch / 2 - 1);
     });
-    // entrance: door + two steps at the pavement
-    const doorX = x + (w > d ? -w * 0.22 : 0);
-    const doorZ = z + d / 2 + 0.02;
-    this.doorMatrices.push(new THREE.Matrix4().makeTranslation(doorX, 1.42, doorZ + 0.06));
-    this.handleMatrices.push(new THREE.Matrix4().makeTranslation(doorX + 0.45, 1.35, doorZ + 0.14));
+    // entrance: the door sits on the facade that faces the street (away from the
+    // block centre), so no shop is left facing a neighbour's wall
+    const dx = x - blockX;
+    const dz = z - blockZ;
+    const faceX = Math.abs(dx) > Math.abs(dz);
+    const outward = (faceX ? dx : dz) >= 0 ? 1 : -1;
+    const nx = faceX ? outward : 0;
+    const nz = faceX ? 0 : outward;
+    const doorYaw = Math.atan2(nx, nz);
+    const tx = nz; // tangent along the facade
+    const tz = -nx;
+    const doorX = faceX ? x + nx * (w / 2 + 0.02) : x + (w > d ? -w * 0.22 : 0);
+    const doorZ = faceX ? z + (d > w ? -d * 0.22 : 0) : z + nz * (d / 2 + 0.02);
+    this.doorMatrices.push(new THREE.Matrix4().makeRotationY(doorYaw).setPosition(doorX + nx * 0.06, 1.42, doorZ + nz * 0.06));
+    this.handleMatrices.push(
+      new THREE.Matrix4().makeTranslation(doorX + tx * 0.45 + nx * 0.14, 1.35, doorZ + tz * 0.45 + nz * 0.14)
+    );
     // remember this entrance as an enterable shop
     if (w > 8 && d > 8) {
-      const kind = pick(['minimarket', 'minimarket', 'warteg', 'kopi', 'bengkel'] as InteriorKind[]);
+      const kind = SHOP_KINDS[this.shopDoorKindCursor++ % SHOP_KINDS.length];
       const room = this.roomFor(kind);
       if (room) {
-        this.shopDoors.push({ x: doorX, z: doorZ + 1.1, kind, name: room.name });
+        this.shopDoors.push({ x: doorX + nx * 1.1, z: doorZ + nz * 1.1, nx, nz, kind, name: room.name });
         // physical shop sign above the door so the street reads Indonesian
         const boardTex = canvasTexture(512, 96, (ctx, cw, ch) => {
-          ctx.fillStyle = kind === 'minimarket' ? '#c0392b' : kind === 'kopi' ? '#3f2a1d' : '#2f5d3a';
+          ctx.fillStyle = KIND_SIGN[kind];
           ctx.fillRect(0, 0, cw, ch);
           ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 46px ui-sans-serif, system-ui, sans-serif';
+          fitFont(ctx, room.name, cw - 40, 46);
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(room.name, cw / 2, ch / 2 + 1);
@@ -779,25 +842,27 @@ export class City {
           new THREE.MeshStandardMaterial({ map: boardTex, emissive: 0xffffff, emissiveMap: boardTex, emissiveIntensity: 0.25, roughness: 0.55 })
         );
         if (withBoard) {
-          board.position.set(doorX, 3.55, doorZ + 0.18);
+          board.position.set(doorX + nx * 0.18, 3.55, doorZ + nz * 0.18);
+          board.rotation.y = doorYaw;
           board.castShadow = true;
           this.group.add(board);
         }
         // welcome mat
         const mat2 = new THREE.Mesh(
           new THREE.BoxGeometry(2.0, 0.04, 0.8),
-          new THREE.MeshStandardMaterial({ color: kind === 'minimarket' ? 0xc0392b : 0x3f6b4a, roughness: 0.95 })
+          new THREE.MeshStandardMaterial({ color: KIND_MAT[kind], roughness: 0.95 })
         );
         if (withBoard) {
-          mat2.position.set(doorX, 0.29, doorZ + 0.55);
+          mat2.position.set(doorX + nx * 0.55, 0.29, doorZ + nz * 0.55);
+          mat2.rotation.y = doorYaw;
           this.group.add(mat2);
         }
       }
     }
 
     for (let s2 = 0; s2 < 2; s2++) {
-      const m = new THREE.Matrix4().makeScale(1, 1, 1);
-      m.setPosition(doorX, 0.2 + s2 * 0.13, doorZ + 0.28 + s2 * 0.28);
+      const m = new THREE.Matrix4().makeRotationY(doorYaw);
+      m.setPosition(doorX + nx * (0.28 + s2 * 0.28), 0.2 + s2 * 0.13, doorZ + nz * (0.28 + s2 * 0.28));
       this.stepMatrices.push({ m, scale: 1.9 - s2 * 0.25 });
     }
 
@@ -819,8 +884,10 @@ export class City {
 
     if (Math.random() < 0.5) {
       const awningMat = new THREE.MeshStandardMaterial({ color: pick([0xd94f4f, 0x3f8fbf, 0xe0a83f, 0x4fae6a]), roughness: 0.8 });
-      const aw = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, 0.18, 1.6), awningMat);
-      aw.position.set(x, 3.2, z + d / 2 + 0.8);
+      const along = faceX ? d : w;
+      const aw = new THREE.Mesh(new THREE.BoxGeometry(along * 0.7, 0.18, 1.6), awningMat);
+      aw.position.set(doorX + nx * 0.8, 3.2, doorZ + nz * 0.8);
+      aw.rotation.y = doorYaw;
       aw.castShadow = true;
       this.group.add(aw);
     }
@@ -832,6 +899,9 @@ export class City {
       maxZ: z + d / 2,
       h: h + 0.2,
     });
+
+    // remember which facade faces the street so spanduk banners can be strung there
+    this.facades.push({ x, z, w, d, faceX, dir: outward });
   }
 
   decorateBlockEdge(cx: any, cz: any) {
@@ -992,7 +1062,7 @@ export class City {
       }
     }
     this.propAudit = [];
-    const addInstanced = (geo: any, material: any, matrices: THREE.Matrix4[], cast = true, name = 'prop') => {
+    const addInstanced = (geo: any, material: any, matrices: THREE.Matrix4[], cast = true, name = 'prop', audit = true) => {
       if (!matrices.length) return null;
       const mesh = new THREE.InstancedMesh(geo, material, matrices.length);
       matrices.forEach((m: THREE.Matrix4, i: number) => mesh.setMatrixAt(i, m));
@@ -1001,6 +1071,7 @@ export class City {
       mesh.frustumCulled = false;
       mesh.name = name;
       this.group.add(mesh);
+      if (!audit) return mesh;
       geo.computeBoundingBox();
       const localBottom = geo.boundingBox.min.y;
       matrices.forEach((m: THREE.Matrix4) => {
@@ -1037,11 +1108,320 @@ export class City {
     }), true, 'traffic-housing');
     addInstanced(new THREE.BoxGeometry(0.3, 0.2, 0.3), new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0xffb020, emissiveIntensity: 0.6 }), lightLampM, false, 'traffic-lens');
 
+    // Indonesian street dressing sits on top of the generic props
+    this.addStreetDressing(addInstanced);
+
     // stunt ramps on straight road segments
     this.addRamp(-PITCH * 1.5, 6, 0);
     this.addRamp(PITCH * 1.5, -PITCH * 2, Math.PI);
     this.addRamp(-PITCH * 2, -PITCH * 1.5, Math.PI / 2);
     this.addRamp(PITCH * 2.5, PITCH * 2.5, -Math.PI / 2);
+  }
+
+  /**
+   * Indonesian street dressing, placed procedurally and sunk to `groundHeightAt`:
+   * warung tenda (tarp, table, benches, hanging banner), parked angkot, becak,
+   * spanduk strung on shop facades, a pos ronda and parkir boards.
+   *
+   * Repeated parts are batched into one InstancedMesh per part, so the whole layer
+   * costs a few dozen draw calls instead of hundreds of individual meshes.
+   */
+  addStreetDressing(add: InstancedAdder) {
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    // local -> world, rotated by yaw around the prop origin, y is absolute
+    const place = (px: number, pz: number, yaw: number, lx: number, ly: number, lz: number) => {
+      const off = new THREE.Vector3(lx, 0, lz).applyAxisAngle(yAxis, yaw);
+      return new THREE.Matrix4().compose(
+        new THREE.Vector3(px + off.x, ly, pz + off.z),
+        new THREE.Quaternion().setFromAxisAngle(yAxis, yaw),
+        new THREE.Vector3(1, 1, 1)
+      );
+    };
+    const facing = (px: number, pz: number, yaw: number, lx: number, ly: number, lz: number) =>
+      new THREE.Matrix4().compose(
+        new THREE.Vector3(px + lx, ly, pz + lz),
+        new THREE.Quaternion().setFromAxisAngle(yAxis, yaw),
+        new THREE.Vector3(1, 1, 1)
+      );
+
+    const cityBlocks = this.blocks.filter((b) => b.type === 'city');
+    const nearBlocks = cityBlocks
+      .filter((b) => Math.abs(b.x) <= PITCH && Math.abs(b.z) <= PITCH)
+      .sort((a, b) => Math.abs(a.x) + Math.abs(a.z) - (Math.abs(b.x) + Math.abs(b.z)));
+    const anchors = (nearBlocks.length >= 3 ? nearBlocks : cityBlocks).slice(0, 4);
+    if (!anchors.length) return;
+
+    // ------------------------------------------------------------ warung tenda
+    const stripes = canvasTexture(64, 64, (ctx, w, h) => {
+      ctx.fillStyle = '#f6f9fd';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#2f6fd0';
+      for (let x = 0; x < w; x += 16) ctx.fillRect(x, 0, 8, h);
+      ctx.fillStyle = 'rgba(0,0,0,0.09)';
+      for (let x = 0; x < w; x += 16) ctx.fillRect(x + 8, 0, 2, h);
+    });
+    stripes.wrapS = stripes.wrapT = THREE.RepeatWrapping;
+    stripes.repeat.set(4, 1);
+    const tarpMat = new THREE.MeshStandardMaterial({ map: stripes, roughness: 0.88, side: THREE.DoubleSide });
+    const tentWood = new THREE.MeshStandardMaterial({ color: 0x9a6b3a, roughness: 0.95 });
+    const tentBench = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.85 });
+    const tentSteel = new THREE.MeshStandardMaterial({ color: 0x8f959d, roughness: 0.45, metalness: 0.55 });
+    const bannerMat = (text: string, bg: string, fg = '#fffaf0') =>
+      new THREE.MeshStandardMaterial({
+        map: canvasTexture(512, 96, (ctx, w, h) => {
+          ctx.fillStyle = bg;
+          ctx.fillRect(0, 0, w, h);
+          ctx.fillStyle = 'rgba(0,0,0,0.15)';
+          ctx.fillRect(0, h - 9, w, 9);
+          ctx.fillStyle = fg;
+          ctx.font = 'bold 54px ui-sans-serif, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, w / 2, h / 2 + 2);
+        }),
+        roughness: 0.8,
+        side: THREE.DoubleSide,
+      });
+
+    const stallLegs: THREE.Matrix4[] = [];
+    const stallRoofs: THREE.Matrix4[] = [];
+    const stallValance: THREE.Matrix4[] = [];
+    const stallTable: THREE.Matrix4[] = [];
+    const stallTableLeg: THREE.Matrix4[] = [];
+    const stallBench: THREE.Matrix4[] = [];
+    const stallBenchLeg: THREE.Matrix4[] = [];
+    const stallPot: THREE.Matrix4[] = [];
+    const stallBanners: THREE.Matrix4[][] = [[], [], []];
+    const stallTexts: [string, string][] = [['WARUNG KOPI', '#c0392b'], ['MIE INSTAN', '#e0a83f'], ['PROMO', '#2f6f9f']];
+    const stallBannerMats = stallTexts.map(([text, bg]) => bannerMat(text, bg));
+
+    const stallAlong = [-7, 2.5, 8];
+    for (let i = 0; i < Math.min(3, anchors.length); i++) {
+      const b = anchors[i];
+      const px = b.x + stallAlong[i % stallAlong.length];
+      const pz = b.z + BLOCK / 2 - 2.7;
+      const yaw = 0; // faces the street (+z)
+      const g = this.groundHeightAt(px, pz);
+      this.dressingSpots.push({ type: 'warung', x: px, z: pz, yaw });
+      for (const [lx, lz] of [[-1.55, -1.15], [1.55, -1.15], [-1.55, 1.15], [1.55, 1.15]]) {
+        stallLegs.push(place(px, pz, yaw, lx, g + 1.05, lz));
+      }
+      stallRoofs.push(place(px, pz, yaw, 0, g + 2.16, 0));
+      stallValance.push(place(px, pz, yaw, 0, g + 1.99, 1.42));
+      stallTable.push(place(px, pz, yaw, 0, g + 0.79, 0.15));
+      for (const [lx, lz] of [[-0.62, -0.2], [0.62, -0.2], [-0.62, 0.5], [0.62, 0.5]]) {
+        stallTableLeg.push(place(px, pz, yaw, lx, g + 0.37, lz));
+      }
+      for (const bz of [-0.4, 0.7]) {
+        stallBench.push(place(px, pz, yaw, 0, g + 0.46, bz));
+        for (const lx of [-0.62, 0.62]) stallBenchLeg.push(place(px, pz, yaw, lx, g + 0.23, bz));
+      }
+      stallPot.push(place(px, pz, yaw, 0.45, g + 0.9, 0.15));
+      // one banner across the front valance, a second one hanging on the side
+      stallBanners[i % 3].push(facing(px, pz, yaw, 0, g + 1.62, 1.46));
+      stallBanners[(i + 1) % 3].push(
+        new THREE.Matrix4().compose(
+          new THREE.Vector3(px + 1.52, g + 1.62, pz + 0.1),
+          new THREE.Quaternion().setFromAxisAngle(yAxis, Math.PI / 2),
+          new THREE.Vector3(1, 1, 1)
+        )
+      );
+      // table + benches are solid, the space under the tarp stays walkable
+      this.colliders.push({ minX: px - 0.85, maxX: px + 0.85, minZ: pz - 0.25, maxZ: pz + 0.55, h: 0.9 });
+      for (const bz of [-0.4, 0.7]) {
+        this.colliders.push({ minX: px - 0.8, maxX: px + 0.8, minZ: pz + bz - 0.18, maxZ: pz + bz + 0.18, h: 0.6 });
+      }
+    }
+    add(new THREE.BoxGeometry(0.08, 2.1, 0.08), tentSteel, stallLegs, true, 'warung-leg');
+    add(new THREE.BoxGeometry(3.6, 0.1, 2.9), tarpMat, stallRoofs, true, 'warung-tarp', false);
+    add(new THREE.BoxGeometry(3.6, 0.34, 0.06), tarpMat, stallValance, true, 'warung-valance', false);
+    add(new THREE.BoxGeometry(1.5, 0.08, 0.75), tentWood, stallTable, true, 'warung-table', false);
+    add(new THREE.BoxGeometry(0.07, 0.74, 0.07), tentSteel, stallTableLeg, true, 'warung-table-leg');
+    add(new THREE.BoxGeometry(1.5, 0.08, 0.34), tentBench, stallBench, true, 'warung-bench', false);
+    add(new THREE.BoxGeometry(0.06, 0.46, 0.06), tentSteel, stallBenchLeg, true, 'warung-bench-leg');
+    add(new THREE.BoxGeometry(0.22, 0.2, 0.22), new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.6 }), stallPot, true, 'warung-kettle', false);
+    stallBannerMats.forEach((mat, i) => add(new THREE.PlaneGeometry(2.7, 0.5), mat, stallBanners[i], false, 'warung-banner', false));
+
+    // ------------------------------------------------------------ parked angkot
+    const angkotTex = canvasTexture(512, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#2f6fd0';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#f7fbff';
+      ctx.fillRect(0, 0, w, 14);
+      ctx.fillStyle = '#f7fbff';
+      ctx.font = 'bold 82px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('ANGKOT', w / 2, h / 2 + 4);
+    });
+    const angkotMat = new THREE.MeshStandardMaterial({ map: angkotTex, roughness: 0.55 });
+    for (let i = 0; i < 2; i++) {
+      const b = anchors[i];
+      const px = b.x + (i === 0 ? 1.5 : -8);
+      const pz = b.z + BLOCK / 2 + 3.6; // first lane against the curb
+      const yaw = Math.PI / 2;
+      const g = this.groundHeightAt(px, pz);
+      const angkot = new Car(this.scene, { type: 'van', color: i === 0 ? 0x2f6fd0 : 0x2fa89a, position: new THREE.Vector3(px, g, pz), yaw });
+      for (const sx of [-1, 1]) {
+        const decal = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.6), angkotMat);
+        decal.position.set(sx * 0.96, 1.02, 0.1);
+        decal.rotation.y = (sx * Math.PI) / 2;
+        angkot.mesh.add(decal);
+      }
+      this.propAudit.push({ name: 'angkot', x: px, z: pz, bottom: g });
+      this.colliders.push({ minX: px - 2.9, maxX: px + 2.9, minZ: pz - 1.2, maxZ: pz + 1.2, h: 2.2 });
+      this.dressingSpots.push({ type: 'angkot', x: px, z: pz, yaw });
+    }
+
+    // ------------------------------------------------------------ becak
+    const becakBody = new THREE.MeshStandardMaterial({ color: 0x2f6f9f, roughness: 0.6, metalness: 0.2 });
+    const becakSeat = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.9 });
+    const becakHood = new THREE.MeshStandardMaterial({ color: 0xf2b134, roughness: 0.85, side: THREE.DoubleSide });
+    const rearWheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.12, 12);
+    rearWheelGeo.rotateZ(Math.PI / 2);
+    const frontWheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 12);
+    frontWheelGeo.rotateZ(Math.PI / 2);
+    const becakSpots = [
+      { x: anchors[0].x - 3.4, z: anchors[0].z + BLOCK / 2 - 3.2, yaw: Math.PI / 2 },
+      { x: anchors[1].x + 5.2, z: anchors[1].z + BLOCK / 2 - 3.2, yaw: Math.PI / 2 },
+    ];
+    const bFrame: THREE.Matrix4[] = [], bSeat: THREE.Matrix4[] = [], bBack: THREE.Matrix4[] = [];
+    const bHood: THREE.Matrix4[] = [], bPost: THREE.Matrix4[] = [], bBoard: THREE.Matrix4[] = [];
+    const bRear: THREE.Matrix4[] = [], bFront: THREE.Matrix4[] = [];
+    const bDriver: THREE.Matrix4[] = [], bBar: THREE.Matrix4[] = [];
+    for (const s of becakSpots) {
+      const g = this.groundHeightAt(s.x, s.z);
+      this.dressingSpots.push({ type: 'becak', x: s.x, z: s.z, yaw: s.yaw });
+      for (const sx of [-1, 1]) bRear.push(place(s.x, s.z, s.yaw, sx * 0.62, g + 0.4, -0.25));
+      bFront.push(place(s.x, s.z, s.yaw, 0, g + 0.3, 0.95));
+      bFrame.push(place(s.x, s.z, s.yaw, 0, g + 0.52, -0.2));
+      bSeat.push(place(s.x, s.z, s.yaw, 0, g + 0.74, -0.05));
+      bBack.push(place(s.x, s.z, s.yaw, 0, g + 1.0, -0.34));
+      bHood.push(place(s.x, s.z, s.yaw, 0, g + 1.78, 0.05));
+      for (const [lx, lz] of [[-0.55, -0.42], [0.55, -0.42], [-0.55, 0.52], [0.55, 0.52]]) {
+        bPost.push(place(s.x, s.z, s.yaw, lx, g + 1.34, lz));
+      }
+      bBoard.push(place(s.x, s.z, s.yaw, 0, g + 0.44, 0.62));
+      bDriver.push(place(s.x, s.z, s.yaw, 0, g + 0.74, 0.42));
+      bBar.push(place(s.x, s.z, s.yaw, 0, g + 1.02, 0.86));
+      this.colliders.push({ minX: s.x - 1.15, maxX: s.x + 1.15, minZ: s.z - 0.75, maxZ: s.z + 0.75, h: 1.8 });
+    }
+    add(new THREE.BoxGeometry(1.15, 0.12, 0.6), becakBody, bFrame, true, 'becak-frame', false);
+    add(new THREE.BoxGeometry(0.98, 0.12, 0.52), becakSeat, bSeat, true, 'becak-seat', false);
+    add(new THREE.BoxGeometry(0.98, 0.46, 0.1), becakSeat, bBack, true, 'becak-back', false);
+    add(new THREE.BoxGeometry(1.16, 0.08, 1.2), becakHood, bHood, true, 'becak-canopy', false);
+    add(new THREE.BoxGeometry(0.05, 1.0, 0.05), tentSteel, bPost, true, 'becak-post', false);
+    add(new THREE.BoxGeometry(1.0, 0.08, 0.36), tentWood, bBoard, true, 'becak-footboard', false);
+    add(new THREE.BoxGeometry(0.42, 0.1, 0.4), becakSeat, bDriver, true, 'becak-driver-seat', false);
+    add(new THREE.BoxGeometry(0.52, 0.05, 0.05), tentSteel, bBar, true, 'becak-handlebar', false);
+    add(rearWheelGeo, new THREE.MeshStandardMaterial({ color: 0x1b1b1e, roughness: 0.9 }), bRear, true, 'becak-wheel', true);
+    add(frontWheelGeo, new THREE.MeshStandardMaterial({ color: 0x1b1b1e, roughness: 0.9 }), bFront, true, 'becak-wheel', true);
+
+    // ------------------------------------------------------------ spanduk on facades
+    const spandukTexts: [string, string][] = [['SEDANG PROMO', '#c0392b'], ['DISKON 20%', '#e0a83f'], ['BUKA 24 JAM', '#2f6f9f']];
+    const spandukMats = spandukTexts.map(([text, bg]) => bannerMat(text, bg));
+    const spanduk: THREE.Matrix4[][] = [[], [], []];
+    const spandukRope: THREE.Matrix4[] = [];
+    const spandukStrap: THREE.Matrix4[] = [];
+    const nearFacades = this.facades
+      .filter((f) => Math.abs(f.x) < PITCH * 1.8 && Math.abs(f.z) < PITCH * 1.8)
+      .sort((a, b) => Math.hypot(a.x - anchors[0].x, a.z - anchors[0].z) - Math.hypot(b.x - anchors[0].x, b.z - anchors[0].z));
+    nearFacades.forEach((f, i) => {
+      // the three facades closest to the first warung always get a banner, so the
+      // street around spawn reads Indonesian from any angle
+      if (i >= 3 && i % 2 === 1) return;
+      const along = f.faceX ? f.d : f.w;
+      const width = Math.min(5.6, Math.max(3.2, along * 0.8));
+      const px = f.faceX ? f.x + f.dir * (f.w / 2 + 0.32) : f.x;
+      const pz = f.faceX ? f.z : f.z + f.dir * (f.d / 2 + 0.32);
+      const yaw = f.faceX ? (f.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : f.dir > 0 ? 0 : Math.PI;
+      const g = this.groundHeightAt(px, pz);
+      const y = g + 4.7;
+      const m = new THREE.Matrix4().compose(
+        new THREE.Vector3(px, y, pz),
+        new THREE.Quaternion().setFromAxisAngle(yAxis, yaw),
+        new THREE.Vector3(width / 5.2, 1, 1)
+      );
+      spanduk[i % 3].push(m);
+      // rope above the cloth + two straps, so it reads as strung on the facade
+      spandukRope.push(place(px, pz, yaw, 0, y + 0.6, 0));
+      for (const sx of [-1, 1]) spandukStrap.push(place(px, pz, yaw, (sx * width) / 2.6, y + 0.3, 0));
+      this.dressingSpots.push({ type: 'spanduk', x: px, z: pz, yaw });
+    });
+    spandukMats.forEach((mat, i) => add(new THREE.PlaneGeometry(5.2, 0.86), mat, spanduk[i], false, 'spanduk', false));
+    add(new THREE.BoxGeometry(5.6, 0.05, 0.05), tentSteel, spandukRope, false, 'spanduk-rope', false);
+    add(new THREE.BoxGeometry(0.04, 0.62, 0.04), tentSteel, spandukStrap, false, 'spanduk-strap', false);
+
+    // ------------------------------------------------------------ pos ronda + parkir
+    const rondaBlock = anchors[0];
+    const rx = rondaBlock.x + BLOCK / 2 - 4.2;
+    const rz = rondaBlock.z - BLOCK / 2 + 4.2;
+    const rg = this.groundHeightAt(rx, rz);
+    const hutRoof = new THREE.MeshStandardMaterial({ color: 0x9a5a3a, roughness: 0.85 });
+    const hutBase = box(2.4, 0.16, 2.4, 0xb4aea0);
+    hutBase.position.set(rx, rg + 0.08, rz);
+    this.group.add(hutBase);
+    this.propAudit.push({ name: 'pos-ronda', x: rx, z: rz, bottom: rg });
+    const hutBack = box(2.2, 2.0, 0.14, 0xe8e2d2);
+    hutBack.position.set(rx, rg + 1.16, rz - 1.12);
+    this.group.add(hutBack);
+    for (const sx of [-1, 1]) {
+      const side = box(0.14, 2.0, 2.2, 0xd8d2c2);
+      side.position.set(rx + sx * 1.12, rg + 1.16, rz);
+      this.group.add(side);
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.16, 2.9), hutRoof);
+    roof.position.set(rx, rg + 2.26, rz);
+    roof.castShadow = true;
+    this.group.add(roof);
+    const hutBench = box(1.7, 0.12, 0.5, 0x9a6b3a);
+    hutBench.position.set(rx, rg + 0.66, rz - 0.7);
+    this.group.add(hutBench);
+    const rondaTex = canvasTexture(256, 96, (ctx, w, h) => {
+      ctx.fillStyle = '#2f5d3a';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#f4ffe9';
+      ctx.font = 'bold 40px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('POS RONDA', w / 2, h / 2 + 2);
+    });
+    const rondaSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.7, 0.55),
+      new THREE.MeshStandardMaterial({ map: rondaTex, roughness: 0.7, side: THREE.DoubleSide })
+    );
+    rondaSign.position.set(rx, rg + 1.95, rz + 1.2);
+    this.group.add(rondaSign);
+    this.colliders.push({ minX: rx - 1.2, maxX: rx + 1.2, minZ: rz - 1.2, maxZ: rz - 0.2, h: 2.3 });
+    this.dressingSpots.push({ type: 'pos-ronda', x: rx, z: rz, yaw: 0 });
+
+    const parkirTex = canvasTexture(256, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#1d4f8f';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = '#eaf2ff';
+      ctx.lineWidth = 8;
+      ctx.strokeRect(6, 6, w - 12, h - 12);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 58px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('PARKIR', w / 2, h / 2 + 2);
+    });
+    const parkirMat = new THREE.MeshStandardMaterial({ map: parkirTex, roughness: 0.6, side: THREE.DoubleSide });
+    const parkirPost: THREE.Matrix4[] = [];
+    const parkirBoard: THREE.Matrix4[] = [];
+    for (const b of anchors.slice(1, 3)) {
+      const px = b.x - BLOCK / 2 + 5.4;
+      const pz = b.z + BLOCK / 2 - 2.4;
+      const yaw = Math.PI / 2;
+      const g = this.groundHeightAt(px, pz);
+      parkirPost.push(place(px, pz, yaw, 0, g + 0.9, 0));
+      parkirBoard.push(place(px, pz, yaw, 0, g + 1.85, 0));
+      this.dressingSpots.push({ type: 'parkir', x: px, z: pz, yaw });
+      this.colliders.push({ minX: px - 0.3, maxX: px + 0.3, minZ: pz - 0.3, maxZ: pz + 0.3, h: 1.9 });
+    }
+    add(new THREE.BoxGeometry(0.08, 1.8, 0.08), tentSteel, parkirPost, true, 'parkir-post');
+    add(new THREE.BoxGeometry(1.0, 0.55, 0.05), parkirMat, parkirBoard, true, 'parkir-board', false);
   }
 
   addRamp(x: number, z: number, rotY: any) {
