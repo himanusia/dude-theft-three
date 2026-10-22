@@ -12,7 +12,7 @@ import path from 'node:path';
 
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const BASE = process.env.DTA_URL || 'http://localhost:8765';
-const OUT = new URL('../screenshots', import.meta.url).pathname;
+const OUT = new URL('../../screenshots', import.meta.url).pathname;
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const PORTRAIT = { width: 390, height: 844 };
 const LANDSCAPE = { width: 844, height: 390 };

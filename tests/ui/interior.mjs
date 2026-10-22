@@ -3,7 +3,7 @@ import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const OUT = new URL('../screenshots', import.meta.url).pathname;
+const OUT = new URL('../../screenshots', import.meta.url).pathname;
 const results = [];
 const check = (n, ok, d) => { results.push({ n, ok }); console.log((ok ? 'PASS ' : 'FAIL ') + n + (d ? ' :: ' + JSON.stringify(d) : '')); };
 

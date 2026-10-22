@@ -13,7 +13,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = new URL('../..', import.meta.url).pathname;   // tests/<group>/ -> repo root
 const OUT = path.join(ROOT, 'screenshots');
 const PORT = 8797;
 const BASE = process.env.DTA_URL || `http://localhost:${PORT}`;
