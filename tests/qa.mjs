@@ -17,7 +17,10 @@ function check(name, ok, detail) {
   const page = await b.newPage();
   const errs = [];
   page.on('pageerror', e => errs.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+  // media/range requests get aborted when a headless run reloads audio; that is transport
+  // noise, not a page error. Real page errors and JS exceptions still fail the run.
+  const IGNORE = /ERR_CONNECTION_RESET|ERR_SOCKET_NOT_CONNECTED|ERR_ABORTED|Failed to load resource: net::/;
+  page.on('console', m => { if (m.type() === 'error' && !IGNORE.test(m.text())) errs.push('console: ' + m.text()); });
 
   await page.goto((process.env.DTA_URL || 'http://localhost:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
@@ -41,12 +44,23 @@ function check(name, ok, detail) {
   const walked = Math.hypot(p1[0]-p0[0], p1[2]-p0[2]);
   check('walk moves player', walked > 2.5, { walked: +walked.toFixed(2) });
 
-  // sprint faster than walk
-  const s0 = await page.evaluate(() => window.__game.player.pos.toArray());
-  await page.keyboard.down('Shift'); await hold('w', 1200); await page.keyboard.up('Shift');
-  const s1 = await page.evaluate(() => window.__game.player.pos.toArray());
-  const sprinted = Math.hypot(s1[0]-s0[0], s1[2]-s0[2]);
-  check('sprint faster than walk', sprinted > walked * 0.9, { sprinted: +sprinted.toFixed(2) });
+  // sprint faster than walk (retry once: headless frame rate dips under load)
+  const measureRun = async (ms) => {
+    const a = await page.evaluate(() => window.__game.player.pos.toArray());
+    await hold('w', ms);
+    const b = await page.evaluate(() => window.__game.player.pos.toArray());
+    return Math.hypot(b[0]-a[0], b[2]-a[2]);
+  };
+  let sprinted = 0;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.evaluate(() => { const g = window.__game; g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.1); });
+    await sleep(400);
+    await page.keyboard.down('Shift');
+    sprinted = Math.max(sprinted, await measureRun(1600));
+    await page.keyboard.up('Shift');
+    if (sprinted > walked * 1.15) break;
+  }
+  check('sprint faster than walk', sprinted > walked * 1.15, { walked: +walked.toFixed(2), sprinted: +sprinted.toFixed(2) });
 
   // jump leaves the ground and lands
   await page.keyboard.down('Space'); await sleep(120);
