@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, lerp, rand, pick, resolveCircleBox, shadowBlob, roundedBox, canvasTexture } from './utils';
+import { MODELS, TYPE_TO_MODEL, instantiateModel } from './carmodels';
 
 // saturated toy-car palette from the reference screenshots
 const CAR_COLORS = [0xff3399, 0xd02b2b, 0x2f6fd0, 0xffce2e, 0x2fa89a, 0xf0f0f4, 0x24242c, 0xe86a2b, 0x39b54a];
@@ -37,6 +38,9 @@ export class Car {
   declare vz: number;
   declare slip: number;
   declare driver: any;
+  declare modelSize: any;
+  declare driverAnchor: any;
+  declare driverLook: [number, number, number] | null;
   declare roll: number;
   declare pitch: number;
   declare health: number;
@@ -79,6 +83,9 @@ export class Car {
     this.vz = 0;
     this.slip = 0;
     this.driver = null;
+    this.modelSize = null;
+    this.driverAnchor = null;
+    this.driverLook = null;
     this.y = 0;
     this.vy = 0;
     this.roll = 0;
@@ -96,6 +103,13 @@ export class Car {
   }
 
   build() {
+    // A real model from the Kenney kit, when that type has one (angkot does not: it keeps the
+    // reference-built body). Falls through to the procedural body if the model did not load.
+    const modelId = TYPE_TO_MODEL[this.type];
+    if (modelId && MODELS[modelId]) {
+      this.buildFromModel(modelId);
+      return;
+    }
     const g = new THREE.Group();
     const paint = new THREE.MeshStandardMaterial({
       color: this.isPolice ? 0x1b2436 : this.color,
@@ -496,6 +510,40 @@ export class Car {
     this.scene.add(g);
   }
 
+  /** Body from a real car model, with its own wheel nodes wired to the steering and spin. */
+  buildFromModel(modelId: any) {
+    const g = new THREE.Group();
+    const built = instantiateModel(modelId, this.length, this.color);
+    if (!built) {
+      this.build();
+      return;
+    }
+    // the kit's origin is not the tyre contact patch: drop the body so the wheels sit on 0.
+    // The offset has to come from a matrixWorld-updated box, otherwise it is measured unscaled.
+    built.root.position.y -= built.minY;
+    g.add(built.root);
+    this.wheels = built.wheels;
+    this.modelSize = built.size;
+    // the model's wheel centres sit at its own ride height, so the radius has to come from the
+    // geometry: the procedural spec would leave the audit thinking the car is sunk
+    if (built.wheels.length) {
+      this.wheelRadius = Math.max(...built.wheels.map((w: any) => w.pivot.position.y));
+    }
+    // the driver sits in the front-left seat of whatever body we got
+    this.driverAnchor = new THREE.Vector3(
+      -built.size.x * 0.22,
+      built.size.y * 0.42,
+      built.size.z * 0.06
+    );
+    const blob = shadowBlob(this.width * 1.25, this.length * 1.05, 0.4);
+    blob.position.y = 0.05;
+    g.add(blob);
+    this.mesh = g;
+    this.mesh.position.copy(this.pos);
+    this.mesh.rotation.y = this.yaw;
+    this.scene.add(g);
+  }
+
   get forward() {
     return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
   }
@@ -522,6 +570,7 @@ export class Car {
   /** A driver you can see through the windscreen: head, shoulders, hair, hands on the wheel.
    *  Cheap on purpose — three boxes and two arms, not a full character rig. */
   addDriver(skin = 0xe0b28d, shirt = 0x3346a8, hair = 0x241a14) {
+    this.driverLook = [skin, shirt, hair];
     if (this.driver) {
       this.driver.visible = true;
       return this.driver;
@@ -540,8 +589,9 @@ export class Car {
     bx(shirtMat, 0.42, 0.52, 0.28, 0, 0.26, 0);   // torso and arms as one block
     bx(skinMat, 0.3, 0.3, 0.3, 0, 0.62, 0.02);     // head
     bx(hairMat, 0.32, 0.09, 0.31, 0, 0.78, 0.02);  // hair cap
-    // left-hand drive, sitting where the steering wheel is
-    g.position.set(-0.4, 0.98, -0.22);
+    // left-hand drive, sitting where the steering wheel is; a modelled body knows its own size
+    if (this.driverAnchor) g.position.copy(this.driverAnchor);
+    else g.position.set(-0.4, 0.98, -0.22);
     this.mesh.add(g);
     this.driver = g;
     return g;
@@ -712,7 +762,7 @@ export class Car {
 
     this.brakeLight = false;
     // police lightbar
-    if (this.isPolice) {
+    if (this.isPolice && this.lightRed && this.lightBlue) {
       const t = performance.now() * 0.006;
       const on = Math.sin(t) > 0;
       this.lightRed.emissiveIntensity = on ? 2.4 : 0.15;
@@ -729,6 +779,30 @@ export class Car {
       this.y + 0.7,
       this.pos.z + f.z * this.length * 0.5
     );
+  }
+
+  /**
+   * Swap the body in place, used when the real models finish loading after the game already
+   * built its procedural cars: same physics state, new body.
+   */
+  rebuild() {
+    const look = this.driverLook;
+    if (this.mesh) {
+      this.scene.remove(this.mesh);
+      this.mesh.traverse((o: any) => {
+        if (o.isMesh) {
+          o.geometry?.dispose?.();
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          mats.forEach((m: any) => m?.dispose?.());
+        }
+      });
+    }
+    this.driver = null;
+    this.wheels = [];
+    this.build();
+    if (look) this.addDriver(...look);
+    this.mesh.position.copy(this.pos);
+    this.mesh.rotation.y = this.yaw;
   }
 
   dispose() {

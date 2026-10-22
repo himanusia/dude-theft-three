@@ -70,3 +70,10 @@ It is not affiliated with, endorsed by, or distributed by Poxel Studios.
 - **Ancol waterfront** — modelled from *Ancol Beach, Jakarta, Indonesia* (Wikimedia Commons,
   CC BY-SA 4.0) for the sand strip, calm water, timber pier on pilings, tall mast and the
   yellow/blue feather flags.
+
+## 3D models
+
+- **Cars** — Kenney Car Kit (CC0 1.0, kenney.nl): `sedan`, `sedan-sports`, `taxi`, `police`, `van`,
+  `suv`. Licence text ships with the models in `public/models/cars/KENNEY-LICENSE.txt`. Scaled to
+  the game's own car dimensions at load time; the angkot stays a custom body built from the
+  reference photographs below.

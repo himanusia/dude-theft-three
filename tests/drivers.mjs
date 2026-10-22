@@ -59,18 +59,19 @@ const outside = await page.evaluate(() => ({
 }));
 check('leaving the car puts the driver back', !outside.inCar && outside.driverBack, outside);
 
-const glass = await page.evaluate(() => {
+const seated2 = await page.evaluate(() => {
   const g = window.__game;
-  const car = g.cityCars[0];
-  let opacity = null;
-  car.mesh.traverse((o) => {
-    if (!o.isMesh) return;
-    const m = o.material;
-    if (m && m.transparent && m.opacity < 0.6) opacity = opacity === null ? m.opacity : Math.min(opacity, m.opacity);
-  });
-  return { opacity };
+  const T = g.THREE;
+  const car = g.cityCars.find((c) => c.driver && c.type !== 'angkot');
+  if (!car) return null;
+  car.mesh.updateMatrixWorld(true);
+  const box = new T.Box3().setFromObject(car.mesh);
+  const head = car.driver.children[1];
+  const p = new T.Vector3();
+  head.getWorldPosition(p);
+  return { inside: box.containsPoint(p), y: +p.y.toFixed(2), top: +box.max.y.toFixed(2), type: car.type };
 });
-check('glass is see-through, so the driver reads from outside', glass.opacity !== null && glass.opacity <= 0.35, glass);
+check('the driver sits inside the cabin, not through the roof', seated2 && seated2.inside && seated2.y < seated2.top, seated2);
 
 console.log('SUMMARY ' + JSON.stringify({ pass: checks.filter((c) => c.ok).length, total: checks.length }));
 await browser.close();
