@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview --port 8765 --strictPort"
+    "preview": "vite preview --port 8765 --strictPort",
+    "test:qa": "node tests/qa.mjs",
+    "test:interior": "node tests/interior.mjs",
+    "test:audit": "node tests/audit.mjs"
   },
   "repository": {
     "type": "git",
@@ -23,6 +26,7 @@
   "homepage": "https://github.com/himanusia/dude-theft-three#readme",
   "devDependencies": {
     "@types/three": "^0.169.0",
+    "puppeteer-core": "^23.11.1",
     "typescript": "^5.9.3",
     "vite": "^5.4.21"
   },
