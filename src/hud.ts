@@ -35,6 +35,7 @@ export class HUD {
   declare hitTimer: number;
   declare damageTimer: number;
   declare mapOpen: boolean;
+  declare helpOpen: boolean;
   declare settingsOpen: boolean;
   /** last projection used by drawFullMap, so a harness can sample the player marker */
   declare mapProjection: any;
@@ -96,6 +97,7 @@ export class HUD {
     this.hitTimer = 0;
     this.damageTimer = 0;
     this.mapOpen = false;
+    this.helpOpen = false;
     this.settingsOpen = false;
     this.mapProjection = null;
     this.onSettings = null;
@@ -112,10 +114,17 @@ export class HUD {
     if (!on) this.toggleHelp(false);
   }
 
+  isHelpOpen() {
+    return !!this.helpOpen;
+  }
+
   toggleHelp(force?: boolean) {
     const open = force === undefined ? !this.el.help.classList.contains('show') : !!force;
+    this.helpOpen = open;
     this.el.help.classList.toggle('show', open);
-    this.el.helpBtn.setAttribute('aria-expanded', String(open));
+    this.el.helpBtn?.setAttribute('aria-expanded', String(open));
+    // a menu needs a free cursor: release the pointer so the close button can be clicked
+    if (open && document.pointerLockElement) document.exitPointerLock?.();
   }
 
   setCash(n: number) {
@@ -128,8 +137,8 @@ export class HUD {
   setHealth(hp: any) {
     const pct = clamp(hp, 0, 100);
     this.el.health.style.width = pct + '%';
-    this.el.health.style.background =
-      pct > 55 ? 'linear-gradient(90deg,#4ade80,#22c55e)' : pct > 25 ? 'linear-gradient(90deg,#fbbf24,#f59e0b)' : 'linear-gradient(90deg,#f87171,#dc2626)';
+    // flat fills, GTA-style: green healthy, amber hurt, red critical
+    this.el.health.style.background = pct > 55 ? '#4fd463' : pct > 25 ? '#f0b429' : '#d8552f';
     this.el.healthNum.textContent = Math.round(pct);
   }
 

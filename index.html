@@ -875,6 +875,33 @@
   /* narrow bands, measured: health hugs the stick, the prompt rides above it */
   body.hud-narrow #health-wrap { top: auto; bottom: calc(var(--t-stick, 120px) + 26px * var(--s)); left: calc(12px * var(--s)); }
   body.hud-narrow #prompt { bottom: calc(var(--t-stick, 120px) + 62px * var(--s)); }
+
+  /* ---------------------------------------------------------------- HUD surface: GTA-style
+     Flat black plates, no accent bars, no blur, no drop shadows. The old left-border accent
+     on every chip was the generic "AI dashboard" tell; colour is carried by the money, the
+     wanted stars and the health bar instead. */
+  #objective, #topright, #health-wrap, #ammo-wrap, #speedo, #cash, .toast,
+  #prompt, #pause .panel, #help-sheet .sheet, #settings, .panel {
+    border-left: 0 !important; border: 0 !important;
+    border-radius: 2px !important;
+    background: rgba(6, 8, 10, .74) !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+  #objective { padding: 11px 16px 12px !important; }
+  #objective b, #objective strong { color: #ffd24a; }
+  #cash { color: #4fd463 !important; font-weight: 800; letter-spacing: .01em; }
+  #stars .on, #stars .off { color: #ffd24a !important; }
+
+  #health-fill { background: #d8552f !important; }
+
+  #ammo-wrap small { color: #cfd8e0 !important; letter-spacing: .06em; }
+  #minimap { border-radius: 3px !important; border: 2px solid rgba(10,12,14,.9) !important; }
+
+  #prompt::first-letter { color: #ffd24a !important; }
+
+
+  #resume-btn, #help-close, .btn { border-radius: 2px !important; }
 </style>
 </head>
 <body>
