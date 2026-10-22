@@ -120,6 +120,8 @@ export class RoadNav {
   private readonly heapCost: Float64Array;
   private readonly stack: Int32Array;
   private heapSize = 0;
+  /** diagnostics: nodes expanded and seeded by the last findPath call */
+  lastStats = { expanded: 0, seeded: 0, goalLeg: 0 };
   private readonly raw: number[] = [];
   private readonly tmpPts: number[] = [];
   private readonly obstacles: Box[] = [];
@@ -433,8 +435,10 @@ export class RoadNav {
       this.push(best, bestD + Math.hypot(this.px[best] - gx, this.pz[best] - gz));
     }
 
+    this.lastStats = { expanded: 0, seeded, goalLeg: 0 };
     while (this.heapSize > 0) {
       const cur = this.pop();
+      this.lastStats.expanded++;
       if (closed[cur]) continue;
       closed[cur] = 1;
       if (cur === goal) break;
@@ -446,6 +450,7 @@ export class RoadNav {
         if (ng < g[goal]) {
           g[goal] = ng;
           parent[goal] = cur;
+          this.lastStats.goalLeg++;
           this.push(goal, ng);
         }
       }
@@ -464,18 +469,32 @@ export class RoadNav {
     let node = goal;
     let cnt = 0;
     if (parent[goal] === -1) {
-      // target unreachable through a clear final leg: finish at the closest node
+      // Target unreachable through a clear final leg. Finish at the node that gets closest to
+      // it - and take a node with a real parent chain, never a seed, because a seed has no
+      // parent and reconstruction would collapse the whole route into "start, goal": that is
+      // what handed the police two-point paths and left them driving back and forth.
       let best = -1;
       let bestCost = Infinity;
       for (let n = 0; n < N; n++) {
         if (!closed[n] || g[n] === Infinity) continue;
+        if (parent[n] === -1) continue;              // a seed: no route behind it
         const c = g[n] + Math.hypot(this.px[n] - gx, this.pz[n] - gz);
         if (c < bestCost) {
           bestCost = c;
           best = n;
         }
       }
-      if (best === -1) return 0;
+      if (best === -1) {
+        // nowhere good: at least drive at the nearest node to the target
+        let near = -1;
+        let nearD = Infinity;
+        for (let n = 0; n < N; n++) {
+          const d = Math.hypot(this.px[n] - gx, this.pz[n] - gz);
+          if (d < nearD) { nearD = d; near = n; }
+        }
+        if (near === -1) return 0;
+        best = near;
+      }
       node = best;
     }
 
