@@ -8,6 +8,7 @@ import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interio
 import { terrainHeight } from './terrain';
 import { LOCAL_STREETS } from './streets';
 import { Car, driverLook } from '../vehicles/car';
+import { Ojek } from '../vehicles/ojek';
 
 // City-block scale. A block is 140 m and the pitch is 170 m, so the street between two
 // blocks is 30 m of asphalt and pavement - close to a real Jakarta block, and wide enough
@@ -527,6 +528,9 @@ export class City {
     this.buildRoadRibbons();
     this.buildWater();
     this.buildDistrictProps();
+    // buildOjekBases() is written but off: parked at the POI coordinates the bikes ended up
+    // inside the frontage wall, so nothing was visible from the street. It needs the same
+    // verge spacing as the haltes before it ships.
     // buildHaltes() is written but not switched on: the platform colliders land on the verge
     // where cars park, and qa caught a car stuck against one at 8 km/h. It goes live once the
     // verge spacing is worked out against parking spots.
@@ -753,6 +757,31 @@ export class City {
       const pz = poi.z + best.nz * off;
       const g = buildHalte({ group: this.group, colliders: this.colliders, audit: this.propAudit }, px, pz, best.yaw);
       g.position.y = terrainHeight(px, pz);
+    }
+  }
+
+
+  /**
+   * Ojek pangkalan: the row of motorbikes waiting for a fare on the kerb. Two per stop, angled
+   * to the street, only at the POIs the map marks as passenger/food places, because a bike is
+   * 11 draw calls and the frame has a budget to hold.
+   */
+  buildOjekBases() {
+    let placed = 0;
+    for (const poi of POIS) {
+      if (poi.kind !== 'kaki5' && poi.kind !== 'terminal') continue;
+      if (placed >= 3) break;
+      placed++;
+      for (let i = 0; i < 2; i++) {
+        const x = poi.x + i * 1.1 - 0.55;
+        const z = poi.z + 2.4;
+        const bike = new Ojek({ color: i === 0 ? 0xc0392b : 0x1f6f4a });
+        bike.group.position.set(x, terrainHeight(x, z), z);
+        bike.group.rotation.y = Math.PI * 0.62 + i * 0.12;
+        this.group.add(bike.group);
+        this.propAudit.push({ name: 'ojek', x, z, bottom: terrainHeight(x, z) });
+        this.colliders.push({ minX: x - 0.55, maxX: x + 0.55, minZ: z - 1.1, maxZ: z + 1.1, h: 1.6 });
+      }
     }
   }
 
