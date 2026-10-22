@@ -35,7 +35,7 @@ export const BAJAJ_DIMENSIONS = {
 } as const;
 
 const PAINT = 0xe4571c;
-const CANVAS = 0x1b1b1e;
+const CANVAS = 0x6c6e6d;   // grey canvas, as in the Glodok reference (not black vinyl)
 const TRIM = 0x151518;
 const CHROME = 0xc9cdd3;
 const STEEL = 0x8e9299;
@@ -56,7 +56,7 @@ const REAR_AXLE = BAJAJ_DIMENSIONS.rearAxleZ;
 const WHEEL_R = BAJAJ_DIMENSIONS.wheelRadius;
 /** centre of the front cowl, and how shallow it is in Z versus X */
 const COWL_Z = 0.955;
-const COWL_ZSCALE = 0.52;
+const COWL_ZSCALE = 0.40;   // a bajaj nose is shallow; 0.52 read as a bulb
 
 export interface BajajOptions {
   /** skip the small parts (spokes, vents, wipers, instrument) for background traffic */
@@ -247,7 +247,7 @@ export class Bajaj {
     ) => new THREE.MeshStandardMaterial({ color, roughness, metalness, ...extra });
 
     this.materials.paint = std(PAINT, 0.38, 0.16);
-    this.materials.canvas = std(CANVAS, 0.94, 0.02);
+    this.materials.canvas = std(CANVAS, 0.99, 0.0);
     this.materials.trim = std(TRIM, 0.74, 0.1);
     this.materials.chrome = std(CHROME, 0.26, 0.85);
     this.materials.steel = std(STEEL, 0.48, 0.6);
@@ -470,7 +470,12 @@ export class Bajaj {
       for (let i = 0; i < pos.count; i++) {
         const x = pos.getX(i);
         const z = pos.getZ(i);
-        const crown = 0.05 * Math.max(0, 1 - (x / 0.7) ** 2) * Math.max(0, 1 - (z / 0.97) ** 2);
+        // 0.12 m of crown with a shallow sag between the two ribs: a canvas top stretches,
+        // it does not sit dead flat like a metal panel
+        const across = Math.max(0, 1 - (x / 0.7) ** 2);
+        const along = Math.max(0, 1 - (z / 0.97) ** 2);
+        const sag = 0.03 * Math.sin(Math.PI * Math.min(1, Math.abs(z + 0.27) / 0.97));
+        const crown = (0.12 - sag) * across * along;
         pos.setY(i, pos.getY(i) + crown);
       }
       pos.needsUpdate = true;
@@ -483,7 +488,7 @@ export class Bajaj {
       const pts: THREE.Vector3[] = [];
       for (let i = 0; i <= 6; i++) {
         const z = 0.67 - (i / 6) * 1.88;
-        const crown = 0.05 * Math.max(0, 1 - ((z + 0.27) / 0.97) ** 2);
+        const crown = 0.09 * Math.max(0, 1 - ((z + 0.27) / 0.97) ** 2);
         pts.push(new THREE.Vector3(0, 1.612 + crown, z));
       }
       const curve = new THREE.CatmullRomCurve3(pts);
@@ -495,7 +500,7 @@ export class Bajaj {
       const ribs: THREE.Vector3[] = [];
       for (let i = 0; i <= 4; i++) {
         const x = -0.66 + (i / 4) * 1.32;
-        const crown = 0.05 * Math.max(0, 1 - (x / 0.7) ** 2) * Math.max(0, 1 - ((zRib + 0.27) / 0.97) ** 2);
+        const crown = 0.12 * Math.max(0, 1 - (x / 0.7) ** 2) * Math.max(0, 1 - ((zRib + 0.27) / 0.97) ** 2);
         ribs.push(new THREE.Vector3(x, 1.605 + crown, zRib));
       }
       this.mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(ribs), 8, 0.016, 4, false), this.materials.canvas, canopy);
