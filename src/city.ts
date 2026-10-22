@@ -747,6 +747,12 @@ export class City {
     // is white plaster under red clay, Tanah Abang is a wall of awnings.
     const id = districtAt(cx, cz);
     const style = DISTRICTS[id];
+    // A kampung is not a lot with one big box on it: it is houses packed along a narrow gang,
+    // which is the shape you actually walk through in Jakarta.
+    if (id === 'kampung') {
+      this.buildKampungRow(cx, cz, style);
+      return;
+    }
     const count = Math.random() < 0.35 ? style.lots[0] : randInt(style.lots[0], style.lots[1]);
     const area = BLOCK - 9;
     const cells = count === 1 ? [[0, 0, area, area]] : this.splitLots(area, count, cx, cz);
@@ -759,6 +765,60 @@ export class City {
     if (id === 'tanahabang' || id === 'glodok') {
       if (!this.propAudit) this.propAudit = [];
       buildMarketStalls({ group: this.group, colliders: this.colliders, audit: this.propAudit }, cx, cz, 2);
+    }
+  }
+
+  /** Six small houses facing a 4 m gang: the alley is walkable, the houses are solid. */
+  buildKampungRow(cx: number, cz: number, style: any) {
+    const gangHalf = 2.0;
+    const houseW = 6.4;
+    const houseD = 8.2;
+    const gapZ = 3.6; // real gaps: houses must read as separate homes, not one barracks
+    const roofMat = new THREE.MeshStandardMaterial({ color: style.roof, roughness: 0.95 });
+    const doorMat = new THREE.MeshStandardMaterial({ color: 0x5a3b28, roughness: 0.9 });
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const h = rand(style.heights[0], style.heights[1]) - (i % 2) * 0.6;
+        const x = cx + side * (gangHalf + houseW / 2);
+        const z = cz - houseD - gapZ * 1.5 + i * (houseD + gapZ);
+        const wall = pick(style.walls);
+        const tex = windowTexture(wall, 'strips');
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(1.4, 1.1);
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(houseW, h, houseD),
+          [new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }),
+           new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.95 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }),
+           new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 })]
+        );
+        body.position.set(x, h / 2 + 0.3, z);
+        body.castShadow = true;
+        body.receiveShadow = true;
+        this.group.add(body);
+        // gable roof: two slabs leaning into a ridge along the house depth
+        for (const dir of [-1, 1]) {
+          const slope = new THREE.Mesh(new THREE.BoxGeometry(houseW * 0.62, 0.18, houseD + 0.6), roofMat);
+          slope.position.set(x + dir * houseW * 0.26, h + 0.55, z);
+          slope.rotation.z = dir * 0.42;
+          slope.castShadow = true;
+          this.group.add(slope);
+        }
+        // door and two windows facing the gang
+        const face = x - side * (houseW / 2 + 0.02);
+        const door = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.0, 0.9), doorMat);
+        door.position.set(face, 1.3, z + rand(-1.6, 1.6));
+        this.group.add(door);
+        const glassMat = new THREE.MeshStandardMaterial({ color: 0x2b3a46, roughness: 0.3, metalness: 0.2 });
+        for (const dz of [-2.4, 2.4]) {
+          const win = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.9, 1.0), glassMat);
+          win.position.set(face, 1.9, z + dz);
+          this.group.add(win);
+        }
+        this.colliders.push({
+          minX: x - houseW / 2, maxX: x + houseW / 2,
+          minZ: z - houseD / 2, maxZ: z + houseD / 2, h,
+        });
+      }
     }
   }
 
