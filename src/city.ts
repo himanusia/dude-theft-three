@@ -654,7 +654,7 @@ export class City {
     } else if (id === 'kampung') {
       // laundry lines between the tight houses
       for (let i = 0; i < 2; i++) {
-        const z = cz + (i ? 7 : -7);
+        const z = cz + (i ? half + 0.9 : -half - 0.9);
         this.washMats.push(m.clone().makeTranslation(cx, 3.1 + i * 0.2, z));
       }
     }
