@@ -1991,9 +1991,14 @@ export class City {
       this.group.add(hill);
     }
 
-    // 2. tanggul: a raised bank on each side of every canal, following its polyline
-    const bankMat = new THREE.MeshStandardMaterial({ color: 0x6e6a5e, roughness: 0.98 });
+    // 2. the canals themselves: water in the middle, a concrete tanggul either side. The
+    // heightfield cannot cut a channel this narrow at 18 m per quad, so it is a mesh.
+    const bankMat = new THREE.MeshStandardMaterial({ color: 0x7d786a, roughness: 0.95 });
+    const waterMat = new THREE.MeshStandardMaterial({ color: 0x2b5a63, roughness: 0.22, metalness: 0.35 });
     for (const river of RIVERS) {
+      const surf = new THREE.Mesh(this.ribbon(river.path, river.width - 3, 0.3), waterMat);
+      surf.receiveShadow = true;
+      this.group.add(surf);
       for (const side of [-1, 1]) {
         const offsets: [number, number][] = [];
         const pts = river.path;
@@ -2007,7 +2012,7 @@ export class City {
           offsets.push([x1 + nx * off * side, z1 + nz * off * side]);
           offsets.push([x2 + nx * off * side, z2 + nz * off * side]);
         }
-        const band = new THREE.Mesh(this.ribbon(offsets, 6.4, 0.9), bankMat);
+        const band = new THREE.Mesh(this.ribbon(offsets, 6.4, 0.42), bankMat);
         band.receiveShadow = true;
         band.castShadow = true;
         this.group.add(band);

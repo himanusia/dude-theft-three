@@ -73,12 +73,12 @@ export function terrainHeight(x: number, z: number): number {
   for (const r of RIVERS) {
     const d = distToPath(x, z, r.path) - r.width / 2;
     if (d < 0) {
-      // inside the channel: dig it out so the water plane sits in a visible cut
-      const depth = 2.6 * smoothstep(-8, 0, d);
-      h -= depth;
+      // no digging: at 18 m per ground quad a 30 m channel comes out jagged, so the canal is
+      // built as its own mesh in city.buildTerrainFeatures instead
+      continue;
     } else if (d < 30) {
       const crest = 1 - Math.abs(d - 9) / 14;
-      if (crest > 0) h += crest * 3.2;
+      if (crest > 0) h += crest * 1.4;   // a real tanggul is 1.5-2 m, not a wall
     }
   }
 
