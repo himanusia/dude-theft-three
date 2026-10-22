@@ -312,7 +312,10 @@ export class Police {
       // Dismount: once the cruiser has stopped near a player on foot, two officers get out and
       // come for them, GTA-style, instead of the fight happening through the windscreen.
       const stopped = Math.abs(car.speed) < 3.5;
-      const canDeploy = this.wanted >= 2 && onFoot && dist < 28 && stopped && !entry.crew;
+      // The route now ends where the cruiser can legally stop, so "finished the route" is the
+      // signal to dismount and let the crew walk the last stretch behind the building.
+      const routeDone = entry.points > 0 && (entry.idx ?? 0) >= entry.points - 1;
+      const canDeploy = this.wanted >= 2 && onFoot && stopped && !entry.crew && (dist < 28 || routeDone);
       if (canDeploy) {
         entry.crew = true;
         const rx = Math.cos(car.yaw);

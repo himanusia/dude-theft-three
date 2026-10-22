@@ -4,6 +4,7 @@ import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKota
 import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater, pointInPoly } from './jakartamap';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 import { terrainHeight } from './terrain';
+import { LOCAL_STREETS } from './streets';
 import { Car, driverLook } from '../vehicles/car';
 
 // City-block scale. A block is 140 m and the pitch is 170 m, so the street between two
@@ -927,6 +928,11 @@ export class City {
     const asphalt = new THREE.MeshStandardMaterial({ color: 0x33383f, roughness: 0.95 });
     const ring = new THREE.MeshStandardMaterial({ color: 0x2e333a, roughness: 0.95 });
     const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });
+    for (const st of LOCAL_STREETS) {
+      const m = new THREE.Mesh(this.ribbon(st.path as [number, number][], st.width, 0.03), asphalt);
+      m.receiveShadow = true;
+      this.group.add(m);
+    }
     for (const a of ARTERIALS) {
       const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.035), asphalt);
       m.receiveShadow = true;

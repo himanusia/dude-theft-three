@@ -1,4 +1,5 @@
 import { ARTERIALS, RING_ROAD } from '../world/jakartamap';
+import { LOCAL_STREETS } from '../world/streets';
 
 /**
  * Waypoint navigation over the road network that the Jakarta map actually defines.
@@ -93,7 +94,13 @@ interface Road {
   width: number;
 }
 
-const ROAD_NET: Road[] = [...ARTERIALS.map((a) => ({ pts: a.path, width: a.width })), { pts: RING_ROAD, width: 20 }];
+const ROAD_NET: Road[] = [
+  ...ARTERIALS.map((a) => ({ pts: a.path, width: a.width })),
+  { pts: RING_ROAD, width: 20 },
+  // the streets between the blocks: without them the nearest drivable point can be 50 m from
+  // the player, which is why a police route used to end nowhere near them
+  ...LOCAL_STREETS.map((st) => ({ pts: st.path, width: st.width })),
+];
 
 /**
  * Deterministic A* over the map's road network.
@@ -121,7 +128,7 @@ export class RoadNav {
   private readonly stack: Int32Array;
   private heapSize = 0;
   /** diagnostics: nodes expanded and seeded by the last findPath call */
-  lastStats = { expanded: 0, seeded: 0, goalLeg: 0 };
+  lastStats = { expanded: 0, seeded: 0, goalLeg: 0, shortfall: 0 };
   private readonly raw: number[] = [];
   private readonly tmpPts: number[] = [];
   private readonly obstacles: Box[] = [];
@@ -435,7 +442,7 @@ export class RoadNav {
       this.push(best, bestD + Math.hypot(this.px[best] - gx, this.pz[best] - gz));
     }
 
-    this.lastStats = { expanded: 0, seeded, goalLeg: 0 };
+    this.lastStats = { expanded: 0, seeded, goalLeg: 0, shortfall: 0 };
     while (this.heapSize > 0) {
       const cur = this.pop();
       this.lastStats.expanded++;
@@ -468,7 +475,9 @@ export class RoadNav {
     const stack = this.stack;
     let node = goal;
     let cnt = 0;
+    let reachGoal = true;
     if (parent[goal] === -1) {
+      reachGoal = false;
       // Target unreachable through a clear final leg. Finish at the node that gets closest to
       // it - and take a node with a real parent chain, never a seed, because a seed has no
       // parent and reconstruction would collapse the whole route into "start, goal": that is
@@ -496,6 +505,10 @@ export class RoadNav {
         best = near;
       }
       node = best;
+      // A route that cannot legally reach the target must not pretend to: appending the goal
+      // anyway made police drive into the wall behind which the player was standing, over and
+      // over. The path ends at the last reachable point and the shortfall is reported.
+      this.lastStats.shortfall = Math.hypot(this.px[best] - gx, this.pz[best] - gz);
     }
 
     while (node !== -1 && cnt < stack.length) {
@@ -511,7 +524,7 @@ export class RoadNav {
       if (n === goal) continue;
       raw.push(this.px[n], this.pz[n]);
     }
-    raw.push(gx, gz);
+    if (reachGoal) raw.push(gx, gz);
 
     return this.smooth(raw, raw.length >> 1, out);
   }
