@@ -168,6 +168,7 @@ export class Ped {
   declare dir: number;
   declare crossed: boolean;
   declare wpCross: boolean;
+  declare wpEntryT: number;
   declare tx: number;
   declare tz: number;
   declare mode: string; // 'walk' | 'cross'
@@ -239,6 +240,7 @@ export class Ped {
     this.dir = 1;
     this.crossed = false;
     this.wpCross = false;
+    this.wpEntryT = 0;
     this.tx = this.pos.x;
     this.tz = this.pos.z;
     this.step = 1;
@@ -340,6 +342,7 @@ export class Ped {
         return;
       } else {
         this.wpCross = true;
+        this.wpEntryT = entry;
         this.setTarget(L.ax + L.ux * entry, L.az + L.uz * entry);
         return;
       }
@@ -360,8 +363,10 @@ export class Ped {
     const L = this.mgr.legs[this.leg];
     const fromT = this.dir > 0 ? L.cf : L.ct;
     const toT = this.dir > 0 ? L.ct : L.cf;
-    this.crossFromX = L.ax + L.ux * fromT;
-    this.crossFromZ = L.az + L.uz * fromT;
+    // cross from the body's own position, straight down the stripes: a shop row that pushed
+    // the walker sideways must not make it walk back to a point it cannot stand on
+    this.crossFromX = this.pos.x;
+    this.crossFromZ = this.pos.z;
     this.crossDx = L.ux * this.dir;
     this.crossDz = L.uz * this.dir;
     this.crossLen = Math.abs(toT - fromT);
@@ -375,7 +380,10 @@ export class Ped {
     this.crossSampleT = 0;
     this.samples.length = 0;
     this.wpCross = false;
-    this.setTarget(L.ax + L.ux * toT, L.az + L.uz * toT);
+    this.setTarget(
+      this.pos.x + this.crossDx * (this.crossLen + 1.2),
+      this.pos.z + this.crossDz * (this.crossLen + 1.2)
+    );
   }
 
   private arriveLegEnd() {
@@ -631,6 +639,17 @@ export class Ped {
 
     const dx = this.tx - this.pos.x;
     const dz = this.tz - this.pos.z;
+    // The kerb is a place, not a point: measure progress along the lane and how far the body
+    // was pushed off it, so a shop row that overhangs the zebra cannot pin a pedestrian on its
+    // way to the crossing (which left the crowd stuck at "walking to the zebra" forever).
+    if (this.wpCross) {
+      const leg = this.mgr.legs[this.leg];
+      const lateral = (this.pos.x - leg.ax) * -leg.uz + (this.pos.z - leg.az) * leg.ux;
+      if (Math.abs(this.legT() - this.wpEntryT) < 2.5 && Math.abs(lateral) < 1.6) {
+        this.beginCrossing();
+        return;
+      }
+    }
     if (dx * dx + dz * dz < 0.81) {
       if (this.wpCross) this.beginCrossing();
       else this.arriveLegEnd();
@@ -693,7 +712,7 @@ export class Ped {
     }
     // something (a car, a body, a shop wall overhanging the far kerb) kept me off the exit
     // point: the crossing is over once I have walked it and then some
-    if (this.crossT > this.crossLen / CROSS_SPEED + 4) this.finishCrossing(mgr);
+    if (this.crossT > Math.min(this.crossLen / CROSS_SPEED + 4, 14)) this.finishCrossing(mgr);
   }
 
   private finishCrossing(mgr: any) {
@@ -1200,7 +1219,10 @@ export class PedManager {
           t1 = t;
         }
       }
-      if (t0 < 0 || t1 - t0 < 2) continue;
+      // a street crossing is a road width, not a lane that happens to run alongside another
+      // road: an interval longer than the widest carriageway is not a zebra, it is a slip lane
+      const span = t1 - t0;
+      if (t0 < 0 || span < 2 || span > 40) continue;
       const midT = (t0 + t1) / 2;
       const strip = this.stripAt(leg.ax + leg.ux * midT, leg.az + leg.uz * midT, leg.ux, leg.uz);
       if (strip < 0) continue; // no paint here: the pedestrian has no business on that asphalt
