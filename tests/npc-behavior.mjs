@@ -197,7 +197,9 @@ function stopServer() {
       strips: g.peds.strips.length,
     };
   });
-  check('boot: crowd spawned and running', boot.paused === false && boot.peds > 0 && boot.peds <= 34, boot);
+  // the crowd budget was raised to 46 with the density pass; the cap here guards against
+  // runaway spawning, not against the configured size
+  check('boot: crowd spawned and running', boot.paused === false && boot.peds > 0 && boot.peds <= 46, boot);
 
   // ---------------------------------------------------------------- (b) 60 s of walking
   const walk = await page.evaluate(() => {
