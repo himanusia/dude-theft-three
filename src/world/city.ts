@@ -885,10 +885,10 @@ export class City {
           // the roads come first: a block may not sit on an arterial, or the street the player
           // spawns on has a building in the middle of it
           for (const a of ARTERIALS) {
-            if (this.distToPath(jx, jz, a.path) < a.width / 2 + SIZE * 1.45 + 2) { blocked = true; break; }
+            if (this.distToPath(jx, jz, a.path) < a.width / 2 + (SIZE / 2) * 1.42 + 2) { blocked = true; break; }
           }
           if (blocked) continue;
-          if (this.distToPath(jx, jz, RING_ROAD) < 12 + SIZE * 1.45 + 2) continue;
+          if (this.distToPath(jx, jz, RING_ROAD) < 12 + (SIZE / 2) * 1.42 + 2) continue;
           for (const lm of LANDMARKS) {
             if (Math.hypot(jx - lm.x, jz - lm.z) < SIZE / 2 + 34) { blocked = true; break; }
           }
