@@ -1886,6 +1886,7 @@ hud.setPrompt('');
 animate();
 
 window.__game = {
+  THREE,
   scene,
   camera,
   renderer,

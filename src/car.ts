@@ -17,6 +17,7 @@ const SPECS = {
 const COAST_DRAG = 0.55;
 const WRECK_DRAG = 1.6;
 // reverse tops out at 42 % of the forward spec, same as before the retune
+const WHEELBASE = 2.6;
 const REVERSE_CAP = 0.42;
 
 export class Car {
@@ -30,6 +31,9 @@ export class Car {
   declare steer: number;
   declare y: number;
   declare vy: number;
+  declare vx: number;
+  declare vz: number;
+  declare slip: number;
   declare roll: number;
   declare pitch: number;
   declare health: number;
@@ -68,6 +72,9 @@ export class Car {
     this.pos.y = 0;
     this.speed = 0;
     this.steer = 0;
+    this.vx = 0;
+    this.vz = 0;
+    this.slip = 0;
     this.y = 0;
     this.vy = 0;
     this.roll = 0;
@@ -433,20 +440,35 @@ export class Car {
     this.speed = clamp(this.speed, -maxSpeed * REVERSE_CAP, maxSpeed * 1.08);
     if (Math.abs(this.speed) < 0.12) this.speed = 0;
 
-    // steering: grip falls as speed rises
+    // Steering grip falls as speed rises. The car is no longer kinematic: momentum is split
+    // into a forward and a sideways component, so the body can rotate ahead of the direction
+    // of travel and the tyres have something to slip against.
     const speedFactor = clamp(Math.abs(this.speed) / this.maxSpeed, 0, 1);
     const maxSteer = 0.62 - speedFactor * 0.3;
     this.steer = lerp(this.steer, steerInput * maxSteer, clamp(dt * 9, 0, 1));
-    const gripDamp = handbrake ? 0.55 : 1;
-    const yawRate = (this.speed / 2.6) * Math.tan(this.steer * gripDamp);
+
+    const fwd = this.forward;
+    const rightX = fwd.z;
+    const rightZ = -fwd.x;
+    let vLat = this.vx * rightX + this.vz * rightZ;
+
+    // Yaw the front wheels ask for, capped: the tail may outrun the nose, which is a drift
+    const yawAsk = (this.speed / WHEELBASE) * Math.tan(this.steer);
+    const yawCap = handbrake ? 2.9 : 1.75;
+    const yawRate = clamp(yawAsk, -yawCap, yawCap);
     this.yaw += yawRate * dt;
 
-    // integrate position
-    const fwd = this.forward;
-    const nx = this.pos.x + fwd.x * this.speed * dt;
-    const nz = this.pos.z + fwd.z * this.speed * dt;
-    this.pos.x = nx;
-    this.pos.z = nz;
+    // Sideways grip: strong while rolling, nearly gone on the handbrake
+    const gripRate = handbrake ? this.grip * 0.14 : this.grip;
+    vLat *= Math.exp(-gripRate * dt);
+    // Rotating the body throws weight sideways: with the handbrake, that slide survives
+    vLat -= yawRate * this.speed * dt * (handbrake ? 0.62 : 0.3);
+
+    this.slip = Math.atan2(vLat, Math.abs(this.speed) + 0.001);
+    this.vx = fwd.x * this.speed + rightX * vLat;
+    this.vz = fwd.z * this.speed + rightZ * vLat;
+    this.pos.x += this.vx * dt;
+    this.pos.z += this.vz * dt;
 
     // collision with buildings / props
     let hit = null;
@@ -454,7 +476,7 @@ export class Car {
       if (b.h !== undefined && b.h < 0.6) continue;
       const res = resolveCircleBox(this.pos.x, this.pos.z, this.radius * 0.82, b);
       if (res) {
-        const impact = Math.abs(this.speed);
+        const impact = Math.hypot(this.vx, this.vz);
         this.pos.x = res.x;
         this.pos.z = res.z;
         if (impact > 4) {
@@ -463,6 +485,9 @@ export class Car {
         }
         this.lastCollision = { x: res.x, z: res.z, box: b };
         this.speed *= -0.28;
+        // a wall kills the slide as well as the forward speed
+        this.vx = 0;
+        this.vz = 0;
         if (Math.abs(this.speed) > 6) this.jump(1.6);
       }
     }
