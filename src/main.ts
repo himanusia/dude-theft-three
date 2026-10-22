@@ -18,6 +18,7 @@ import {
   rayVsColliders,
   resolveCircleBox,
   formatMoney,
+  canvasTexture,
 } from './utils';
 
 // ---------------------------------------------------------------- renderer
@@ -149,14 +150,40 @@ function addSpark(pos: THREE.Vector3, color: number = 0xffd27a) {
   scene.add(m);
   fx.push({ obj: m, life: 0.22, max: 0.22, kind: 'spark' });
 }
+// muzzle flash: additive sprite with soft falloff + spike so it reads as a
+// flash, not a floating ball, and stays visible for a couple of frames
+const muzzleTex = canvasTexture(64, 64, (ctx, w, h) => {
+  const g = ctx.createRadialGradient(w / 2, h / 2, 1, w / 2, h / 2, w / 2);
+  g.addColorStop(0, 'rgba(255,255,240,1)');
+  g.addColorStop(0.3, 'rgba(255,224,140,0.95)');
+  g.addColorStop(0.62, 'rgba(255,150,40,0.5)');
+  g.addColorStop(1, 'rgba(255,110,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(255,248,210,0.9)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.5, h * 0.06);
+  ctx.lineTo(w * 0.5, h * 0.94);
+  ctx.moveTo(w * 0.1, h * 0.5);
+  ctx.lineTo(w * 0.9, h * 0.5);
+  ctx.stroke();
+});
 function addMuzzle(pos: THREE.Vector3) {
-  const m = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 6, 5),
-    new THREE.MeshBasicMaterial({ color: 0xfff0b0, transparent: true, opacity: 0.9 })
-  );
-  m.position.copy(pos);
-  scene.add(m);
-  fx.push({ obj: m, life: 0.05, max: 0.05, kind: 'spark' });
+  const mat = new THREE.SpriteMaterial({
+    map: muzzleTex,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false, // a 0.12 s flash may not be hidden by the shooter's own body
+    opacity: 1,
+  });
+  const s = new THREE.Sprite(mat);
+  s.position.copy(pos);
+  s.scale.setScalar(0.85);
+  s.renderOrder = 10;
+  scene.add(s);
+  fx.push({ obj: s, life: 0.12, max: 0.12, kind: 'flash' });
 }
 function updateFx(dt: number) {
   for (let i = fx.length - 1; i >= 0; i--) {
@@ -165,6 +192,7 @@ function updateFx(dt: number) {
     const k = clamp(f.life / f.max, 0, 1);
     f.obj.material.opacity = k;
     if (f.kind === 'spark') f.obj.scale.setScalar(0.4 + k * 0.9);
+    if (f.kind === 'flash') f.obj.scale.setScalar(0.55 + (1 - k) * 0.45);
     if (f.life <= 0) {
       scene.remove(f.obj);
       f.obj.geometry?.dispose();
@@ -194,6 +222,7 @@ let camYaw = Math.PI * 0.25;
 let camPitch = 0.1;
 let camDist = 5.8;
 let shake = 0;
+let shakeRate = 2.2; // amplitude units per second, set by setShake()
 let paused = true;
 let started = false;
 let pointerLocked = false;
@@ -294,8 +323,24 @@ let dayT = 0.34;
 // ---------------------------------------------------------------- camera
 const camTarget = new THREE.Vector3();
 const camGoal = new THREE.Vector3();
+const camOffset = new THREE.Vector3(Math.sin(Math.PI * 0.25) * 5.7, 1.15, Math.cos(Math.PI * 0.25) * 5.7);
+const camShoulder = new THREE.Vector3();
+const _camTmp = new THREE.Vector3();
+const BASE_FOV = 58;
+let camDistActual = 5.8;
 let autoAlignTimer = 0;
 let cinematic = false; // test hook: freeze the follow camera for asset comparison shots
+
+/**
+ * Screen shake: `amp` is a world-unit offset, `duration` is clamped to 0.25 s so
+ * even a full-speed pile-up settles quickly. A stronger shake already playing
+ * wins, smaller ones are ignored instead of restarting the timer.
+ */
+function setShake(amp: number, duration = 0.25) {
+  if (amp <= 0 || amp < shake) return;
+  shake = amp;
+  shakeRate = amp / clamp(duration, 0.05, 0.25);
+}
 
 function updateCamera(dt: number) {
   if (cinematic) return;
@@ -325,37 +370,48 @@ function updateCamera(dt: number) {
 
   const cp = Math.cos(camPitch);
   const dir = new THREE.Vector3(Math.sin(camYaw) * cp, Math.sin(camPitch), Math.cos(camYaw) * cp);
-  camGoal.copy(camTarget).addScaledVector(dir, camDist);
 
-  // permanent slight shoulder offset so the crosshair never sits on the player's back
+  // shoulder offset is built from camYaw alone, so strafing never drags it
   if (!player.inCar) {
     const right = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
     const shoulder = aiming ? 0.45 : 0.55;
-    camGoal.addScaledVector(right, shoulder);
     camTarget.addScaledVector(right, shoulder * 0.9);
     camTarget.y += aiming ? 0.06 : 0.12;
+    camShoulder.copy(right).multiplyScalar(shoulder);
+  } else {
+    camShoulder.set(0, 0, 0);
   }
 
-  // keep the camera out of buildings / room walls and above ground
+  // boom collision: if a wall is between the target and the wanted camera
+  // position, shorten the boom quickly, then ease back out — never snap
   const camColliders = player.inInterior ? player.inInterior.colliders : city.colliders;
-  for (const b of camColliders) {
-    if (b.h < 1.5) continue;
-    const r = resolveCircleBox(camGoal.x, camGoal.z, 0.5, b);
-    if (r && camGoal.y < b.h) {
-      camGoal.x = r.x;
-      camGoal.z = r.z;
-    }
-  }
+  const boomHit = rayVsColliders(camTarget, dir, camDist + 0.6, camColliders);
+  const allowed = boomHit ? Math.max(1.1, boomHit.dist - 0.45) : camDist;
+  camDistActual = lerp(camDistActual, allowed, clamp(dt * (allowed < camDistActual ? 20 : 4.5), 0, 1));
+
+  camGoal.copy(camTarget).addScaledVector(dir, camDistActual).add(camShoulder);
   camGoal.y = Math.max(camGoal.y, 0.75);
 
-  camera.position.lerp(camGoal, clamp(dt * 14, 0, 1));
+  // smooth the camera-local offset rather than the world position, so the
+  // framing stays glued to the player while the boom settles
+  _camTmp.copy(camGoal).sub(camTarget);
+  camOffset.lerp(_camTmp, clamp(dt * 12, 0, 1));
+  camera.position.copy(camTarget).add(camOffset);
   if (shake > 0.001) {
     camera.position.x += rand(-shake, shake);
     camera.position.y += rand(-shake, shake);
     camera.position.z += rand(-shake, shake);
-    shake = Math.max(0, shake - dt * 2.2);
+    shake = Math.max(0, shake - dt * shakeRate);
   }
   camera.lookAt(camTarget);
+
+  // small FOV kick once the car is properly moving (never on foot)
+  const speed01 = player.inCar ? clamp(Math.abs(player.inCar.speed) / player.inCar.maxSpeed, 0, 1) : 0;
+  const targetFov = BASE_FOV + clamp((speed01 - 0.45) / 0.55, 0, 1) * 6;
+  if (Math.abs(camera.fov - targetFov) > 0.02) {
+    camera.fov = lerp(camera.fov, targetFov, clamp(dt * 2.5, 0, 1));
+    camera.updateProjectionMatrix();
+  }
 }
 
 // ---------------------------------------------------------------- ground contact
@@ -579,6 +635,7 @@ function toggleVehicle() {
   }
 }
 
+let squealCd = 0;
 function updateDriving(dt: number) {
   const car = player.inCar;
   if (!car) return;
@@ -597,13 +654,21 @@ function updateDriving(dt: number) {
   );
   if (hit && hit.impact > 5) {
     audio.play(hit.impact > 16 ? 'crash2' : 'crash', { vol: clamp(hit.impact / 34, 0.15, 0.8) });
-    shake = clamp(hit.impact / 70, 0.05, 0.4);
+    // shake tracks the closing speed of the hit, capped at 0.25 s
+    setShake(clamp(hit.impact / 70, 0.04, 0.22), clamp(hit.impact / 55, 0.1, 0.25));
     if (hit.impact > 14) {
       hud.toast('Crash!', 'bad', 1200);
       hurt(hit.impact * 0.55);
     }
   }
-  if (handbrake && Math.abs(car.speed) > 12 && Math.random() < 0.12) audio.tyreScreech(0.12);
+  // tyre squeal: a short burst when the handbrake bites at speed, repeated
+  // while the car keeps sliding (no reliance on a per-frame random roll)
+  squealCd = Math.max(0, squealCd - dt);
+  const sliding = handbrake && Math.abs(car.speed) > 8 && car.y < 0.2;
+  if (sliding && squealCd <= 0) {
+    audio.tyreScreech(clamp(Math.abs(car.speed) / 30, 0.08, 0.2));
+    squealCd = 0.5;
+  }
 
   // ramp launch
   for (const pad of city.jumpPads) {
@@ -620,7 +685,10 @@ function updateDriving(dt: number) {
   }
 
   // enter / exit prompt handled in prompt logic
-  audio.engineUpdate({ speed01: clamp(Math.abs(car.speed) / car.maxSpeed, 0, 1), throttle, on: true });
+  // engine note: gear-stepped pitch from the real speed, volume swells with
+  // both throttle and road speed instead of a flat idle drone
+  const speed01 = clamp(Math.abs(car.speed) / car.maxSpeed, 0, 1);
+  audio.engineUpdate({ speed01: car.engineRpm01, throttle: throttle * (0.55 + 0.45 * speed01), on: true });
 
   // headlights at night
   if (headlightAttached !== car) {
@@ -658,7 +726,7 @@ function updateDriving(dt: number) {
           completeObjective('chaos');
         }
         car.speed *= 0.94;
-        shake = 0.12;
+        setShake(0.1, 0.16);
       }
     }
   }
@@ -671,7 +739,7 @@ function updateDriving(dt: number) {
     if (d < 3.4 && Math.abs(cop.speed) > 5 && now - (entry.lastRam ?? 0) > 700) {
       entry.lastRam = now;
       car.applyDamage(7);
-      shake = 0.16;
+      setShake(0.14, 0.2);
       audio.play('crash', { vol: 0.3 });
     }
   }
@@ -694,14 +762,17 @@ function shoot() {
   player.shootCd = 0.17;
   audio.play('shot_pistol', { vol: 0.5, rate: rand(0.94, 1.06), pan: rand(-0.2, 0.2) });
   camPitch = clamp(camPitch - 0.014, -0.55, 1.05);
-  shake = Math.max(shake, 0.05);
+  setShake(0.035, 0.1);
 
   const origin = camera.position.clone();
   const dir = camera.getWorldDirection(new THREE.Vector3()).normalize();
+  // gun muzzle: ahead of the shoulder (not inside the torso) so the flash is
+  // never hidden by the player model from the follow camera
+  const muzzleRight = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
   const muzzle = new THREE.Vector3(
-    player.pos.x - Math.sin(camYaw) * 0.45,
-    player.y + 1.35,
-    player.pos.z - Math.cos(camYaw) * 0.45
+    player.pos.x - Math.sin(camYaw) * 0.75 + muzzleRight.x * 0.28,
+    player.y + 1.32,
+    player.pos.z - Math.cos(camYaw) * 0.75 + muzzleRight.z * 0.28
   );
   addMuzzle(muzzle);
 
@@ -812,7 +883,7 @@ function punch() {
       flags.chaos = true;
     }
   }
-  if (!hit) shake = Math.max(shake, 0.02);
+  if (!hit) setShake(0.02, 0.08);
 }
 
 function ragdollPed(ped: any, velocity: any) {
@@ -844,7 +915,7 @@ function explode(car: any) {
   }
   car.wrecked = true;
   car.speed = 0;
-  shake = 0.4;
+  setShake(0.28, 0.25);
 }
 
 // ---------------------------------------------------------------- damage & money
@@ -852,7 +923,7 @@ function hurt(n: number) {
   player.hp -= n;
   player.lastHit = performance.now();
   hud.damageFlash();
-  shake = Math.max(shake, 0.12);
+  setShake(0.12, 0.2);
   if (player.hp <= 0) wasted();
 }
 
@@ -871,7 +942,7 @@ function wasted() {
   police.clearWanted();
   police.clearAll();
   hud.toast('WASTED — $100 hospital bill', 'bad', 3200);
-  shake = 0.4;
+  setShake(0.3, 0.25);
 }
 
 function busted() {
@@ -1015,12 +1086,14 @@ function copShoot(pos: any, dmg: any) {
 
 // ---------------------------------------------------------------- main loop
 const clock = new THREE.Clock();
+let simTime = 0; // accumulated game time, immune to frame-rate dips
 let fpsAcc = 0;
 let fpsFrames = 0;
 let slowWindows = 0;
 let fastWindows = 0;
 
 function update(dt: number) {
+  simTime += dt;
   dayT = (dayT + dt / 300) % 1;
   city.update(dt, dayT);
 
@@ -1062,7 +1135,7 @@ function update(dt: number) {
       if (d < 2.4 && Math.abs(c.speed) > 3 && now - (entry.lastBump ?? 0) > 1200) {
         entry.lastBump = now;
         hurt(5);
-        shake = Math.max(shake, 0.22);
+        setShake(0.22, 0.25);
         audio.play('bodyfall', { vol: 0.5 });
       }
     }
@@ -1247,6 +1320,7 @@ window.__game = {
       calls: renderer.info.render.calls,
       tris: renderer.info.render.triangles,
       objective: hud.el.objective.textContent,
+      simTime: +simTime.toFixed(2),
       camYaw: +camYaw.toFixed(2),
       camPitch: +camPitch.toFixed(3),
       fov: +camera.fov.toFixed(2),
