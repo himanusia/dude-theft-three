@@ -285,6 +285,45 @@
   .t-btn-fire .t-btn-label { font-size: max(11px, calc(var(--t-btn) * .23)); color: #ff9b93; }
   .t-btn-fire.active { background: rgba(255,59,48,.45); border-color: var(--danger); }
 
+
+  /* ---------------------------------------------------------------- persistence UI
+     Options sheet, the full-screen map and the extra start/pause actions. The map
+     hides the HUD while it is open so no HUD chip can sit on top of it. */
+  .ghost-btn {
+    font-family: var(--font); font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+    padding: 13px 24px; border-radius: 6px; background: transparent; color: rgba(255,255,255,.82);
+    border: 1px solid var(--stroke); cursor: pointer; pointer-events: auto;
+    transition: border-color .12s ease, color .12s ease;
+  }
+  .ghost-btn:hover { border-color: var(--accent); color: #fff; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  #save-status { margin-top: 12px; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.4); min-height: 14px; }
+
+  #settings-sheet {
+    position: fixed; inset: 0; z-index: 45; display: none; align-items: center; justify-content: center;
+    padding: 24px; background: rgba(6,8,12,.88); backdrop-filter: blur(8px);
+  }
+  #settings-sheet.show { display: flex; }
+  #settings-sheet .sheet {
+    width: min(440px, 100%); max-height: 100%; overflow: auto; padding: 24px 26px 22px;
+    border-radius: 14px; background: var(--panel); border: 1px solid var(--stroke); border-left: 3px solid var(--accent);
+  }
+  #settings-sheet h2 { margin: 2px 0 18px; font-size: 28px; text-transform: uppercase; letter-spacing: -.02em; }
+  .set-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; margin-bottom: 14px; font-size: 13px; }
+  .set-row label { color: rgba(255,255,255,.78); }
+  .set-row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); pointer-events: auto; }
+  .set-row output { font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .set-check { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: 13px; color: rgba(255,255,255,.78); }
+  .set-check input { width: 16px; height: 16px; accent-color: var(--accent); pointer-events: auto; }
+  #settings-close { margin-top: 8px; }
+
+  #bigmap {
+    position: fixed; inset: 0; z-index: 50; display: none; width: 100vw; height: 100vh; background: #080a0d;
+  }
+  #bigmap.show { display: block; }
+  /* the map is a full-screen canvas: nothing from the HUD is allowed to float over it */
+  body.map-open #hud, body.settings-open #hud { visibility: hidden; }
+
   /* help */
   body.touch-mode #help-btn {
     display: flex; position: absolute; top: calc(12px + var(--t-safe-t)); left: calc(16px + var(--t-safe-l));
@@ -335,7 +374,7 @@
 
   <div id="ammo-wrap"><small>AMMO</small><span id="ammo">12 / 12</span></div>
 
-  <div id="hints"><b>F</b> enter / exit car &nbsp;·&nbsp; <b>Q</b> punch &nbsp;·&nbsp; <b>R</b> reload &nbsp;·&nbsp; <b>T</b> skip time &nbsp;·&nbsp; <b>M</b> mute</div>
+  <div id="hints"><b>F</b> enter / exit car &nbsp;·&nbsp; <b>Q</b> punch &nbsp;·&nbsp; <b>R</b> reload &nbsp;·&nbsp; <b>T</b> skip time &nbsp;·&nbsp; <b>M</b> map &nbsp;·&nbsp; <b>N</b> mute</div>
 
   <div id="speedo"><div id="speed-val">0</div><span class="unit">KM/H</span></div>
   <div id="prompt"></div>
@@ -365,6 +404,38 @@
   </div>
 </div>
 
+<canvas id="bigmap" role="img" aria-label="City map"></canvas>
+
+<div id="settings-sheet" role="dialog" aria-modal="true" aria-label="Game settings">
+  <div class="sheet">
+    <div class="kicker">Options</div>
+    <h2>Settings</h2>
+    <div class="set-row">
+      <label for="set-sens">Mouse sensitivity</label><output id="out-sens">1.00×</output>
+      <input id="set-sens" type="range" min="0.2" max="3" step="0.05" value="1" />
+    </div>
+    <div class="set-row">
+      <label for="set-master">Master volume</label><output id="out-master">90%</output>
+      <input id="set-master" type="range" min="0" max="1" step="0.05" value="0.9" />
+    </div>
+    <div class="set-row">
+      <label for="set-sfx">SFX volume</label><output id="out-sfx">100%</output>
+      <input id="set-sfx" type="range" min="0" max="1" step="0.05" value="1" />
+    </div>
+    <div class="set-row">
+      <label for="set-bgm">Music volume</label><output id="out-bgm">100%</output>
+      <input id="set-bgm" type="range" min="0" max="1" step="0.05" value="1" />
+    </div>
+    <div class="set-row">
+      <label for="set-scale">Render scale</label><output id="out-scale">1.00×</output>
+      <input id="set-scale" type="range" min="0.5" max="1.5" step="0.05" value="1" />
+    </div>
+    <label class="set-check"><input id="set-invert" type="checkbox" /> Invert mouse Y</label>
+    <label class="set-check"><input id="set-fps-show" type="checkbox" checked /> Show FPS counter</label>
+    <button id="settings-close" class="ghost-btn" type="button">Close</button>
+  </div>
+</div>
+
 <div id="start-screen" class="overlay">
   <div class="card">
     <div class="kicker">Three.js fan sandbox · prototype</div>
@@ -385,8 +456,16 @@
       <kbd>R</kbd><span>Reload</span>
       <kbd>T</kbd><span>Skip time of day</span>
       <kbd>Esc</kbd><span>Pause</span>
+      <kbd>M</kbd><span>City map</span>
+      <kbd>N</kbd><span>Mute audio</span>
+      <kbd>O</kbd><span>Settings</span>
     </div>
-    <button id="start-btn">Start chaos</button>
+    <div class="actions">
+      <button id="start-btn">Start chaos</button>
+      <button id="new-game-btn" class="ghost-btn" type="button">New game</button>
+      <button id="settings-btn" class="ghost-btn" type="button">Settings</button>
+    </div>
+    <div id="save-status"></div>
     <div id="loading-text"></div>
     <div class="credits">
       SFX: Kenney (CC0) — impact, digital, sci-fi packs. Music: Kevin MacLeod / incompetech.com (CC BY 4.0) —
@@ -399,12 +478,17 @@
   <div class="card">
     <h2>Paused</h2>
     <div class="sub" style="text-align:center"><span class="kb-only">Click anywhere to jump back in.</span><span class="touch-only-inline">Tap anywhere to jump back in.</span></div>
-    <button id="resume-btn" style="margin-bottom:18px">Resume</button>
+    <div class="actions" style="justify-content:center;margin-bottom:18px">
+      <button id="resume-btn">Resume</button>
+      <button id="pause-new-game" class="ghost-btn" type="button">New game</button>
+      <button id="pause-settings" class="ghost-btn" type="button">Settings</button>
+    </div>
     <div class="keys" style="text-align:left">
       <kbd>F</kbd><span>Enter / exit vehicle</span>
       <kbd>Q</kbd><span>Punch</span>
       <kbd>R</kbd><span>Reload</span>
-      <kbd>M</kbd><span>Mute audio</span>
+      <kbd>M</kbd><span>City map</span>
+      <kbd>N</kbd><span>Mute audio</span>
     </div>
   </div>
 </div>

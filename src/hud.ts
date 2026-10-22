@@ -1,14 +1,21 @@
 import { clamp, formatMoney } from './utils';
 
 export const WORLD_HALF_MAP = 3 * 52 + 19;
+const MAP_BLOCK = 38; // city block plate size in metres (matches BLOCK in city.ts)
 
 export class HUD {
   declare el: any;
   declare mapCtx: any;
   declare mapSize: any;
+  declare fullMapCtx: any;
   declare lastCash: number;
   declare hitTimer: number;
   declare damageTimer: number;
+  declare mapOpen: boolean;
+  declare settingsOpen: boolean;
+  /** last projection used by drawFullMap, so a harness can sample the player marker */
+  declare mapProjection: any;
+  declare onSettings: ((s: any) => void) | null;
   constructor() {
     this.el = {
       cash: document.getElementById('cash'),
@@ -35,12 +42,37 @@ export class HUD {
       helpBtn: document.getElementById('help-btn'),
       help: document.getElementById('help-sheet'),
       helpClose: document.getElementById('help-close'),
+      bigmap: document.getElementById('bigmap') as HTMLCanvasElement,
+      saveStatus: document.getElementById('save-status'),
+      newGame: document.getElementById('new-game-btn'),
+      pauseNewGame: document.getElementById('pause-new-game'),
+      settingsBtn: document.getElementById('settings-btn'),
+      pauseSettings: document.getElementById('pause-settings'),
+      settings: document.getElementById('settings-sheet'),
+      settingsClose: document.getElementById('settings-close'),
+      setSens: document.getElementById('set-sens'),
+      setInvert: document.getElementById('set-invert'),
+      setMaster: document.getElementById('set-master'),
+      setSfx: document.getElementById('set-sfx'),
+      setBgm: document.getElementById('set-bgm'),
+      setScale: document.getElementById('set-scale'),
+      setFpsShow: document.getElementById('set-fps-show'),
+      outSens: document.getElementById('out-sens'),
+      outMaster: document.getElementById('out-master'),
+      outSfx: document.getElementById('out-sfx'),
+      outBgm: document.getElementById('out-bgm'),
+      outScale: document.getElementById('out-scale'),
     };
     this.mapCtx = this.el.minimap.getContext('2d');
     this.mapSize = this.el.minimap.width;
+    this.fullMapCtx = this.el.bigmap.getContext('2d');
     this.lastCash = -1;
     this.hitTimer = 0;
     this.damageTimer = 0;
+    this.mapOpen = false;
+    this.settingsOpen = false;
+    this.mapProjection = null;
+    this.onSettings = null;
     this.el.helpBtn?.addEventListener('click', () => this.toggleHelp());
     this.el.helpClose?.addEventListener('click', () => this.toggleHelp(false));
     this.el.help?.addEventListener('click', (e: Event) => {
@@ -153,6 +185,226 @@ export class HUD {
 
   setLoading(text: string) {
     this.el.loading.textContent = text;
+  }
+
+  /** The FPS readout is a debug aid, so the settings checkbox hides the chip instead of the loop. */
+  setFpsVisible(on: boolean) {
+    this.el.fps.style.display = on ? '' : 'none';
+  }
+
+  /** One line under the start button: "no save" / "saved 2 min ago". */
+  setSaveStatus(text: string) {
+    const el = this.el.saveStatus;
+    if (!el) return;
+    if (el.textContent !== text) el.textContent = text;
+  }
+
+  /**
+   * Wire the options sheet to a live settings object. The sheet edits the object
+   * in place, so the caller always sees the current values, then pushes the
+   * change through `onChange` (apply + persist).
+   */
+  bindSettings(settings: any, onChange: (s: any) => void) {
+    this.onSettings = onChange;
+    const el = this.el;
+    const push = () => {
+      if (el.setSens) settings.sensitivity = Number(el.setSens.value);
+      if (el.setInvert) settings.invertY = !!el.setInvert.checked;
+      if (el.setMaster) settings.master = Number(el.setMaster.value);
+      if (el.setSfx) settings.sfx = Number(el.setSfx.value);
+      if (el.setBgm) settings.bgm = Number(el.setBgm.value);
+      if (el.setScale) settings.renderScale = Number(el.setScale.value);
+      if (el.setFpsShow) settings.showFps = !!el.setFpsShow.checked;
+      this.syncSettingsLabels(settings);
+      this.onSettings?.(settings);
+    };
+    for (const input of [el.setSens, el.setMaster, el.setSfx, el.setBgm, el.setScale]) {
+      input?.addEventListener('input', push);
+    }
+    for (const box of [el.setInvert, el.setFpsShow]) {
+      box?.addEventListener('change', push);
+    }
+    this.syncSettings(settings);
+  }
+
+  syncSettings(settings: any) {
+    const el = this.el;
+    if (el.setSens) el.setSens.value = String(settings.sensitivity);
+    if (el.setInvert) el.setInvert.checked = !!settings.invertY;
+    if (el.setMaster) el.setMaster.value = String(settings.master);
+    if (el.setSfx) el.setSfx.value = String(settings.sfx);
+    if (el.setBgm) el.setBgm.value = String(settings.bgm);
+    if (el.setScale) el.setScale.value = String(settings.renderScale);
+    if (el.setFpsShow) el.setFpsShow.checked = !!settings.showFps;
+    this.syncSettingsLabels(settings);
+  }
+
+  syncSettingsLabels(settings: any) {
+    const el = this.el;
+    if (el.outSens) el.outSens.textContent = Number(settings.sensitivity).toFixed(2) + '×';
+    if (el.outMaster) el.outMaster.textContent = Math.round(settings.master * 100) + '%';
+    if (el.outSfx) el.outSfx.textContent = Math.round(settings.sfx * 100) + '%';
+    if (el.outBgm) el.outBgm.textContent = Math.round(settings.bgm * 100) + '%';
+    if (el.outScale) el.outScale.textContent = Number(settings.renderScale).toFixed(2) + '×';
+  }
+
+  showSettings(open: boolean) {
+    this.settingsOpen = !!open;
+    this.el.settings?.classList.toggle('show', this.settingsOpen);
+    document.body.classList.toggle('settings-open', this.settingsOpen);
+  }
+
+  showMap(open: boolean) {
+    this.mapOpen = !!open;
+    this.el.bigmap?.classList.toggle('show', this.mapOpen);
+    document.body.classList.toggle('map-open', this.mapOpen);
+  }
+
+  /**
+   * Full-screen city map: road bands, block plates, shop doors, cruisers and the
+   * player arrow. Drawn on demand from the same state the minimap uses, at device
+   * pixel ratio so the labels stay sharp on a retina screen.
+   */
+  drawFullMap(state: any) {
+    const canvas = this.el.bigmap;
+    if (!canvas) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const pw = Math.round(w * dpr);
+    const ph = Math.round(h * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
+    }
+    const ctx = this.fullMapCtx ?? (this.fullMapCtx = canvas.getContext('2d'));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#080a0d';
+    ctx.fillRect(0, 0, w, h);
+
+    const half = WORLD_HALF_MAP + 8;
+    const size = Math.max(160, Math.min(w, h) - 96);
+    const scale = size / (half * 2);
+    const cx = w / 2;
+    const cy = h / 2;
+    const mx = (x: number) => cx + x * scale;
+    const my = (z: number) => cy + z * scale;
+    const blockSide = MAP_BLOCK * scale;
+
+    // road bands first: the asphalt is what makes the street grid readable
+    ctx.strokeStyle = '#161b22';
+    ctx.lineWidth = 14 * scale;
+    ctx.lineCap = 'butt';
+    for (const line of state.roadLines || []) {
+      const a = line.axis === 'x' ? [mx(line.coord), my(-half)] : [mx(-half), my(line.coord)];
+      const b = line.axis === 'x' ? [mx(line.coord), my(half)] : [mx(half), my(line.coord)];
+      ctx.beginPath();
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(b[0], b[1]);
+      ctx.stroke();
+    }
+    // lane dashes, dim so they never compete with the markers
+    ctx.strokeStyle = 'rgba(120,132,148,0.28)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 8]);
+    for (const line of state.roadLines || []) {
+      const a = line.axis === 'x' ? [mx(line.coord), my(-half)] : [mx(-half), my(line.coord)];
+      const b = line.axis === 'x' ? [mx(line.coord), my(half)] : [mx(half), my(line.coord)];
+      ctx.beginPath();
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(b[0], b[1]);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // blocks
+    for (const b of state.blocks || []) {
+      ctx.fillStyle = b.type === 'park' ? '#274b31' : b.type === 'lot' ? '#1d2229' : '#333a45';
+      ctx.fillRect(mx(b.x) - blockSide / 2, my(b.z) - blockSide / 2, blockSide, blockSide);
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(mx(b.x) - blockSide / 2, my(b.z) - blockSide / 2, blockSide, blockSide);
+    }
+
+    // shop doors
+    for (const d of state.shops || []) {
+      ctx.fillStyle = '#ffcc33';
+      ctx.fillRect(mx(d.x) - 2.5, my(d.z) - 2.5, 5, 5);
+    }
+
+    // ambient traffic, faint
+    ctx.fillStyle = 'rgba(140,158,178,0.85)';
+    for (const c of state.cars || []) {
+      if (c === state.playerCar) continue;
+      ctx.fillRect(mx(c.pos.x) - 2, my(c.pos.z) - 2, 4, 4);
+    }
+
+    // police cruisers: pulsing red/blue so they read at a glance
+    const pulse = Math.sin(performance.now() * 0.006) > 0;
+    for (const entry of state.police || []) {
+      const car = entry.car ?? entry;
+      const x = mx(car.pos.x);
+      const y = my(car.pos.z);
+      ctx.fillStyle = pulse ? '#ff3b30' : '#3b82f6';
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // player arrow
+    const px = mx(state.playerPos.x);
+    const pz = my(state.playerPos.z);
+    const yaw = state.playerYaw ?? 0;
+    this.mapProjection = { scale, cx, cy, size, player: [px, pz] };
+    ctx.save();
+    ctx.translate(px, pz);
+    ctx.rotate(-yaw + Math.PI);
+    ctx.beginPath();
+    ctx.moveTo(0, -12);
+    ctx.lineTo(8, 9);
+    ctx.lineTo(0, 5);
+    ctx.lineTo(-8, 9);
+    ctx.closePath();
+    ctx.fillStyle = '#ffcc33';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    // labels: title, legend, close hint
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.font = '800 22px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('CITY MAP', 32, 52);
+    ctx.fillStyle = 'rgba(255,255,255,0.42)';
+    ctx.font = '600 12px ui-sans-serif, system-ui, sans-serif';
+    ctx.fillText('ESC OR M TO CLOSE', 32, 74);
+
+    const legend: [string, string][] = [
+      ['#ffcc33', 'SHOPS'],
+      ['#ff3b30', 'POLICE'],
+      ['#8c9eb2', 'TRAFFIC'],
+    ];
+    let ly = h - 34;
+    ctx.textAlign = 'left';
+    for (const [color, label] of legend.reverse()) {
+      ctx.fillStyle = color;
+      ctx.fillRect(32, ly - 9, 10, 10);
+      ctx.fillStyle = 'rgba(255,255,255,0.62)';
+      ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillText(label, 50, ly);
+      ly -= 20;
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${Math.round(size)} px · ${state.blocks?.length ?? 0} blocks`, w - 32, h - 26);
   }
 
   drawMinimap(state: any) {
