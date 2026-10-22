@@ -2,6 +2,28 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { clamp, rand, pick, angleDelta, resolveCircleBox } from './utils';
 
+const _footV = new THREE.Vector3();
+
+/**
+ * Sit a pedestrian so its lowest sole touches `groundY` exactly. Same reason as
+ * the player: footLift ignores the shoe's forward offset and tilt, so the
+ * planted foot could dip a few millimetres under the pavement.
+ */
+function plantOnGround(ch: any, groundY: number) {
+  if (!ch?.legL || !ch?.legR) return;
+  const scale = ch.scale ?? 1;
+  ch.group.position.y = groundY;
+  let lowest = Infinity;
+  for (const leg of [ch.legL, ch.legR]) {
+    const shoe = leg.children?.[1];
+    if (!shoe) continue;
+    shoe.getWorldPosition(_footV);
+    lowest = Math.min(lowest, _footV.y - 0.075 * scale);
+  }
+  if (lowest === Infinity) return;
+  ch.group.position.y = groundY + (groundY - lowest);
+}
+
 export class Ped {
   declare scene: any;
   declare city: any;
@@ -108,7 +130,7 @@ export class Ped {
     // animation LOD: full cycle up close, frozen pose further away
     if (playerDist < 55) this.char.animate(dt, moving);
     this.char.setDetail(playerDist < 30);
-    this.char.group.position.y -= this.char.footLift ?? 0;
+    plantOnGround(this.char, this.pos.y);
   }
 
   kill(velocity: any, colliders: any) {
