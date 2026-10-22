@@ -358,6 +358,31 @@ function updateCamera(dt: number) {
   camera.lookAt(camTarget);
 }
 
+// ---------------------------------------------------------------- ground contact
+const _footV = new THREE.Vector3();
+
+/**
+ * Sit a character so its lowest sole touches `groundY` exactly.
+ * `character.footLift` approximates that shift but ignores the shoe's forward
+ * offset and its own tilt, which let the planted foot sink a few millimetres
+ * into the road. Measuring the real shoe transforms keeps the feet ground-exact
+ * for every stride angle, including the frozen LOD poses.
+ */
+function plantFeet(ch: any, groundY: number) {
+  if (!ch?.legL || !ch?.legR) return;
+  const scale = ch.scale ?? 1;
+  ch.group.position.y = groundY;
+  let lowest = Infinity;
+  for (const leg of [ch.legL, ch.legR]) {
+    const shoe = leg.children?.[1];
+    if (!shoe) continue;
+    shoe.getWorldPosition(_footV);
+    lowest = Math.min(lowest, _footV.y - 0.075 * scale);
+  }
+  if (lowest === Infinity) return;
+  ch.group.position.y = groundY + (groundY - lowest);
+}
+
 // ---------------------------------------------------------------- player on foot
 const WALK = 4.7;
 const RUN = 7.6;
@@ -402,6 +427,8 @@ function updateOnFoot(dt: number) {
   } else {
     player.y = groundY;
   }
+  // never rest below the surface, whatever the step-up/jump bookkeeping says
+  player.y = Math.max(player.y, groundY);
 
   // collision: room walls/furniture while inside, city colliders outside
   const colliders = player.inInterior ? player.inInterior.colliders : city.colliders;
@@ -447,7 +474,7 @@ function updateOnFoot(dt: number) {
   character.group.position.set(player.pos.x, player.y, player.pos.z);
   character.group.rotation.y = player.yaw;
   character.animate(dt, clamp(speed / RUN, 0, 1), { aiming, airborne: !player.grounded, tilt: -player.vel.dot(new THREE.Vector3(right.x, 0, right.z)) * 0.01 });
-  character.group.position.y -= character.footLift ?? 0;
+  plantFeet(character, player.y);
 
   // footsteps
   if (speed > 1.2 && player.grounded) {
@@ -1221,6 +1248,11 @@ window.__game = {
       tris: renderer.info.render.triangles,
       objective: hud.el.objective.textContent,
       camYaw: +camYaw.toFixed(2),
+      camPitch: +camPitch.toFixed(3),
+      fov: +camera.fov.toFixed(2),
+      speedKmh: player.inCar ? Math.round(player.inCar.kmh) : 0,
+      shake: +shake.toFixed(3),
+      fxCount: fx.length,
       vel: +Math.hypot(player.vel.x, player.vel.z).toFixed(2),
     };
   },
@@ -1278,9 +1310,14 @@ window.__game = {
         if (Math.abs(gap) > 0.03) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
       }
 
-      const playerShoe = character.legL.children[1];
-      playerShoe.getWorldPosition(v);
-      report.player = +(v.y - 0.075 - player.y).toFixed(3);
+      // lowest sole of the on-foot model vs the logical foot height: this is the
+      // number that used to go negative when the planted shoe sank into the road
+      let playerLowest = Infinity;
+      for (const shoe of [character.legL.children[1], character.legR.children[1]]) {
+        shoe.getWorldPosition(v);
+        playerLowest = Math.min(playerLowest, v.y - 0.075 * (character.scale ?? 1));
+      }
+      report.player = +(playerLowest - player.y).toFixed(3);
 
       for (const r of ragdolls) {
         let minY = Infinity;
