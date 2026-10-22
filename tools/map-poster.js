@@ -777,11 +777,25 @@
       const p = polyPath(view, [
         [b.x - h, b.z - h], [b.x + h, b.z - h], [b.x + h, b.z + h], [b.x - h, b.z + h],
       ]);
-      c.fillStyle = b.type === 'park' ? 'rgba(92,118,76,.22)' : 'rgba(120,100,72,.17)';
+      c.fillStyle = b.type === 'park' ? 'rgba(92,118,76,.30)' : 'rgba(120,100,72,.22)';
       c.fill(p);
-      c.strokeStyle = 'rgba(96,82,60,.38)';
+      c.strokeStyle = 'rgba(96,82,60,.45)';
       c.lineWidth = 0.9;
       c.stroke(p);
+    }
+    // Real building footprints. A block drawn as an empty rectangle reads as a hole in the
+    // city; the colliders already carry every footprint the generator placed, so the map can
+    // show the built-up fabric instead of guessing at it.
+    const FOOTPRINTS = ((G.city && G.city.colliders) || []).filter((b) => (b.h || 0) > 3);
+    for (const b of FOOTPRINTS) {
+      const q = polyPath(view, [
+        [b.minX, b.minZ], [b.maxX, b.minZ], [b.maxX, b.maxZ], [b.minX, b.maxZ],
+      ]);
+      c.fillStyle = 'rgba(86,70,52,.30)';
+      c.fill(q);
+      c.strokeStyle = 'rgba(52,42,30,.42)';
+      c.lineWidth = 0.5;
+      c.stroke(q);
     }
     c.restore();
 
