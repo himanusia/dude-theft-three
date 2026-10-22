@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Character } from './character';
-import { clamp, rand, angleDelta } from './utils';
-import { PITCH, BLOCK, GRID } from './city';
+import { clamp, rand, angleDelta } from '../core/utils';
+import { PITCH, BLOCK, GRID } from '../world/city';
 
 // ---------------------------------------------------------------- street metrics
 // The city is a regular grid: blocks of BLOCK metres on a PITCH lattice, so the

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from './utils';
+import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
-import { Car, driverLook } from './car';
+import { Car, driverLook } from '../vehicles/car';
 
 export const PITCH = 52;
 export const BLOCK = 38;

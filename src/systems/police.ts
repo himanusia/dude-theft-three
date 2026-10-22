@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { Car } from './car';
-import { LANE, RoadNav } from './pathfinding';
-import { clamp, angleDelta, rand } from './utils';
+import { Car } from '../vehicles/car';
+import { LANE, RoadNav } from '../core/pathfinding';
+import { clamp, angleDelta, rand } from '../core/utils';
 
 // Cruisers navigate the road grid instead of aiming at the player through walls:
 // RoadNav gives a lane-accurate waypoint list, this module drives the list with the

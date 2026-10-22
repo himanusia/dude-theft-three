@@ -1,8 +1,8 @@
 
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { Car } from '../src/car';
-import { Character } from '../src/character';
+import { Car } from '../src/vehicles/car';
+import { Character } from '../src/actors/character';
 
 // Dev-only helper: builds the procedural assets and hands back GLB as base64 so a
 // headless browser can save them. Not part of the game bundle.

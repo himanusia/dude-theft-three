@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp } from './utils';
+import { clamp } from '../core/utils';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const tmpQ = new THREE.Quaternion();

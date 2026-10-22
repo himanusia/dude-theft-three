@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { AABB, canvasTexture, pick, rand, randInt, roundedBox } from './utils';
+import { AABB, canvasTexture, pick, rand, randInt, roundedBox } from '../core/utils';
 
 /**
  * Reusable interior kit.
