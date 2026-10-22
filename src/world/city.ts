@@ -202,6 +202,7 @@ export class City {
   declare blockGroups: { x: number; z: number; group: any }[];
   declare blocks: any[];
   declare roadLines: any[];
+  declare roads: { name: string; width: number; path: [number, number][] }[];
   declare jumpPads: any[];
   declare parkedSpots: any[];
   declare emissiveMats: any[];
@@ -925,6 +926,13 @@ export class City {
   }
 
   buildRoadRibbons() {
+    // The road network as data, so actors (pedestrians) navigate the streets the map draws
+    // instead of a lattice constant. One list, one width per road.
+    this.roads = [
+      ...ARTERIALS.map((a) => ({ name: a.name, width: a.width, path: a.path as [number, number][] })),
+      { name: 'Ring Road', width: 20, path: RING_ROAD as [number, number][] },
+      ...LOCAL_STREETS.map((s, i) => ({ name: `Local Street ${i}`, width: s.width, path: s.path as [number, number][] })),
+    ];
     const asphalt = new THREE.MeshStandardMaterial({ color: 0x33383f, roughness: 0.95 });
     const ring = new THREE.MeshStandardMaterial({ color: 0x2e333a, roughness: 0.95 });
     const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });

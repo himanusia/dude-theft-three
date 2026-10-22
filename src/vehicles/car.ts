@@ -24,6 +24,8 @@ const WHEELBASE = 2.6;
 const REVERSE_CAP = 0.42;
 
 export class Car {
+  /** where the ground is under a given point; set by main from city.groundHeightAt */
+  groundAt: ((x: number, z: number) => number) | null = null;
   declare scene: any;
   declare type: any;
   declare color: any;
@@ -87,6 +89,7 @@ export class Car {
     this.driverAnchor = null;
     this.driverLook = null;
     this.y = 0;
+    this.groundAt = null as null | ((x: number, z: number) => number);
     this.vy = 0;
     this.roll = 0;
     this.pitch = 0;
@@ -723,13 +726,14 @@ export class Car {
     this.pos.x = clamp(this.pos.x, -worldHalf, worldHalf);
     this.pos.z = clamp(this.pos.z, -worldHalf, worldHalf);
 
-    // airborne
-    if (this.y > 0 || this.vy > 0) {
+    // airborne, relative to the ground under the car (the city has terrain now)
+    const floor = this.groundAt ? this.groundAt(this.pos.x, this.pos.z) : 0;
+    if (this.y > floor + 0.001 || this.vy > 0) {
       this.vy -= 26 * dt;
       this.y += this.vy * dt;
-      if (this.y <= 0) {
+      if (this.y <= floor) {
         const landImpact = Math.abs(this.vy);
-        this.y = 0;
+        this.y = floor;
         this.vy = 0;
         if (landImpact > 6) {
           this.applyDamage(landImpact * 1.5);

@@ -1,19 +1,24 @@
 import { ARTERIALS, RING_ROAD } from '../world/jakartamap';
+import { LOCAL_STREETS } from '../world/streets';
 import * as THREE from 'three';
 import { Character } from './character';
 import { clamp, rand, angleDelta } from '../core/utils';
-import { PITCH, BLOCK, GRID } from '../world/city';
 
 // ---------------------------------------------------------------- street metrics
-// The city is a regular grid: blocks of BLOCK metres on a PITCH lattice, so the
-// sidewalk loop, the kerb line and the crosswalk bands can all be derived from
-// those two numbers instead of sampled from the mesh.
-const ROAD = PITCH - BLOCK; // 14 m carriageway
-const KERB = BLOCK / 2; // 19 m from a block centre to the kerb
-const WALK_MIN = KERB - 2.8; // inner edge of the pedestrian lane band
-const WALK_MAX = KERB - 1.6; // outer edge (still on the 0.26 m plate: ground drops at 18.4)
-const HALF_ROAD = ROAD / 2; // 7 m from the intersection centre to the kerb
-const STRIP_DEPTH = 3.4; // zebra band depth just outside the junction box
+// Pedestrians walk the *pavements of the streets the map actually draws*, not the old 380 m
+// lattice. Those constants (PITCH/BLOCK/GRID at 52/38) no longer describe this world: the
+// blocks moved onto a 112 m pitch inside district polygons, the map is 2.5 km across, and the
+// nearest block to the player spawn is 128 m away - so a pedestrian anchored to a block corner
+// is never on the street the player is standing on, and never reaches a crossing.
+//
+// A pavement lane runs parallel to every road at width/2 + PAVE (inside the kerb line), on both
+// sides, split into legs between polyline points. A pedestrian walks one leg at a time and
+// crosses another road only where a zebra band sits: the bands come from the junctions where
+// two road polylines cross (PedManager.buildCrosswalkStrips), so every metre of asphalt a
+// pedestrian walks is painted.
+const PAVE = 1.5; // pavement lane offset from the kerb line
+const STRIP_HALF = 1.7; // half the depth of a zebra band, along the road it crosses
+const STRIP_PAD = 1.4; // the band overhangs the kerb a little, like the painted stripes do
 const RADIUS = 0.4; // pedestrian body radius
 const FLEE_RADIUS = 18; // a gunshot scares everyone this close
 const SPREAD_RADIUS = 12; // a fleeing pedestrian passes panic on
@@ -23,29 +28,7 @@ const ANIM_LOD = 55; // stop animating limbs beyond this range
 const HIDE_LOD = 110;
 const CROSS_CHANCE = 0.45;
 const CROSS_SPEED = 2.35; // brisk, but still a walk
-
-// corner order around a block, clockwise: NW, NE, SE, SW
-const CORNER_SX = [-1, 1, 1, -1];
-const CORNER_SZ = [-1, -1, 1, 1];
-// crossing options per corner: [dirX, dirZ, corner index on the block across the road]
-const CROSS_OPTIONS: number[][][] = [
-  [
-    [-1, 0, 1],
-    [0, -1, 3],
-  ],
-  [
-    [1, 0, 0],
-    [0, -1, 2],
-  ],
-  [
-    [1, 0, 3],
-    [0, 1, 1],
-  ],
-  [
-    [-1, 0, 2],
-    [0, 1, 0],
-  ],
-];
+const STREET_REACH = 12; // a car this close to the crossing line stops the crossing
 
 const _footV = new THREE.Vector3();
 const _scratch: any[] = [];
@@ -68,6 +51,55 @@ function plantOnGround(ch: any, groundY: number) {
   }
   if (lowest === Infinity) return;
   ch.group.position.y = groundY + (groundY - lowest);
+}
+
+/** Drop points that sit on the straight line between their neighbours. */
+function simplify(path: [number, number][]): [number, number][] {
+  if (path.length < 3) return path.slice();
+  const out: [number, number][] = [path[0]];
+  for (let i = 1; i < path.length - 1; i++) {
+    const a = out[out.length - 1];
+    const b = path[i];
+    const c = path[i + 1];
+    const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const ab = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const bc = Math.hypot(c[0] - b[0], c[1] - b[1]);
+    if (Math.abs(cross) / (ab + bc + 1e-6) < 0.05) continue; // < 3 degrees off the line
+    out.push(b);
+  }
+  out.push(path[path.length - 1]);
+  return out;
+}
+
+/** A straight run of pavement. `u` points from a to b, `len` is its length. */
+interface Leg {
+  i: number;
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  len: number;
+  ux: number;
+  uz: number;
+  road: number;
+  side: number;
+  prev: number;
+  next: number;
+  cross: number; // strip index of the zebra this leg walks over, -1 when it crosses nothing
+  cf: number; // where the crossing starts, in metres along the leg
+  ct: number; // and where the far kerb is
+}
+
+/** A painted zebra: a rectangle the length of a crossing, `hl` across and `hw` deep. */
+interface Strip {
+  cx: number;
+  cz: number;
+  ux: number; // travel direction (across the road being crossed)
+  uz: number;
+  hl: number; // half length along `u` (spans the carriageway)
+  hw: number; // half depth, along the road being crossed
+  len: number; // kerb to kerb
+  road: number; // the road whose paint this is
 }
 
 // ---------------------------------------------------------------- collision index
@@ -121,6 +153,7 @@ class ColliderGrid {
 export class Ped {
   declare scene: any;
   declare city: any;
+  declare mgr: any;
   declare char: any;
   declare pos: any;
   declare yaw: any;
@@ -130,12 +163,11 @@ export class Ped {
   declare target: any;
   declare id: number;
 
-  // navigation: the sidewalk ring of the block we are walking, plus the corner we head for
-  declare bx: number;
-  declare bz: number;
-  declare ring: number;
-  declare ci: number;
-  declare step: number;
+  // navigation: which pavement leg we are walking and which way along it
+  declare leg: number;
+  declare dir: number;
+  declare crossed: boolean;
+  declare wpCross: boolean;
   declare tx: number;
   declare tz: number;
   declare mode: string; // 'walk' | 'cross'
@@ -147,9 +179,7 @@ export class Ped {
   declare crossDx: number;
   declare crossDz: number;
   declare crossLen: number;
-  declare destBx: number;
-  declare destBz: number;
-  declare destCi: number;
+  declare crossStrip: number;
   declare crossT: number;
   declare crossSampleT: number;
   declare crossBack: boolean;
@@ -187,10 +217,12 @@ export class Ped {
   declare partner: any;
   declare leader: any;
   declare talkPhase: number;
+  declare step: number;
 
   constructor(scene: THREE.Scene, city: any, position: any, opts: any = {}) {
     this.scene = scene;
     this.city = city;
+    this.mgr = opts.mgr;
     this.id = opts.id ?? 0;
     this.char = new Character({ scale: rand(0.92, 1.05) });
     this.pos = position.clone();
@@ -202,14 +234,20 @@ export class Ped {
     this.state = 'walk';
     this.dead = false;
     this.target = this.pos.clone();
-    this.ring = rand(WALK_MIN, WALK_MAX);
-    this.step = Math.random() < 0.5 ? 1 : -1;
+    this.leg = 0;
+    this.dir = 1;
+    this.crossed = false;
+    this.wpCross = false;
+    this.tx = this.pos.x;
+    this.tz = this.pos.z;
+    this.step = 1;
     this.mode = 'walk';
     this.waiting = false;
     this.waitT = 0;
     this.lookT = 0;
     this.crossT = 0;
-    this.crossLen = PITCH - this.ring * 2;
+    this.crossLen = 0;
+    this.crossStrip = -1;
     this.crossSampleT = 0;
     this.crossBack = false;
     this.samples = [];
@@ -250,6 +288,7 @@ export class Ped {
     this.char.group.rotation.y = this.yaw;
   }
 
+  // kept for the harnesses that reset a crowd by hand
   get radius() {
     return RADIUS;
   }
@@ -258,40 +297,53 @@ export class Ped {
     return new THREE.Vector3(this.pos.x, this.pos.y + 1.55, this.pos.z);
   }
 
-  // ------------------------------------------------------------ sidewalk graph
-  private cornerX(ci: number) {
-    return this.bx + CORNER_SX[ci] * this.ring;
+  // ------------------------------------------------------------ pavement graph
+  private legT() {
+    const L = this.mgr.legs[this.leg];
+    return clamp((this.pos.x - L.ax) * L.ux + (this.pos.z - L.az) * L.uz, 0, L.len);
   }
 
-  private cornerZ(ci: number) {
-    return this.bz + CORNER_SZ[ci] * this.ring;
-  }
-
-  /** Re-anchor the ring walk to the block the pedestrian is standing on. */
+  /** Re-anchor the walk to the pavement lane the pedestrian is standing on. */
   repath() {
-    this.bx = Math.round(this.pos.x / PITCH) * PITCH;
-    this.bz = Math.round(this.pos.z / PITCH) * PITCH;
-    this.bx = clamp(this.bx, -GRID * PITCH, GRID * PITCH);
-    this.bz = clamp(this.bz, -GRID * PITCH, GRID * PITCH);
+    const near = this.mgr.nearestLeg(this.pos.x, this.pos.z);
+    this.leg = near.leg;
+    this.dir = near.t < this.mgr.legs[this.leg].len * 0.5 ? 1 : -1;
+    this.crossed = false;
     this.mode = 'walk';
     this.waiting = false;
+    this.waitT = 0;
     this.crossBack = false;
+    this.crossT = 0;
+    this.crossStrip = -1;
+    this.samples.length = 0;
     this.spreadDepth = 0;
     this.spreadDone = false;
-    // face the nearest corner and walk at it
-    let best = 0;
-    let bd = Infinity;
-    for (let ci = 0; ci < 4; ci++) {
-      const dx = this.cornerX(ci) - this.pos.x;
-      const dz = this.cornerZ(ci) - this.pos.z;
-      const d = dx * dx + dz * dz;
-      if (d < bd) {
-        bd = d;
-        best = ci;
+    this.plan();
+  }
+
+  /** Walk to the zebra at the end of this run of pavement, or turn the corner. */
+  private plan() {
+    const L = this.mgr.legs[this.leg];
+    const t = this.legT();
+    if (!this.crossed && L.cross >= 0) {
+      const entry = this.dir > 0 ? L.cf : L.ct;
+      const past = this.dir > 0 ? t > entry + 0.5 : t < entry - 0.5;
+      const ahead = this.dir > 0 ? t < entry - 0.5 : t > entry + 0.5;
+      if (past) {
+        // already over this crossing on the way in: keep walking
+        this.crossed = true;
+      } else if (!ahead) {
+        this.beginCrossing();
+        return;
+      } else {
+        this.wpCross = true;
+        this.setTarget(L.ax + L.ux * entry, L.az + L.uz * entry);
+        return;
       }
     }
-    this.ci = best;
-    this.setTarget(this.cornerX(best), this.cornerZ(best));
+    this.wpCross = false;
+    const endT = this.dir > 0 ? L.len : 0;
+    this.setTarget(L.ax + L.ux * endT, L.az + L.uz * endT);
   }
 
   private setTarget(x: number, z: number) {
@@ -300,14 +352,36 @@ export class Ped {
     this.target.set(x, this.pos.y, z);
   }
 
-  private advanceCorner() {
-    this.ci = (this.ci + this.step + 4) % 4;
-    this.setTarget(this.cornerX(this.ci), this.cornerZ(this.ci));
+  /** The far kerb of a crossing: wait for a gap in the traffic, then walk the stripes. */
+  private beginCrossing() {
+    const L = this.mgr.legs[this.leg];
+    const fromT = this.dir > 0 ? L.cf : L.ct;
+    const toT = this.dir > 0 ? L.ct : L.cf;
+    this.crossFromX = L.ax + L.ux * fromT;
+    this.crossFromZ = L.az + L.uz * fromT;
+    this.crossDx = L.ux * this.dir;
+    this.crossDz = L.uz * this.dir;
+    this.crossLen = Math.abs(toT - fromT);
+    this.crossStrip = L.cross;
+    this.mode = 'cross';
+    this.waiting = true;
+    this.waitT = 0;
+    this.lookT = 0;
+    this.crossBack = false;
+    this.crossT = 0;
+    this.crossSampleT = 0;
+    this.samples.length = 0;
+    this.wpCross = false;
+    this.setTarget(L.ax + L.ux * toT, L.az + L.uz * toT);
   }
 
-  /** True when the point is on the same block plate (no road in between). */
-  private sameBlock(x: number, z: number) {
-    return Math.abs(Math.round(x / PITCH) * PITCH - this.bx) < 1 && Math.abs(Math.round(z / PITCH) * PITCH - this.bz) < 1;
+  private arriveLegEnd() {
+    const L = this.mgr.legs[this.leg];
+    const next = this.dir > 0 ? L.next : L.prev;
+    if (next >= 0) this.leg = next;
+    else this.dir = -this.dir; // the end of the street: walk back down it
+    this.crossed = false;
+    this.plan();
   }
 
   // ------------------------------------------------------------ reactions
@@ -326,6 +400,7 @@ export class Ped {
     this.waiting = false;
     this.mode = 'walk';
     this.crossBack = false;
+    this.wpCross = false;
     this.state = 'flee';
     this.stateT = 0;
     void mgr;
@@ -416,18 +491,11 @@ export class Ped {
       const rz = c.pos.z - mz;
       const along = rx * this.crossDx + rz * this.crossDz;
       const across = rx * px + rz * pz;
-      if (Math.abs(along) > HALF_ROAD + 3) continue;
+      if (Math.abs(along) > STREET_REACH + 3) continue;
       if (Math.abs(across) > 11) continue; // 11 m of road either side of the crossing
       return true;
     }
     return false;
-  }
-
-  /** True when (x,z) is on the carriageway, not on a kerb lip. */
-  private onCarriageway(x: number, z: number) {
-    const fx = ((x / PITCH) % 1 + 1) % 1;
-    const fz = ((z / PITCH) % 1 + 1) % 1;
-    return Math.abs(fx - 0.5) * PITCH <= HALF_ROAD || Math.abs(fz - 0.5) * PITCH <= HALF_ROAD;
   }
 
   /** A car that closed in while I am on the asphalt: get out of its lane. */
@@ -494,14 +562,23 @@ export class Ped {
     }
   }
 
+  /** Place the body at (x,z) on the pavement and re-plan from there. */
+  placeAt(x: number, z: number) {
+    this.pos.set(x, 0, z);
+    this.pushOut(this.mgr.grid);
+    this.pos.y = this.city.groundHeightAt(this.pos.x, this.pos.z);
+    this.char.group.position.copy(this.pos);
+    this.repath();
+  }
+
   // ------------------------------------------------------------ state updates
   private updateWalk(dt: number, ctx: any, mgr: any) {
     if (this.speed < 0.05) return; // pinned by a test harness: stand still
     this.speed = this.walkSpeed;
 
-    // pairs: the follower shadows the leader's corner while both are on the block
+    // pairs: the follower shadows the leader while both are on the same run of pavement
     const L = this.leader;
-    if (L && !L.dead && L.state === 'walk' && L.mode === 'walk' && !L.waiting && this.sameBlock(L.tx, L.tz)) {
+    if (L && !L.dead && L.state === 'walk' && L.mode === 'walk' && !L.waiting && this.leg === L.leg) {
       this.tx = L.tx;
       this.tz = L.tz;
       this.target.set(this.tx, this.pos.y, this.tz);
@@ -521,10 +598,11 @@ export class Ped {
         this.crossBack = false;
         this.samples.length = 0;
       } else if (this.waitT > 12) {
-        // nobody is letting me through; walk my block instead
+        // nobody is letting me through; walk on instead
         this.waiting = false;
         this.mode = 'walk';
-        this.advanceCorner();
+        this.crossed = true;
+        this.plan();
       }
       return;
     }
@@ -537,49 +615,15 @@ export class Ped {
     const dx = this.tx - this.pos.x;
     const dz = this.tz - this.pos.z;
     if (dx * dx + dz * dz < 0.81) {
-      this.arriveCorner(ctx, mgr);
+      if (this.wpCross) this.beginCrossing();
+      else this.arriveLegEnd();
       return;
     }
     this.moveToward(this.tx, this.tz, this.speed, dt);
   }
 
-  private arriveCorner(ctx: any, mgr: any) {
-    if (this.mode === 'cross') {
-      this.finishCrossing(mgr);
-      return;
-    }
-    // sometimes cross the road at the junction instead of turning the corner
-    if (Math.random() < CROSS_CHANCE) {
-      const options = CROSS_OPTIONS[this.ci];
-      const opt = options[Math.random() < 0.5 ? 0 : 1];
-      const nbx = clamp(this.bx + opt[0] * PITCH, -GRID * PITCH, GRID * PITCH);
-      const nbz = clamp(this.bz + opt[1] * PITCH, -GRID * PITCH, GRID * PITCH);
-      if (nbx !== this.bx || nbz !== this.bz) {
-        this.crossFromX = this.cornerX(this.ci);
-        this.crossFromZ = this.cornerZ(this.ci);
-        this.crossDx = opt[0];
-        this.crossDz = opt[1];
-        this.mode = 'cross';
-        this.waiting = true;
-        this.waitT = 0;
-        this.lookT = 0;
-        this.crossBack = false;
-        this.samples.length = 0;
-        this.destBx = nbx;
-        this.destBz = nbz;
-        this.destCi = opt[2];
-        this.setTarget(
-          nbx + CORNER_SX[opt[2]] * this.ring,
-          nbz + CORNER_SZ[opt[2]] * this.ring
-        );
-        return;
-      }
-    }
-    this.advanceCorner();
-  }
-
   private updateCrossing(dt: number, ctx: any, mgr: any) {
-    const onRoad = this.onCarriageway(this.pos.x, this.pos.z);
+    const onRoad = mgr.onCarriageway(this.pos.x, this.pos.z);
     if (!this.crossBack && onRoad && this.carOnTopOfMe(ctx)) {
       // a car I did not expect: reverse out of its lane, do not stand in it
       this.crossBack = true;
@@ -594,7 +638,7 @@ export class Ped {
     this.crossSampleT += dt;
     if (this.crossSampleT > 0.15) {
       this.crossSampleT = 0;
-      if (this.onCarriageway(this.pos.x, this.pos.z)) {
+      if (onRoad) {
         const n = this.samples.length;
         if (n < 160) {
           this.samples.push(+this.pos.x.toFixed(2), +this.pos.z.toFixed(2));
@@ -621,11 +665,9 @@ export class Ped {
     this.mode = 'walk';
     this.waiting = false;
     this.crossBack = false;
-    this.bx = this.destBx;
-    this.bz = this.destBz;
-    this.ci = this.destCi;
+    this.crossed = true;
     this.samples.length = 0;
-    this.advanceCorner();
+    this.plan();
   }
 
   private updateFlee(dt: number, ctx: any, mgr: any) {
@@ -899,7 +941,9 @@ export class PedManager {
   declare respawnTimer: number;
   declare flowTimer: number;
   declare grid: ColliderGrid;
-  declare strips: any[];
+  declare strips: Strip[];
+  declare legs: Leg[];
+  declare roads: { name: string; width: number; path: [number, number][] }[];
   declare stats: any;
   declare crossingLog: any[];
   declare ctx: any;
@@ -912,8 +956,20 @@ export class PedManager {
     this.city = city;
     this.count = count;
     this.peds = [];
+    // The road network is the map's own data: the arterials, the ring and the local streets
+    // that were cut between the blocks. Simplified first, so a street sampled every 18 m for
+    // clipping becomes one straight run instead of thirty.
+    const source = city.roads && city.roads.length
+      ? city.roads
+      : [
+          ...ARTERIALS.map((a) => ({ name: a.name, width: a.width, path: a.path as [number, number][] })),
+          { name: 'Ring Road', width: 20, path: RING_ROAD as [number, number][] },
+          ...LOCAL_STREETS.map((s, i) => ({ name: `Local Street ${i}`, width: s.width, path: s.path as [number, number][] })),
+        ];
+    this.roads = source.map((r: any) => ({ name: r.name, width: r.width, path: simplify(r.path) }));
     this.grid = new ColliderGrid(city.colliders || []);
     this.strips = this.buildCrosswalkStrips();
+    this.legs = this.buildPavements();
     this.stats = { fleeEvents: 0, fleeSpreads: 0, witnessEvents: 0, witnessWanted: 0, cowerEvents: 0, crossings: 0, crossingsOnStrip: 0, crossAborts: 0 };
     this.crossingLog = [];
     this.simTime = 0;
@@ -921,7 +977,8 @@ export class PedManager {
     this.pairs = 0;
     this.ctx = null;
     for (let i = 0; i < count; i++) {
-      this.peds.push(new Ped(scene, city, city.randomSidewalkPointNear(110), { id: i, idler: i % 12 === 0 }));
+      const spot = this.pavementPointNear(0, 0, 6, 110) || this.randomPavementPoint();
+      this.peds.push(new Ped(scene, city, spot, { id: i, idler: i % 12 === 0, mgr: this }));
     }
     // roughly a third of the crowd walks in pairs
     for (let i = 0; i + 1 < this.peds.length; i += 3) {
@@ -938,43 +995,294 @@ export class PedManager {
   }
 
   /**
-   * Zebra bands at the junctions the map actually has.
+   * Zebra bands at every junction the street network actually has.
    *
-   * They used to sit on every crossing of a lattice that no longer exists, so pedestrians
-   * aimed at crosswalks in empty fields. Now the junctions come from the arterial and ring
-   * polylines: wherever two roads cross, a crossing is placed just outside the junction box.
+   * A band is the painted crossing *across* one road, placed just outside the junction box of
+   * the road it meets: its length spans that road's carriageway (`hl`, kerb to kerb) and its
+   * depth runs along the met road (`hw`). A pedestrian walking one road's pavement meets the
+   * band head on, which is the only place it may step onto the asphalt.
    */
   buildCrosswalkStrips() {
-    const strips: any[] = [];
-    const roads = [...ARTERIALS.map((a) => ({ path: a.path, width: a.width })), { path: RING_ROAD, width: 20 }];
-    for (let a = 0; a < roads.length; a++) {
-      for (let b = a + 1; b < roads.length; b++) {
-        const pa = roads[a].path;
-        const pb = roads[b].path;
-        for (let i = 0; i < pa.length - 1; i++) {
-          for (let j = 0; j < pb.length - 1; j++) {
-            const hit = segmentCross(pa[i], pa[i + 1], pb[j], pb[j + 1]);
-            if (!hit) continue;
-            const half = Math.max(roads[a].width, roads[b].width) / 2;
-            const boxX = hit[0];
-            const boxZ = hit[1];
-            strips.push({ minX: boxX - half, maxX: boxX + half, minZ: boxZ + half, maxZ: boxZ + half + STRIP_DEPTH });
-            strips.push({ minX: boxX - half, maxX: boxX + half, minZ: boxZ - half - STRIP_DEPTH, maxZ: boxZ - half });
-            strips.push({ minX: boxX + half, maxX: boxX + half + STRIP_DEPTH, minZ: boxZ - half, maxZ: boxZ + half });
-            strips.push({ minX: boxX - half - STRIP_DEPTH, maxX: boxX - half, minZ: boxZ - half, maxZ: boxZ + half });
-          }
-        }
+    const strips: Strip[] = [];
+    const roads = this.roads;
+    const segs: { r: number; p1: [number, number]; p2: [number, number]; minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
+    for (let r = 0; r < roads.length; r++) {
+      const path = roads[r].path;
+      for (let i = 0; i < path.length - 1; i++) {
+        const p1 = path[i];
+        const p2 = path[i + 1];
+        segs.push({
+          r,
+          p1,
+          p2,
+          minX: Math.min(p1[0], p2[0]),
+          maxX: Math.max(p1[0], p2[0]),
+          minZ: Math.min(p1[1], p2[1]),
+          maxZ: Math.max(p1[1], p2[1]),
+        });
+      }
+    }
+    for (let a = 0; a < segs.length; a++) {
+      const A = segs[a];
+      for (let b = a + 1; b < segs.length; b++) {
+        const B = segs[b];
+        if (A.r === B.r) continue;
+        if (A.maxX < B.minX || A.minX > B.maxX || A.maxZ < B.minZ || A.minZ > B.maxZ) continue;
+        const hit = segmentCross(A.p1, A.p2, B.p1, B.p2);
+        if (!hit) continue;
+        this.addStrips(strips, hit, A, B);
+        this.addStrips(strips, hit, B, A);
       }
     }
     return strips;
   }
 
+  /** Two bands (one either side of the junction) for crossing `cross` while walking `walk`. */
+  private addStrips(strips: Strip[], hit: [number, number], walk: any, cross: any) {
+    const wWalk = this.roads[walk.r].width;
+    const wCross = this.roads[cross.r].width;
+    const dx = walk.p2[0] - walk.p1[0];
+    const dz = walk.p2[1] - walk.p1[1];
+    const len = Math.hypot(dx, dz) || 1;
+    const ux = dx / len;
+    const uz = dz / len;
+    const cxr = cross.p2[0] - cross.p1[0];
+    const czr = cross.p2[1] - cross.p1[1];
+    const lenc = Math.hypot(cxr, czr) || 1;
+    const nx = cxr / lenc;
+    const nz = czr / lenc;
+    const off = wWalk / 2 + PAVE;
+    for (const side of [-1, 1]) {
+      // offset sideways off the walked road (along the road being crossed), and the band runs
+      // along the walker's direction so the stripes are walked end to end
+      strips.push({
+        cx: hit[0] + nx * off * side,
+        cz: hit[1] + nz * off * side,
+        ux,
+        uz,
+        hl: wCross / 2 + STRIP_PAD,
+        hw: STRIP_HALF,
+        len: wCross + 2 * STRIP_PAD,
+        road: cross.r,
+      });
+    }
+  }
+
+  /**
+   * Pavement legs: every road gets a lane on each side at width/2 + PAVE, split at the polyline
+   * points and chained prev/next. A leg also records the zebra it walks over, and where along
+   * the leg that carriageway starts and ends.
+   */
+  buildPavements() {
+    const legs: Leg[] = [];
+    for (let r = 0; r < this.roads.length; r++) {
+      const path = this.roads[r].path;
+      const off = this.roads[r].width / 2 + PAVE;
+      for (const side of [-1, 1]) {
+        const first = legs.length;
+        for (let i = 0; i < path.length - 1; i++) {
+          const na = this.normalAt(path, i);
+          const nb = this.normalAt(path, i + 1);
+          const ax = path[i][0] + na[0] * off * side;
+          const az = path[i][1] + na[1] * off * side;
+          const bx = path[i + 1][0] + nb[0] * off * side;
+          const bz = path[i + 1][1] + nb[1] * off * side;
+          const len = Math.hypot(bx - ax, bz - az);
+          if (len < 0.5) continue;
+          legs.push({
+            i: legs.length,
+            ax,
+            az,
+            bx,
+            bz,
+            len,
+            ux: (bx - ax) / len,
+            uz: (bz - az) / len,
+            road: r,
+            side,
+            prev: -1,
+            next: -1,
+            cross: -1,
+            cf: 0,
+            ct: 0,
+          });
+        }
+        for (let k = first + 1; k < legs.length; k++) {
+          legs[k].prev = k - 1;
+          legs[k - 1].next = k;
+        }
+      }
+    }
+    for (const leg of legs) this.findCrossing(leg);
+    return legs;
+  }
+
+  /** Outward normal of the road at polyline vertex i, averaged across the joint. */
+  private normalAt(path: [number, number][], i: number) {
+    let nx = 0;
+    let nz = 0;
+    if (i > 0) {
+      const dx = path[i][0] - path[i - 1][0];
+      const dz = path[i][1] - path[i - 1][1];
+      const l = Math.hypot(dx, dz) || 1;
+      nx += -dz / l;
+      nz += dx / l;
+    }
+    if (i < path.length - 1) {
+      const dx = path[i + 1][0] - path[i][0];
+      const dz = path[i + 1][1] - path[i][1];
+      const l = Math.hypot(dx, dz) || 1;
+      nx += -dz / l;
+      nz += dx / l;
+    }
+    const l = Math.hypot(nx, nz) || 1;
+    return [nx / l, nz / l];
+  }
+
+  /** Where this leg walks through another road's carriageway, and the zebra that covers it. */
+  private findCrossing(leg: Leg) {
+    const roads = this.roads;
+    for (let r = 0; r < roads.length; r++) {
+      if (r === leg.road) continue;
+      const road = roads[r];
+      const half = road.width / 2;
+      // cheap reject: the road's own path must come near this leg at all
+      let near = false;
+      for (let i = 0; i < road.path.length && !near; i++) {
+        const d = Math.hypot(road.path[i][0] - leg.ax, road.path[i][1] - leg.az);
+        if (d < leg.len + half + 40) near = true;
+      }
+      if (!near) continue;
+      let t0 = -1;
+      let t1 = -1;
+      for (let t = 0; t <= leg.len; t += 1) {
+        const x = leg.ax + leg.ux * t;
+        const z = leg.az + leg.uz * t;
+        const inside = this.city.distToPath(x, z, road.path) < half - 0.2;
+        if (inside) {
+          if (t0 < 0) t0 = t;
+          t1 = t;
+        }
+      }
+      if (t0 < 0 || t1 - t0 < 2) continue;
+      const midT = (t0 + t1) / 2;
+      const strip = this.stripAt(leg.ax + leg.ux * midT, leg.az + leg.uz * midT, leg.ux, leg.uz);
+      if (strip < 0) continue; // no paint here: the pedestrian has no business on that asphalt
+      leg.cross = strip;
+      leg.cf = t0;
+      leg.ct = t1;
+      return;
+    }
+  }
+
+  /** Index of the zebra containing this point whose travel direction matches (ux,uz). */
+  stripAt(x: number, z: number, ux: number, uz: number) {
+    for (let i = 0; i < this.strips.length; i++) {
+      const s = this.strips[i];
+      if (Math.abs(s.ux * ux + s.uz * uz) < 0.7) continue;
+      const px = x - s.cx;
+      const pz = z - s.cz;
+      if (Math.abs(px * s.ux + pz * s.uz) > s.hl) continue;
+      if (Math.abs(px * -s.uz + pz * s.ux) > s.hw) continue;
+      return i;
+    }
+    return -1;
+  }
+
   isOnCrosswalk(x: number, z: number) {
     for (let i = 0; i < this.strips.length; i++) {
       const s = this.strips[i];
-      if (x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ) return true;
+      const px = x - s.cx;
+      const pz = z - s.cz;
+      if (Math.abs(px * s.ux + pz * s.uz) > s.hl) continue;
+      if (Math.abs(px * -s.uz + pz * s.ux) > s.hw) continue;
+      return true;
     }
     return false;
+  }
+
+  /** True when (x,z) is on a road's asphalt, measured against the map's road polylines. */
+  onCarriageway(x: number, z: number) {
+    for (let r = 0; r < this.roads.length; r++) {
+      const road = this.roads[r];
+      if (this.city.distToPath(x, z, road.path) < road.width / 2) return true;
+    }
+    return false;
+  }
+
+  /** Nearest point on the pavement network, for re-anchoring a pedestrian. */
+  nearestLeg(x: number, z: number) {
+    let best = 0;
+    let bd = Infinity;
+    let bt = 0;
+    for (let i = 0; i < this.legs.length; i++) {
+      const L = this.legs[i];
+      let t = (x - L.ax) * L.ux + (z - L.az) * L.uz;
+      t = clamp(t, 0, L.len);
+      const px = L.ax + L.ux * t;
+      const pz = L.az + L.uz * t;
+      const d = (x - px) * (x - px) + (z - pz) * (z - pz);
+      if (d < bd) {
+        bd = d;
+        best = i;
+        bt = t;
+      }
+    }
+    return { leg: best, t: bt, d: Math.sqrt(bd) };
+  }
+
+  /** Is this point clear of buildings and props the body cannot stand in? */
+  clearOfBuildings(x: number, z: number) {
+    const list = this.grid.near(x, z);
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (x > b.minX - RADIUS - 0.2 && x < b.maxX + RADIUS + 0.2 && z > b.minZ - RADIUS - 0.2 && z < b.maxZ + RADIUS + 0.2) return false;
+    }
+    return true;
+  }
+
+  /**
+   * A spot on a pavement lane between minR and maxR from (cx,cz). This is how the crowd is
+   * spawned and recycled: never a random block ring, so nobody is ever dropped inside a wall.
+   */
+  pavementPointNear(cx: number, cz: number, minR: number, maxR: number) {
+    const candidates: number[] = [];
+    for (let i = 0; i < this.legs.length; i++) {
+      const L = this.legs[i];
+      let t = (cx - L.ax) * L.ux + (cz - L.az) * L.uz;
+      t = clamp(t, 0, L.len);
+      const d = Math.hypot(L.ax + L.ux * t - cx, L.az + L.uz * t - cz);
+      const da = Math.hypot(L.ax - cx, L.az - cz);
+      const db = Math.hypot(L.bx - cx, L.bz - cz);
+      if (d > maxR) continue;
+      if (da < minR && db < minR) continue;
+      candidates.push(i);
+    }
+    if (!candidates.length) return null;
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const leg = this.legs[candidates[Math.floor(rand(0, candidates.length))]];
+      const t = rand(0, leg.len);
+      const x = leg.ax + leg.ux * t;
+      const z = leg.az + leg.uz * t;
+      const d = Math.hypot(x - cx, z - cz);
+      if (d < minR || d > maxR) continue;
+      if (!this.clearOfBuildings(x, z)) continue;
+      return new THREE.Vector3(x, this.city.groundHeightAt(x, z), z);
+    }
+    return null;
+  }
+
+  randomPavementPoint() {
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const leg = this.legs[Math.floor(rand(0, this.legs.length))];
+      const t = rand(0, leg.len);
+      const x = leg.ax + leg.ux * t;
+      const z = leg.az + leg.uz * t;
+      if (!this.clearOfBuildings(x, z)) continue;
+      return new THREE.Vector3(x, this.city.groundHeightAt(x, z), z);
+    }
+    const leg = this.legs[0];
+    return new THREE.Vector3(leg.ax, this.city.groundHeightAt(leg.ax, leg.az), leg.az);
   }
 
   logCrossing(ped: any) {
@@ -1059,7 +1367,7 @@ export class PedManager {
       }
     }
 
-    // keep the crowd near the player: far pedestrians get re-placed around him
+    // keep the crowd near the player: far pedestrians are re-placed on a pavement around him
     this.flowTimer += dt;
     if (this.flowTimer > 2.2 && ctx.playerPos) {
       this.flowTimer = 0;
@@ -1067,11 +1375,10 @@ export class PedManager {
         const p = this.peds[i];
         if (p.dead) continue;
         if (p.pos.distanceTo(ctx.playerPos) > 80) {
-          const spot = this.city.randomSidewalkPointAround(ctx.playerPos, 14, 48);
-          p.pos.copy(spot);
-          p.pos.y = this.city.groundHeightAt(p.pos.x, p.pos.z);
-          p.repath();
-          p.char.group.position.copy(p.pos);
+          const spot = this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 14, 48) ||
+            this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 8, 120);
+          // no pavement in reach: leave the body where it is rather than teleport it into a shop
+          if (spot) p.placeAt(spot.x, spot.z);
         }
       }
     }
@@ -1082,7 +1389,8 @@ export class PedManager {
       this.respawnTimer = 0;
       this.peds = this.peds.filter((p) => !p.dead);
       while (this.peds.length < this.count) {
-        this.peds.push(new Ped(this.scene, this.city, this.city.randomSidewalkPointNear(110), { id: this.peds.length, idler: this.peds.length % 12 === 0 }));
+        const spot = this.pavementPointNear(ctx.playerPos?.x ?? 0, ctx.playerPos?.z ?? 0, 8, 110) || this.randomPavementPoint();
+        this.peds.push(new Ped(this.scene, this.city, spot, { id: this.peds.length, idler: this.peds.length % 12 === 0, mgr: this }));
       }
     }
   }

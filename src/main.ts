@@ -1382,7 +1382,8 @@ function resetCar(car: any, spot?: { pos: THREE.Vector3; yaw: number }) {
   }
   car.speed = 0;
   car.steer = 0;
-  car.y = 0;
+  // park on the ground the car is standing on, not on the old y = 0 plane
+  car.y = city.groundHeightAt(car.pos.x, car.pos.z);
   car.vy = 0;
   car.roll = 0;
   car.pitch = 0;
@@ -1406,9 +1407,11 @@ function resetPeds() {
     ped.dead = false;
     ped.state = 'walk';
     ped.speed = rand(1.2, 1.9);
-    ped.phase = 0;
-    ped.pos.copy(city.randomSidewalkPointNear(110));
-    ped.target = city.randomSidewalkPoint();
+    // the pavement network, not the old block-ring lattice: a restored crowd must not be
+    // dropped inside a shopfront (that was the source of the "ped inside a building" count)
+    const spot = peds.pavementPointNear(player.pos.x, player.pos.z, 14, 48) || peds.pavementPointNear(player.pos.x, player.pos.z, 8, 110);
+    if (spot) ped.placeAt(spot.x, spot.z);
+    else ped.repath();
     ped.yaw = rand(0, Math.PI * 2);
     ped.char.group.visible = true;
     ped.char.group.position.copy(ped.pos);
@@ -1760,6 +1763,7 @@ let fastWindows = 0;
 
 function update(dt: number) {
   simTime += dt;
+  for (const c of allCars()) c.groundAt = (x: number, z: number) => city.groundHeightAt(x, z);
   city.updateCulling(player.pos.x, player.pos.z);
   // wall-clock beat, not accumulated dt: dt is clamped to 50 ms, so a slow host
   // would otherwise stretch "every 20 s" to half a minute of real time
@@ -2088,8 +2092,11 @@ window.__game = {
       }
 
       for (const car of allCars()) {
-        // local wheel height vs the wheel radius (body roll/pitch is cosmetic)
-        const gap = car.wheels[0].pivot.position.y - car.wheelRadius + car.y;
+        // local wheel height vs the wheel radius, measured against the ground under the car:
+        // with terrain, "y = 0" is no longer the floor, so the old absolute check flagged every
+        // car that sat correctly on a slope
+        const ground = city.groundHeightAt(car.pos.x, car.pos.z);
+        const gap = car.wheels[0].pivot.position.y - car.wheelRadius + car.y - ground;
         if (Math.abs(gap) > 0.03) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
       }
 
