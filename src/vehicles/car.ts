@@ -742,6 +742,13 @@ export class Car {
       }
     }
 
+    // driving uphill: the ground rises under the car, so lift it instead of letting it sink
+    // into the slope (the airborne branch above only ever handled falling)
+    if (this.y < floor) {
+      this.y = floor;
+      this.vy = 0;
+    }
+
     // visuals
     this.mesh.position.set(this.pos.x, this.y, this.pos.z);
     this.mesh.rotation.y = this.yaw;

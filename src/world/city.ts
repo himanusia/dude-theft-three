@@ -1489,10 +1489,13 @@ export class City {
         for (const m of rawMatrices) {
           const pos = new THREE.Vector3().setFromMatrixPosition(m);
           if (this.groundHeightAt(pos.x, pos.z) <= 0) continue;
-          // traffic lights were modelled from the road surface (0), everything else already
-          // assumed a 0.26 kerb: only the lights need the lift
+          // One contract: a prop's base sits on the ground under it. The matrices were authored
+          // against two different floors (road-level for traffic lights, kerb-level 0.26 for the
+          // rest), so the correction is the delta between the real ground and that assumed
+          // floor - not the raw terrain height, which double-counts the kerb on a plate.
+          const assumedBase = name.startsWith('traffic-') ? 0 : 0.26;
           const lifted = m.clone();
-          if (name.startsWith('traffic-')) lifted.elements[13] += 0.26;
+          lifted.elements[13] += this.groundHeightAt(pos.x, pos.z) - assumedBase;
           kept.push(lifted);
         }
         matrices = kept;

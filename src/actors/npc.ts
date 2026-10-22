@@ -209,6 +209,7 @@ export class Ped {
   declare blocked: boolean;
   declare avoidT: number;
   declare avoidSign: number;
+  declare slideT: number;
   declare stuckT: number;
   declare lastX: number;
   declare lastZ: number;
@@ -273,6 +274,7 @@ export class Ped {
     this.blocked = false;
     this.avoidT = 0;
     this.avoidSign = 1;
+    this.slideT = 0;
     this.stuckT = 0;
     this.lastX = this.pos.x;
     this.lastZ = this.pos.z;
@@ -283,6 +285,7 @@ export class Ped {
     this.talkPhase = rand(0, 10);
 
     this.repath();
+    if (this.mgr) this.pushOut(this.mgr.grid);
     this.scene.add(this.char.group);
     this.char.group.position.copy(this.pos);
     this.char.group.rotation.y = this.yaw;
@@ -307,7 +310,7 @@ export class Ped {
   repath() {
     const near = this.mgr.nearestLeg(this.pos.x, this.pos.z);
     this.leg = near.leg;
-    this.dir = near.t < this.mgr.legs[this.leg].len * 0.5 ? 1 : -1;
+    this.dir = this.mgr.legDirTowardCrossing(this.leg, near.t);
     this.crossed = false;
     this.mode = 'walk';
     this.waiting = false;
@@ -378,8 +381,12 @@ export class Ped {
   private arriveLegEnd() {
     const L = this.mgr.legs[this.leg];
     const next = this.dir > 0 ? L.next : L.prev;
-    if (next >= 0) this.leg = next;
-    else this.dir = -this.dir; // the end of the street: walk back down it
+    if (next >= 0) {
+      this.leg = next;
+      this.dir = this.mgr.legDirTowardCrossing(next, this.dir > 0 ? 0 : this.mgr.legs[next].len);
+    } else {
+      this.dir = -this.dir; // the end of the street: walk back down it
+    }
     this.crossed = false;
     this.plan();
   }
@@ -532,33 +539,40 @@ export class Ped {
 
   /** Push the body out of building footprints; never let the centre enter one. */
   private pushOut(grid: ColliderGrid) {
-    const list = grid.near(this.pos.x, this.pos.z);
-    for (let i = 0; i < list.length; i++) {
-      const b = list[i];
-      const cx = clamp(this.pos.x, b.minX, b.maxX);
-      const cz = clamp(this.pos.z, b.minZ, b.maxZ);
-      const dx = this.pos.x - cx;
-      const dz = this.pos.z - cz;
-      const d2 = dx * dx + dz * dz;
-      if (d2 > RADIUS * RADIUS) continue;
-      if (d2 > 1e-6) {
-        const d = Math.sqrt(d2);
-        const push = (RADIUS - d) / d;
-        this.pos.x += dx * push;
-        this.pos.z += dz * push;
-      } else {
-        // centre inside the box: eject through the shallowest face
-        const pl = this.pos.x - b.minX;
-        const pr = b.maxX - this.pos.x;
-        const pb = this.pos.z - b.minZ;
-        const pf = b.maxZ - this.pos.z;
-        const m = Math.min(pl, pr, pb, pf);
-        if (m === pl) this.pos.x = b.minX - RADIUS;
-        else if (m === pr) this.pos.x = b.maxX + RADIUS;
-        else if (m === pb) this.pos.z = b.minZ - RADIUS;
-        else this.pos.z = b.maxZ + RADIUS;
+    // Shop rows are rotated boxes binned as axis-aligned ones, so their colliders overlap:
+    // ejecting from one can land the body in the next. A few passes settle the pocket.
+    for (let pass = 0; pass < 4; pass++) {
+      let pushed = false;
+      const list = grid.near(this.pos.x, this.pos.z);
+      for (let i = 0; i < list.length; i++) {
+        const b = list[i];
+        const cx = clamp(this.pos.x, b.minX, b.maxX);
+        const cz = clamp(this.pos.z, b.minZ, b.maxZ);
+        const dx = this.pos.x - cx;
+        const dz = this.pos.z - cz;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > RADIUS * RADIUS) continue;
+        if (d2 > 1e-6) {
+          const d = Math.sqrt(d2);
+          const push = (RADIUS - d) / d;
+          this.pos.x += dx * push;
+          this.pos.z += dz * push;
+        } else {
+          // centre inside the box: eject through the shallowest face
+          const pl = this.pos.x - b.minX;
+          const pr = b.maxX - this.pos.x;
+          const pb = this.pos.z - b.minZ;
+          const pf = b.maxZ - this.pos.z;
+          const m = Math.min(pl, pr, pb, pf);
+          if (m === pl) this.pos.x = b.minX - RADIUS;
+          else if (m === pr) this.pos.x = b.maxX + RADIUS;
+          else if (m === pb) this.pos.z = b.minZ - RADIUS;
+          else this.pos.z = b.maxZ + RADIUS;
+        }
+        pushed = true;
+        this.blocked = true;
       }
-      this.blocked = true;
+      if (!pushed) return;
     }
   }
 
@@ -617,6 +631,21 @@ export class Ped {
     if (dx * dx + dz * dz < 0.81) {
       if (this.wpCross) this.beginCrossing();
       else this.arriveLegEnd();
+      return;
+    }
+    if (this.stuckT > 0.35) {
+      // the lane runs into a wall (the shop rows overhang it): sidestep along the wall
+      // instead of pushing straight in, which used to pin pedestrians in place
+      this.slideT = 1.0;
+      this.stuckT = 0;
+      this.avoidSign = -this.avoidSign;
+    }
+    if (this.slideT > 0) {
+      this.slideT -= dt;
+      const d = Math.hypot(dx, dz) || 1;
+      const nx = (-dz / d) * this.avoidSign;
+      const nz = (dx / d) * this.avoidSign;
+      this.moveBy(dx / d + nx * 1.8, dz / d + nz * 1.8, this.speed, dt);
       return;
     }
     this.moveToward(this.tx, this.tz, this.speed, dt);
@@ -1210,6 +1239,17 @@ export class PedManager {
     return false;
   }
 
+  /** Which way to walk from `t` along this leg to reach its zebra: 1, -1, or the longer way. */
+  legDirTowardCrossing(leg: number, t: number) {
+    const L = this.legs[leg];
+    if (L.cross >= 0) {
+      if (t < L.cf) return 1;
+      if (t > L.ct) return -1;
+      return 1; // standing on the paint: finish the crossing
+    }
+    return t < L.len * 0.5 ? 1 : -1;
+  }
+
   /** Nearest point on the pavement network, for re-anchoring a pedestrian. */
   nearestLeg(x: number, z: number) {
     let best = 0;
@@ -1246,7 +1286,8 @@ export class PedManager {
    * spawned and recycled: never a random block ring, so nobody is ever dropped inside a wall.
    */
   pavementPointNear(cx: number, cz: number, minR: number, maxR: number) {
-    const candidates: number[] = [];
+    const all: number[] = [];
+    const nearCrossing: number[] = [];
     for (let i = 0; i < this.legs.length; i++) {
       const L = this.legs[i];
       let t = (cx - L.ax) * L.ux + (cz - L.az) * L.uz;
@@ -1256,20 +1297,28 @@ export class PedManager {
       const db = Math.hypot(L.bx - cx, L.bz - cz);
       if (d > maxR) continue;
       if (da < minR && db < minR) continue;
-      candidates.push(i);
+      all.push(i);
+      // a lane that reaches a zebra soon: the crowd belongs at the corners, not on a
+      // 300 m stretch of boulevard in the middle of nowhere
+      if (L.cross >= 0 && Math.min(Math.abs(t - L.cf), Math.abs(t - L.ct)) <= 30) nearCrossing.push(i);
     }
-    if (!candidates.length) return null;
-    for (let attempt = 0; attempt < 16; attempt++) {
-      const leg = this.legs[candidates[Math.floor(rand(0, candidates.length))]];
+    const pool = nearCrossing.length ? nearCrossing : all;
+    if (!pool.length) return null;
+    let fallback: any = null;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const leg = this.legs[pool[Math.floor(rand(0, pool.length))]];
       const t = rand(0, leg.len);
       const x = leg.ax + leg.ux * t;
       const z = leg.az + leg.uz * t;
       const d = Math.hypot(x - cx, z - cz);
       if (d < minR || d > maxR) continue;
-      if (!this.clearOfBuildings(x, z)) continue;
-      return new THREE.Vector3(x, this.city.groundHeightAt(x, z), z);
+      const spot = new THREE.Vector3(x, this.city.groundHeightAt(x, z), z);
+      if (this.clearOfBuildings(x, z)) return spot;
+      if (!fallback) fallback = spot;
     }
-    return null;
+    // every sample landed under a shop row overhang: hand back one anyway and let the
+    // body's own push-out settle it, rather than teleporting the crowd across the map
+    return fallback;
   }
 
   randomPavementPoint() {
