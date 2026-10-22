@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { City, PITCH, WORLD_HALF } from './city.js';
-import { Character } from './character.js';
-import { Car } from './car.js';
-import { Ragdoll } from './ragdoll.js';
-import { PedManager } from './npc.js';
-import { Police } from './police.js';
-import { Traffic } from './traffic.js';
-import { HUD } from './hud.js';
-import { AudioSys } from './audio.js';
+import { City, PITCH, WORLD_HALF } from './city';
+import { Character } from './character';
+import { Car } from './car';
+import { Ragdoll } from './ragdoll';
+import { PedManager } from './npc';
+import { Police } from './police';
+import { Traffic } from './traffic';
+import { HUD } from './hud';
+import { AudioSys } from './audio';
 import {
   clamp,
   lerp,
@@ -17,12 +17,14 @@ import {
   rayVsColliders,
   resolveCircleBox,
   formatMoney,
-} from './utils.js';
+} from './utils';
 
 // ---------------------------------------------------------------- renderer
-const canvas = document.getElementById('game');
+const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+const BASE_PIXEL_RATIO = Math.min(2, window.devicePixelRatio);
+let pixelRatio = BASE_PIXEL_RATIO;
+renderer.setPixelRatio(pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -40,7 +42,35 @@ const city = new City(scene);
 city.addProps();
 
 // ---------------------------------------------------------------- state
-const player = {
+declare global {
+  interface Window {
+    __game: any;
+    __lastShot: any;
+    __viewer?: any;
+  }
+}
+
+type ObjectiveId = 'drove' | 'chaos' | 'stars' | 'escape';
+
+interface PlayerState {
+  pos: THREE.Vector3;
+  y: number;
+  vy: number;
+  yaw: number;
+  vel: THREE.Vector3;
+  hp: number;
+  cash: number;
+  inCar: Car | null;
+  mag: number;
+  magSize: number;
+  reloading: number;
+  shootCd: number;
+  grounded: boolean;
+  rhythm: number;
+  lastHit?: number;
+}
+
+const player: PlayerState = {
   pos: city.getSpawn(),
   y: 0,
   vy: 0,
@@ -71,9 +101,9 @@ headlight.position.set(0, 0.9, 0);
 headlight.target.position.set(0, 0.2, 20);
 scene.add(headlight);
 scene.add(headlight.target);
-let headlightAttached = null;
+let headlightAttached: Car | null = null;
 
-const cityCars = [];
+const cityCars: Car[] = [];
 for (let i = 0; i < 9; i++) {
   const spot = city.randomParkingSpot();
   const type = pick(['sedan', 'sedan', 'muscle', 'van', 'taxi']);
@@ -86,7 +116,7 @@ function allCars() {
 }
 
 // cash pickups
-const pickups = [];
+const pickups: { pos: THREE.Vector3; mesh: THREE.Mesh; active: boolean; timer: number }[] = [];
 const pickupGeo = new THREE.TorusGeometry(0.42, 0.14, 8, 14);
 const pickupMat = new THREE.MeshStandardMaterial({ color: 0xffcf3a, emissive: 0xffb300, emissiveIntensity: 0.55, metalness: 0.85, roughness: 0.25 });
 for (let i = 0; i < 14; i++) {
@@ -97,15 +127,15 @@ for (let i = 0; i < 14; i++) {
 }
 
 // effects
-const fx = [];
-function addTracer(a, b) {
+const fx: { obj: any; life: number; max: number; kind: string }[] = [];
+function addTracer(a: THREE.Vector3, b: THREE.Vector3) {
   const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
   const mat = new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.95 });
   const line = new THREE.Line(geo, mat);
   scene.add(line);
   fx.push({ obj: line, life: 0.08, max: 0.08, kind: 'fade' });
 }
-function addSpark(pos, color = 0xffd27a) {
+function addSpark(pos: THREE.Vector3, color: number = 0xffd27a) {
   const m = new THREE.Mesh(
     new THREE.SphereGeometry(0.13, 6, 5),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
@@ -114,7 +144,7 @@ function addSpark(pos, color = 0xffd27a) {
   scene.add(m);
   fx.push({ obj: m, life: 0.22, max: 0.22, kind: 'spark' });
 }
-function addMuzzle(pos) {
+function addMuzzle(pos: THREE.Vector3) {
   const m = new THREE.Mesh(
     new THREE.SphereGeometry(0.16, 6, 5),
     new THREE.MeshBasicMaterial({ color: 0xfff0b0, transparent: true, opacity: 0.9 })
@@ -123,7 +153,7 @@ function addMuzzle(pos) {
   scene.add(m);
   fx.push({ obj: m, life: 0.05, max: 0.05, kind: 'spark' });
 }
-function updateFx(dt) {
+function updateFx(dt: number) {
   for (let i = fx.length - 1; i >= 0; i--) {
     const f = fx[i];
     f.life -= dt;
@@ -139,10 +169,11 @@ function updateFx(dt) {
   }
 }
 
-const ragdolls = [];
+const ragdolls: Ragdoll[] = [];
 
 
 function lockPointer() {
+  suppressLockPauseUntil = performance.now() + 600;
   try {
     const p = canvasEl.requestPointerLock?.();
     if (p && typeof p.catch === 'function') p.catch(() => {});
@@ -161,8 +192,9 @@ let shake = 0;
 let paused = true;
 let started = false;
 let pointerLocked = false;
+let suppressLockPauseUntil = 0; // ignore the unlock event our own lock request produces
 
-const canvasEl = canvas;
+const canvasEl = canvas as HTMLCanvasElement;
 canvasEl.addEventListener('click', () => {
   if (started && !pointerLocked) {
     lockPointer();
@@ -171,7 +203,9 @@ canvasEl.addEventListener('click', () => {
 
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvasEl;
-  if (!pointerLocked && started) {
+  // losing the pointer (alt-tab) pauses, but the transient unlock created by our own
+  // requestPointerLock() must not re-pause the game right after the player hits Resume
+  if (!pointerLocked && started && !paused && performance.now() > suppressLockPauseUntil) {
     paused = true;
     hud.showPause(true);
   }
@@ -220,7 +254,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
 
-function togglePause(force) {
+function togglePause(force?: boolean) {
   const next = force === undefined ? !paused : !!force;
   paused = next;
   hud.showPause(next);
@@ -237,7 +271,7 @@ const camGoal = new THREE.Vector3();
 let autoAlignTimer = 0;
 let cinematic = false; // test hook: freeze the follow camera for asset comparison shots
 
-function updateCamera(dt) {
+function updateCamera(dt: number) {
   if (cinematic) return;
   const aiming = mouse.right && !player.inCar;
   const wantDist = player.inCar ? 8.4 : aiming ? 1.35 : 5.8;
@@ -301,7 +335,7 @@ function updateCamera(dt) {
 const WALK = 4.7;
 const RUN = 7.6;
 
-function updateOnFoot(dt) {
+function updateOnFoot(dt: number) {
   const forward = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
   const right = new THREE.Vector3(-forward.z, 0, forward.x);
   const wish = new THREE.Vector3();
@@ -383,6 +417,7 @@ function updateOnFoot(dt) {
   character.group.position.set(player.pos.x, player.y, player.pos.z);
   character.group.rotation.y = player.yaw;
   character.animate(dt, clamp(speed / RUN, 0, 1), { aiming, airborne: !player.grounded, tilt: -player.vel.dot(new THREE.Vector3(right.x, 0, right.z)) * 0.01 });
+  character.group.position.y -= character.footLift ?? 0;
 
   // footsteps
   if (speed > 1.2 && player.grounded) {
@@ -444,8 +479,9 @@ function toggleVehicle() {
   }
 }
 
-function updateDriving(dt) {
+function updateDriving(dt: number) {
   const car = player.inCar;
+  if (!car) return;
   const throttle = keys.has('KeyW') ? 1 : 0;
   const straightBack = keys.has('KeyS');
   const brake = straightBack && car.speed > 0.6;
@@ -637,7 +673,7 @@ function shoot() {
   if (player.mag === 0) startReload();
 }
 
-function raySphere(origin, dir, center, radius) {
+function raySphere(origin: any, dir: any, center: any, radius: number) {
   const ox = center.x - origin.x;
   const oy = center.y - origin.y;
   const oz = center.z - origin.z;
@@ -679,7 +715,7 @@ function punch() {
   if (!hit) shake = Math.max(shake, 0.02);
 }
 
-function ragdollPed(ped, velocity) {
+function ragdollPed(ped: any, velocity: any) {
   const info = ped.kill(velocity);
   const r = new Ragdoll(scene, {
     position: info.position,
@@ -694,7 +730,7 @@ function ragdollPed(ped, velocity) {
   ragdolls.push(r);
 }
 
-function explode(car) {
+function explode(car: any) {
   audio.play('explosion', { vol: 0.8, rate: rand(0.9, 1.1) });
   for (let i = 0; i < 8; i++) {
     const p = new THREE.Vector3(car.pos.x + rand(-1.5, 1.5), car.y + rand(0.4, 2.2), car.pos.z + rand(-1.5, 1.5));
@@ -712,7 +748,7 @@ function explode(car) {
 }
 
 // ---------------------------------------------------------------- damage & money
-function hurt(n) {
+function hurt(n: number) {
   player.hp -= n;
   player.lastHit = performance.now();
   hud.damageFlash();
@@ -720,7 +756,7 @@ function hurt(n) {
   if (player.hp <= 0) wasted();
 }
 
-function addCash(n) {
+function addCash(n: number) {
   player.cash += n;
 }
 
@@ -752,10 +788,10 @@ function busted() {
 }
 
 // ---------------------------------------------------------------- objectives
-const flags = { drove: false, chaos: false, stars: false, escape: false };
-const reward = { drove: 150, chaos: 300, stars: 800, escape: 1500 };
+const flags: { drove: boolean; chaos: boolean; stars: boolean; escape: boolean; chaosRewarded?: boolean } = { drove: false, chaos: false, stars: false, escape: false };
+const reward: Record<ObjectiveId, number> = { drove: 150, chaos: 300, stars: 800, escape: 1500 };
 
-function completeObjective(id) {
+function completeObjective(id: ObjectiveId) {
   const r = reward[id] ?? 100;
   addCash(r);
   hud.toast(`Objective complete · +$${r}`, 'cash', 2600);
@@ -787,8 +823,8 @@ function updateObjectives() {
 }
 
 // ---------------------------------------------------------------- startup
-hud.el.startBtn.addEventListener('click', async () => {
-  hud.el.startBtn.disabled = true;
+hud.el.startBtn!.addEventListener('click', async () => {
+  hud.el.startBtn!.disabled = true;
   hud.setLoading('loading audio…');
   try {
     await audio.init();
@@ -806,11 +842,19 @@ hud.el.startBtn.addEventListener('click', async () => {
   hud.toast('Welcome to the city', 'good');
 });
 
-document.getElementById('pause-screen').addEventListener('click', () => {
+function resumeGame() {
+  if (!paused) return;
   paused = false;
   hud.showPause(false);
+  suppressLockPauseUntil = performance.now() + 600;
   lockPointer();
+}
+
+document.getElementById('pause-screen')!.addEventListener('click', resumeGame);
+document.addEventListener('pointerdown', () => {
+  if (paused) resumeGame();
 });
+document.getElementById('resume-btn')?.addEventListener('click', resumeGame);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -819,7 +863,7 @@ window.addEventListener('resize', () => {
 });
 
 // shooting trigger (held fire, semi-auto cadence)
-function updateCombat(dt) {
+function updateCombat(dt: number) {
   player.shootCd = Math.max(0, player.shootCd - dt);
   if (player.reloading > 0) {
     player.reloading -= dt;
@@ -832,7 +876,7 @@ function updateCombat(dt) {
 }
 
 // ---------------------------------------------------------------- pickups
-function updatePickups(dt) {
+function updatePickups(dt: number) {
   for (const p of pickups) {
     if (!p.active) {
       p.timer -= dt;
@@ -859,7 +903,7 @@ function updatePickups(dt) {
 }
 
 // ---------------------------------------------------------------- cops shoot the player
-function copShoot(pos, dmg) {
+function copShoot(pos: any, dmg: any) {
   audio.play('shot_rifle', { vol: clamp(0.5 - pos.distanceTo(player.pos) / 90, 0.12, 0.45), rate: 1.1 });
   const from = pos.clone().setY(1.4);
   const to = new THREE.Vector3(player.pos.x, player.y + 1.1, player.pos.z);
@@ -871,8 +915,10 @@ function copShoot(pos, dmg) {
 const clock = new THREE.Clock();
 let fpsAcc = 0;
 let fpsFrames = 0;
+let slowWindows = 0;
+let fastWindows = 0;
 
-function update(dt) {
+function update(dt: number) {
   dayT = (dayT + dt / 300) % 1;
   city.update(dt, dayT);
 
@@ -934,8 +980,15 @@ function update(dt) {
         const push = (min - d) * 0.5;
         const nx = dx / d;
         const nz = dz / d;
-        a.pos.x -= nx * push; a.pos.z -= nz * push;
-        b.pos.x += nx * push; b.pos.z += nz * push;
+        // never displace the car the player is driving — push the other one aside
+        if (a === player.inCar) {
+          b.pos.x += nx * push * 2; b.pos.z += nz * push * 2;
+        } else if (b === player.inCar) {
+          a.pos.x -= nx * push * 2; a.pos.z -= nz * push * 2;
+        } else {
+          a.pos.x -= nx * push; a.pos.z -= nz * push;
+          b.pos.x += nx * push; b.pos.z += nz * push;
+        }
       }
     }
   }
@@ -1015,9 +1068,25 @@ function animate() {
   fpsAcc += Math.min(0.5, rawDt);
   fpsFrames++;
   if (fpsAcc > 0.5) {
-    hud.setFps(Math.round(fpsFrames / fpsAcc));
+    const fps = fpsFrames / fpsAcc;
+    hud.setFps(Math.round(fps));
     fpsAcc = 0;
     fpsFrames = 0;
+
+    // dynamic resolution: keep the frame rate responsive instead of dropping frames
+    if (!paused) {
+      slowWindows = fps < 48 ? slowWindows + 1 : 0;
+      fastWindows = fps > 57 ? fastWindows + 1 : 0;
+      if (slowWindows >= 2 && pixelRatio > 0.75) {
+        pixelRatio = Math.max(0.75, pixelRatio - 0.15);
+        renderer.setPixelRatio(pixelRatio);
+        slowWindows = 0;
+      } else if (fastWindows >= 8 && pixelRatio < BASE_PIXEL_RATIO) {
+        pixelRatio = Math.min(BASE_PIXEL_RATIO, pixelRatio + 0.1);
+        renderer.setPixelRatio(pixelRatio);
+        fastWindows = 0;
+      }
+    }
   }
 }
 
@@ -1060,6 +1129,7 @@ window.__game = {
       copCars: police.cars.length,
       peds: peds.peds.length,
       fps: hud.el.fps.textContent,
+      pixelRatio: +pixelRatio.toFixed(2),
       pedsNear: peds.peds.filter((p) => !p.dead && p.pos.distanceTo(player.pos) < 70).length,
       carsNear: allCars().filter((c) => c.pos.distanceTo(player.pos) < 70).length,
       calls: renderer.info.render.calls,
@@ -1078,10 +1148,10 @@ window.__game = {
     wasted,
     addCash,
     startReload,
-    face(x, z) {
+    face(x: number, z: number) {
       camYaw = Math.atan2(-(x - player.pos.x), -(z - player.pos.z));
     },
-    teleport(x, z) {
+    teleport(x: number, z: number) {
       player.pos.set(x, 0, z);
       player.y = city.groundHeightAt(x, z);
       player.vel.set(0, 0, 0);
@@ -1089,20 +1159,67 @@ window.__game = {
     get camYaw() {
       return camYaw;
     },
-    setTime(t) {
+    setTime(t: number) {
       dayT = t;
     },
-    setCam(yaw, pitch) {
+    setCam(yaw: number, pitch: any) {
       if (yaw !== undefined) camYaw = yaw;
       if (pitch !== undefined) camPitch = pitch;
     },
     keys() {
       return [...keys];
     },
-    cinematic(on) {
+
+    // ---- floating geometry audit: every actor and prop must touch the ground ----
+    audit() {
+      const report: { peds: any[]; cars: any[]; player: number | null; ragdolls: any[]; props: any[]; buildings: any[] } = { peds: [], cars: [], player: null, ragdolls: [], props: [], buildings: [] };
+      const v = new THREE.Vector3();
+
+      for (const ped of peds.peds) {
+        if (ped.dead) continue;
+        // a walking dude lifts one foot; the planted foot is what must touch the ground
+        const bottoms = [ped.char.legL.children[1], ped.char.legR.children[1]].map((shoe) => {
+          shoe.getWorldPosition(v);
+          return v.y - 0.075 * (ped.char.scale ?? 1);
+        });
+        const ground = city.groundHeightAt(ped.pos.x, ped.pos.z);
+        const gap = Math.min(...bottoms) - ground;
+        if (gap > 0.06 || gap < -0.05) report.peds.push({ gap: +gap.toFixed(3), pos: ped.pos.toArray().map((n: number) => +n.toFixed(1)) });
+      }
+
+      for (const car of allCars()) {
+        // local wheel height vs the wheel radius (body roll/pitch is cosmetic)
+        const gap = car.wheels[0].pivot.position.y - car.wheelRadius + car.y;
+        if (Math.abs(gap) > 0.03) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
+      }
+
+      const playerShoe = character.legL.children[1];
+      playerShoe.getWorldPosition(v);
+      report.player = +(v.y - 0.075 - player.y).toFixed(3);
+
+      for (const r of ragdolls) {
+        let minY = Infinity;
+        for (const pt of Object.values(r.points)) minY = Math.min(minY, pt.p.y - pt.r);
+        if (minY > 0.12) report.ragdolls.push({ minY: +minY.toFixed(2) });
+      }
+
+      for (const item of city.propAudit || []) {
+        const ground = city.groundHeightAt(item.x, item.z);
+        const gap = item.bottom - ground;
+        // sprites and wall-mounted props legitimately float; only ground furniture is checked
+        // seats, signal heads and lens boxes hang in the air on purpose
+        if (['bench', 'traffic-arm', 'traffic-housing', 'traffic-lens'].includes(item.name)) continue;
+        if (gap > 0.06 || gap < -0.06) {
+          report.props.push({ name: item.name, gap: +gap.toFixed(3), at: [+item.x.toFixed(1), +item.z.toFixed(1)] });
+        }
+      }
+
+      return report;
+    },
+    cinematic(on: boolean) {
       cinematic = !!on;
     },
-    lookFrom(px, py, pz, tx, ty, tz) {
+    lookFrom(px: any, py: any, pz: any, tx: any, ty: any, tz: any) {
       cinematic = true;
       camera.position.set(px, py, pz);
       camera.lookAt(tx, ty, tz);

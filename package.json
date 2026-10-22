@@ -1,0 +1,33 @@
+{
+  "name": "dude-theft-three",
+  "version": "1.0.0",
+  "description": "Fan-made, browser-based demake of the *Dude Theft Wars* formula: open-world city, drivable cars, ragdoll pedestrians, shooting, wanted level and police chase. Everything 3D is **generated in code** (no model files: buildings, cars, characters and textures are built procedurally at runtime).",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --port 8765 --strictPort"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/himanusia/dude-theft-three.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/himanusia/dude-theft-three/issues"
+  },
+  "homepage": "https://github.com/himanusia/dude-theft-three#readme",
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "private": true
+}

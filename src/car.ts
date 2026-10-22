@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, rand, pick, resolveCircleBox, shadowBlob, roundedBox, canvasTexture } from './utils.js';
+import { clamp, lerp, rand, pick, resolveCircleBox, shadowBlob, roundedBox, canvasTexture } from './utils';
 
 // saturated toy-car palette from the reference screenshots
 const CAR_COLORS = [0xff3399, 0xd02b2b, 0x2f6fd0, 0xffce2e, 0x2fa89a, 0xf0f0f4, 0x24242c, 0xe86a2b, 0x39b54a];
@@ -13,10 +13,44 @@ const SPECS = {
 };
 
 export class Car {
-  constructor(scene, opts = {}) {
+  declare scene: any;
+  declare type: any;
+  declare color: any;
+  declare isPolice: any;
+  declare yaw: any;
+  declare pos: any;
+  declare speed: number;
+  declare steer: number;
+  declare y: number;
+  declare vy: number;
+  declare roll: number;
+  declare pitch: number;
+  declare health: number;
+  declare wrecked: boolean;
+  declare honk: number;
+  declare wheelRadius: any;
+  declare length: any;
+  declare width: any;
+  declare radius: any;
+  declare aiPaused: boolean;
+  declare wheels: any[];
+  declare headMat: any;
+  declare tailMat: any;
+  declare mesh: any;
+  declare brakeLight: boolean;
+  declare lightRed: THREE.MeshStandardMaterial;
+  declare lightBlue: THREE.MeshStandardMaterial;
+  declare maxSpeed: number;
+  declare accel: number;
+  declare brake: number;
+  declare turn: number;
+  declare mass: number;
+  declare grip: number;
+  declare lastCollision: any;
+  constructor(scene: THREE.Scene, opts: any = {}) {
     this.scene = scene;
     this.type = opts.type ?? 'sedan';
-    const spec = SPECS[this.type] ?? SPECS.sedan;
+    const spec = (SPECS as Record<string, typeof SPECS.sedan>)[this.type] ?? SPECS.sedan;
     Object.assign(this, spec);
     this.color = opts.color ?? pick(CAR_COLORS);
     this.isPolice = opts.police ?? false;
@@ -91,7 +125,8 @@ export class Car {
     this.wheels = [];
     const wz = L * 0.33;
     const wx = W * 0.5 + 0.05;
-    for (const [sx, sz, front] of [[-1, 1, true], [1, 1, true], [-1, -1, false], [1, -1, false]]) {
+    const wheelOffsets: [number, number, boolean][] = [[-1, 1, true], [1, 1, true], [-1, -1, false], [1, -1, false]];
+    for (const [sx, sz, front] of wheelOffsets) {
       const pivot = new THREE.Group();
       pivot.position.set(sx * wx, this.wheelRadius, sz * wz);
       const wheel = new THREE.Mesh(wheelGeo, wheelMat);
@@ -222,7 +257,8 @@ export class Car {
     }
 
     // chrome bumpers + grille
-    for (const [sz, isFront] of [[1, true], [-1, false]]) {
+    const bumperSides: [number, boolean][] = [[1, true], [-1, false]];
+    for (const [sz, isFront] of bumperSides) {
       const bumper = new THREE.Mesh(rb(W * 0.94, 0.16, 0.18, 0.05, 1), chrome);
       bumper.position.set(0, 0.52, sz * (L * 0.5 - 0.02));
       g.add(bumper);
@@ -248,15 +284,15 @@ export class Car {
     // police livery
     if (this.isPolice) {
       const bar = new THREE.Mesh(rb(W * 0.62, 0.12, 0.36, 0.04, 1), trim);
-      bar.position.set(0, 1.6, -0.12);
+      bar.position.set(0, 1.52, -0.12);
       g.add(bar);
       this.lightRed = new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff0000, emissiveIntensity: 1 });
       this.lightBlue = new THREE.MeshStandardMaterial({ color: 0x2244ff, emissive: 0x0033ff, emissiveIntensity: 1 });
       const lr = new THREE.Mesh(rb(0.34, 0.14, 0.3, 0.03, 1), this.lightRed);
-      lr.position.set(-W * 0.22, 1.69, -0.12);
+      lr.position.set(-W * 0.22, 1.6, -0.12);
       g.add(lr);
       const lb = new THREE.Mesh(rb(0.34, 0.14, 0.3, 0.03, 1), this.lightBlue);
-      lb.position.set(W * 0.22, 1.69, -0.12);
+      lb.position.set(W * 0.22, 1.6, -0.12);
       g.add(lb);
 
       const doorTex = canvasTexture(256, 96, (ctx, w, h) => {
@@ -310,7 +346,7 @@ export class Car {
     return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
   }
 
-  applyDamage(n) {
+  applyDamage(n: number) {
     if (this.wrecked) return;
     this.health = clamp(this.health - n, 0, 100);
     if (this.health <= 0) {
@@ -319,13 +355,13 @@ export class Car {
     }
   }
 
-  jump(power = 8.5) {
+  jump(power: number = 8.5) {
     if (this.y > 0.2) return;
     this.vy = power;
     this.y = 0.05;
   }
 
-  update(dt, input = {}, colliders = [], worldHalf = 220) {
+  update(dt: number, input: any = {}, colliders: any[] = [], worldHalf = 220) {
     const throttle = input.throttle ?? 0;
     const steerInput = input.steer ?? 0;
     const braking = input.brake ?? false;
@@ -408,11 +444,19 @@ export class Car {
     this.mesh.rotation.z = this.roll;
     this.mesh.rotation.x = this.pitch;
 
+    // brake light feedback
+    const brakingNow = braking || handbrake;
+    if (brakingNow !== this.brakeLight) {
+      this.brakeLight = brakingNow;
+      if (this.tailMat) this.tailMat.emissiveIntensity = brakingNow ? 2.2 : 0.6;
+    }
+
     for (const w of this.wheels) {
       w.wheel.rotation.x -= (this.speed * dt) / this.wheelRadius;
       if (w.front) w.pivot.rotation.y = this.steer;
     }
 
+    this.brakeLight = false;
     // police lightbar
     if (this.isPolice) {
       const t = performance.now() * 0.006;
@@ -435,7 +479,7 @@ export class Car {
 
   dispose() {
     this.scene.remove(this.mesh);
-    this.mesh.traverse((o) => {
+    this.mesh.traverse((o: any) => {
       if (o.isMesh) {
         o.geometry?.dispose();
         o.material?.dispose?.();

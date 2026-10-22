@@ -5,7 +5,8 @@ Listens on IPv4 (all interfaces) and on IPv6 loopback so `localhost` resolves ei
 """
 import http.server, socketserver, threading, os, sys, webbrowser, socket
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.abspath(__file__))
+os.chdir(os.path.join(ROOT, "dist") if os.path.isdir(os.path.join(ROOT, "dist")) else ROOT)
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
 
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { rand, pick, shadowBlob, roundedBox, canvasTexture } from './utils.js';
+import { rand, pick, shadowBlob, roundedBox, canvasTexture } from './utils';
 
 // Proportions measured off real Dude Theft Wars screenshots:
 // 1.84 m tall, head 0.42 (≈4.4 heads), torso 0.54×0.58×0.31, arms 0.62, legs 0.72, no neck.
@@ -29,7 +29,7 @@ const GEO = {
 };
 
 const MATS = new Map();
-function mat(color, opts = {}) {
+function mat(color: number, opts: any = {}) {
   const key = color + '|' + JSON.stringify(opts);
   if (!MATS.has(key)) {
     MATS.set(
@@ -130,7 +130,25 @@ function faceTexture(kind = 'calm') {
 }
 
 export class Character {
-  constructor(opts = {}) {
+  declare skin: any;
+  declare shirt: any;
+  declare pants: any;
+  declare scale: any;
+  declare height: number;
+  declare face: any;
+  declare gun: any;
+  declare group: any;
+  declare torso: any;
+  declare head: any;
+  declare armL: any;
+  declare armR: any;
+  declare legL: any;
+  declare legR: any;
+  declare phase: number;
+  declare detail: THREE.Object3D[];
+  declare headMeshRef: THREE.Mesh;
+  declare footLift: any;
+  constructor(opts: any = {}) {
     this.skin = opts.skin ?? pick(SKINS);
     this.shirt = opts.shirt ?? pick(SHIRTS);
     this.pants = opts.pants ?? pick(PANTS);
@@ -145,7 +163,7 @@ export class Character {
     const root = new THREE.Group();
     root.scale.setScalar(this.scale);
 
-    const make = (geo, material, x, y, z, parent, cast = true) => {
+    const make = (geo: any, material: any, x: number, y: number, z: number, parent: any, cast = true) => {
       const m = new THREE.Mesh(geo, material);
       m.position.set(x, y, z);
       m.castShadow = cast;
@@ -164,7 +182,7 @@ export class Character {
     const head = new THREE.Group();
     head.position.y = 0.62;
     torso.add(head);
-    make(GEO.head, skinMat, 0, 0.22, 0, head);
+    this.headMeshRef = make(GEO.head, skinMat, 0, 0.22, 0, head);
     make(GEO.hair, hairMat, 0, 0.45, 0, head, false);
     // hair silhouettes so the crowd is not one repeated model
     const hairStyle = opts.hair ?? pick(['cap', 'cap', 'back', 'beanie', 'bald', 'mohawk']);
@@ -230,13 +248,13 @@ export class Character {
     legL.position.set(-0.14, 0.8, 0);
     root.add(legL);
     make(GEO.leg, pantsMat, 0, -0.36, 0, legL);
-    make(GEO.shoe, SHOE_MAT, 0, -0.735, 0.03, legL);
+    make(GEO.shoe, SHOE_MAT, 0, -0.725, 0.03, legL);
 
     const legR = new THREE.Group();
     legR.position.set(0.14, 0.8, 0);
     root.add(legR);
     make(GEO.leg, pantsMat, 0, -0.36, 0, legR);
-    make(GEO.shoe, SHOE_MAT, 0, -0.735, 0.03, legR);
+    make(GEO.shoe, SHOE_MAT, 0, -0.725, 0.03, legR);
 
     // pistol held in the right hand
     const gun = new THREE.Group();
@@ -264,21 +282,33 @@ export class Character {
     this.legL = legL;
     this.legR = legR;
     this.phase = 0;
+    // small parts that can be dropped at distance without changing the silhouette
+    this.detail = [face, nose, this.armL.children[1], this.armR.children[1]];
+    if (this.armL.children[2]) this.detail.push(this.armL.children[2]);
+    if (this.armR.children[2]) this.detail.push(this.armR.children[2]);
+    for (const child of head.children) {
+      if (child !== this.headMeshRef) this.detail.push(child);
+    }
   }
 
-  setArmed(on) {
+  setDetail(on: boolean) {
+    for (const d of this.detail) d.visible = on;
+    if (on) this.gun.visible = this.gun.userData.armed === true;
+  }
+
+  setArmed(on: boolean) {
     this.gun.visible = on;
   }
 
-  setPos(x, y, z) {
+  setPos(x: number, y: number, z: number) {
     this.group.position.set(x, y, z);
   }
 
-  setYaw(y) {
+  setYaw(y: number) {
     this.group.rotation.y = y;
   }
 
-  animate(dt, speed01, opts = {}) {
+  animate(dt: number, speed01: any, opts: any = {}) {
     this.phase += dt * (4.2 + speed01 * 7.4) * (speed01 > 0.02 ? 1 : 0);
     const amp = 0.3 + speed01 * 0.9;
     const sw = Math.sin(this.phase);
@@ -296,6 +326,9 @@ export class Character {
     }
     this.legL.rotation.x = sw * amp;
     this.legR.rotation.x = -sw * amp;
+    // the pendulum swing lifts both feet; callers subtract this so the planted
+    // foot always touches the ground (works for frozen LOD poses too)
+    this.footLift = 0.725 * (1 - Math.cos(Math.abs(sw) * amp));
     this.torso.rotation.z = opts.tilt ?? 0;
     this.torso.rotation.x = speed01 * 0.1;
     this.torso.position.y = speed01 < 0.02 ? 0.8 + Math.sin(performance.now() * 0.002) * 0.008 : 0.8;

@@ -1,25 +1,37 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from '../vendor/RoundedBoxGeometry.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 export const TAU = Math.PI * 2;
 
-export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-export const lerp = (a, b, t) => a + (b - a) * t;
-export const damp = (a, b, lambda, dt) => lerp(a, b, 1 - Math.exp(-lambda * dt));
-export const rand = (a = 0, b = 1) => a + Math.random() * (b - a);
-export const randInt = (a, b) => Math.floor(rand(a, b + 1));
-export const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-export const sign = (v) => (v < 0 ? -1 : v > 0 ? 1 : 0);
+export const clamp = (v: number, a: number, b: number): number => (v < a ? a : v > b ? b : v);
+export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+export const damp = (a: number, b: number, lambda: number, dt: number): number => lerp(a, b, 1 - Math.exp(-lambda * dt));
+export const rand = (a = 0, b = 1): number => a + Math.random() * (b - a);
+export const randInt = (a: number, b: number): number => Math.floor(rand(a, b + 1));
+export const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+export const sign = (v: number): number => (v < 0 ? -1 : v > 0 ? 1 : 0);
 
 // shortest angle difference, wrapped to [-PI, PI]
-export function angleDelta(a, b) {
+export function angleDelta(a: number, b: number): number {
   let d = (b - a) % TAU;
   if (d > Math.PI) d -= TAU;
   if (d < -Math.PI) d += TAU;
   return d;
 }
 
-export function box(w, h, d, color, opts = {}) {
+export interface BoxOpts {
+  roughness?: number;
+  metalness?: number;
+  emissive?: number;
+  emissiveIntensity?: number;
+  transparent?: boolean;
+  opacity?: number;
+  flat?: boolean;
+  castShadow?: boolean;
+  receiveShadow?: boolean;
+}
+
+export function box(w: number, h: number, d: number, color: number, opts: BoxOpts = {}): THREE.Mesh {
   const m = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
     new THREE.MeshStandardMaterial({
@@ -38,11 +50,13 @@ export function box(w, h, d, color, opts = {}) {
   return m;
 }
 
-export function canvasTexture(w, h, draw) {
+export type DrawFn = (ctx: CanvasRenderingContext2D, w: number, h: number) => void;
+
+export function canvasTexture(w: number, h: number, draw: DrawFn): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  const ctx = c.getContext('2d');
+  const ctx = c.getContext('2d') as CanvasRenderingContext2D;
   draw(ctx, w, h);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -51,7 +65,22 @@ export function canvasTexture(w, h, draw) {
 }
 
 // circle (x,z,r) vs axis aligned box -> pushes the circle out, returns hit flag
-export function resolveCircleBox(x, z, r, b) {
+export interface AABB {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  h?: number;
+}
+
+export interface CirclePush {
+  x: number;
+  z: number;
+  nx: number;
+  nz: number;
+}
+
+export function resolveCircleBox(x: number, z: number, r: number, b: AABB): CirclePush | null {
   const cx = clamp(x, b.minX, b.maxX);
   const cz = clamp(z, b.minZ, b.maxZ);
   let dx = x - cx;
@@ -76,8 +105,19 @@ export function resolveCircleBox(x, z, r, b) {
 }
 
 // ray vs collider AABB (2.5D slabs, box from y=0 to y=h)
-export function rayVsColliders(origin, dir, maxDist, colliders) {
-  let best = null;
+export interface RayHit {
+  dist: number;
+  collider: AABB;
+  point: THREE.Vector3;
+}
+
+export function rayVsColliders(
+  origin: THREE.Vector3,
+  dir: THREE.Vector3,
+  maxDist: number,
+  colliders: AABB[]
+): RayHit | null {
+  let best: RayHit | null = null;
   for (let i = 0; i < colliders.length; i++) {
     const b = colliders[i];
     let tmin = 0;
@@ -136,23 +176,25 @@ export function rayVsColliders(origin, dir, maxDist, colliders) {
   return best;
 }
 
-export function disposeObject(obj) {
+export function disposeObject(obj: THREE.Object3D): void {
   obj.traverse((o) => {
-    if (o.isMesh) {
-      o.geometry?.dispose();
-      if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
-      else o.material?.dispose?.();
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.geometry?.dispose();
+      const material = mesh.material as THREE.Material | THREE.Material[];
+      if (Array.isArray(material)) material.forEach((m) => m.dispose());
+      else material?.dispose?.();
     }
   });
   obj.parent?.remove(obj);
 }
 
-export function formatMoney(n) {
+export function formatMoney(n: number): string {
   return '$' + Math.floor(n).toLocaleString('en-US');
 }
 
-let _blobTex = null;
-export function shadowBlob(w = 1.2, h = 1.2, opacity = 0.42) {
+let _blobTex: THREE.CanvasTexture | null = null;
+export function shadowBlob(w = 1.2, h = 1.2, opacity = 0.42): THREE.Mesh {
   if (!_blobTex) {
     _blobTex = canvasTexture(128, 128, (ctx, cw, ch) => {
       const g = ctx.createRadialGradient(cw / 2, ch / 2, 2, cw / 2, ch / 2, cw / 2);
@@ -174,6 +216,6 @@ export function shadowBlob(w = 1.2, h = 1.2, opacity = 0.42) {
 
 
 // beveled box — the shape language used by the reference game (soft toy edges, still low-poly)
-export function roundedBox(w, h, d, radius = 0.05, segments = 2) {
+export function roundedBox(w: number, h: number, d: number, radius: number = 0.05, segments = 2): THREE.BufferGeometry {
   return new RoundedBoxGeometry(w, h, d, segments, Math.min(radius, Math.min(w, h, d) * 0.49));
 }

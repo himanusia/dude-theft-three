@@ -26,12 +26,22 @@ const BGM = {
 };
 
 export class AudioSys {
+  declare ctx: any;
+  declare buffers: any;
+  declare ready: boolean;
+  declare muted: boolean;
+  declare bgmEls: Record<string, HTMLAudioElement>;
+  declare bgmMode: any;
+  declare bgmVolume: number;
+  declare engine: any;
+  declare sirenNodes: any;
+  declare master: any;
   constructor() {
     this.ctx = null;
     this.buffers = {};
     this.ready = false;
     this.muted = false;
-    this.bgmEls = {};
+    this.bgmEls = {} as Record<string, HTMLAudioElement>;
     this.bgmMode = null;
     this.bgmVolume = 0.28;
     this.engine = null;
@@ -39,13 +49,13 @@ export class AudioSys {
   }
 
   async init() {
-    const AC = window.AudioContext || window.webkitAudioContext;
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = this.muted ? 0 : 0.9;
     this.master.connect(this.ctx.destination);
 
-    const load = async (url) => {
+    const load = async (url: string) => {
       const res = await fetch(url);
       const arr = await res.arrayBuffer();
       return this.ctx.decodeAudioData(arr);
@@ -72,7 +82,7 @@ export class AudioSys {
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
   }
 
-  play(name, { vol = 1, rate = 1, pan = 0 } = {}) {
+  play(name: string, { vol = 1, rate = 1, pan = 0 } = {}) {
     if (!this.ready || this.muted) return;
     const buf = this.buffers[name];
     if (!buf) return;
@@ -97,7 +107,7 @@ export class AudioSys {
     this.play('step' + Math.floor(Math.random() * 4), { vol: 0.22, rate: 0.9 + Math.random() * 0.2 });
   }
 
-  startBgm(mode) {
+  startBgm(mode: string) {
     if (!this.ready || mode === this.bgmMode) return;
     const prev = this.bgmMode;
     this.bgmMode = mode;
@@ -111,7 +121,7 @@ export class AudioSys {
     });
   }
 
-  fadeEl(el, target, seconds, done) {
+  fadeEl(el: HTMLAudioElement, target: number, seconds: number, done?: () => void) {
     const start = el.volume;
     const t0 = performance.now();
     const tick = () => {
@@ -153,7 +163,7 @@ export class AudioSys {
     e.filter.frequency.setTargetAtTime(400 + speed01 * 1400 + throttle * 300, this.ctx.currentTime, 0.1);
   }
 
-  siren(on) {
+  siren(on: boolean) {
     if (!this.ready) return;
     if (on && !this.sirenNodes) {
       const g = this.ctx.createGain();

@@ -1,9 +1,19 @@
 import * as THREE from 'three';
-import { Character } from './character.js';
-import { clamp, rand, pick, angleDelta, resolveCircleBox } from './utils.js';
+import { Character } from './character';
+import { clamp, rand, pick, angleDelta, resolveCircleBox } from './utils';
 
 export class Ped {
-  constructor(scene, city, position) {
+  declare scene: any;
+  declare city: any;
+  declare char: any;
+  declare pos: any;
+  declare yaw: any;
+  declare speed: any;
+  declare state: string;
+  declare dead: boolean;
+  declare phase: number;
+  declare target: any;
+  constructor(scene: THREE.Scene, city: any, position: any) {
     this.scene = scene;
     this.city = city;
     this.char = new Character({ scale: rand(0.92, 1.05) });
@@ -31,7 +41,7 @@ export class Ped {
     return new THREE.Vector3(this.pos.x, this.pos.y + 1.55, this.pos.z);
   }
 
-  update(dt, ctx) {
+  update(dt: number, ctx: any) {
     if (this.dead) return;
     const playerDist = this.pos.distanceTo(ctx.playerPos);
     const scared = (ctx.wanted > 0 && playerDist < 26) || (ctx.armed && playerDist < 12) || ctx.panic;
@@ -97,10 +107,11 @@ export class Ped {
     this.char.group.rotation.y = this.yaw;
     // animation LOD: full cycle up close, frozen pose further away
     if (playerDist < 55) this.char.animate(dt, moving);
-    this.animPhase = (this.animPhase ?? 0) + dt;
+    this.char.setDetail(playerDist < 42);
+    this.char.group.position.y -= this.char.footLift ?? 0;
   }
 
-  kill(velocity, colliders) {
+  kill(velocity: any, colliders: any) {
     this.dead = true;
     // geometries/materials are shared across characters — never dispose them here
     this.scene.remove(this.char.group);
@@ -109,7 +120,13 @@ export class Ped {
 }
 
 export class PedManager {
-  constructor(scene, city, count = 70) {
+  declare scene: any;
+  declare city: any;
+  declare peds: any[];
+  declare count: any;
+  declare respawnTimer: number;
+  declare flowTimer: number;
+  constructor(scene: THREE.Scene, city: any, count = 70) {
     this.scene = scene;
     this.city = city;
     this.peds = [];
@@ -121,7 +138,7 @@ export class PedManager {
     this.flowTimer = 0;
   }
 
-  update(dt, ctx) {
+  update(dt: number, ctx: any) {
     for (const p of this.peds) p.update(dt, ctx);
 
     // keep the crowd near the player: far pedestrians get re-placed around him
@@ -154,7 +171,7 @@ export class PedManager {
     }
   }
 
-  nearest(point, maxDist = 60) {
+  nearest(point: any, maxDist = 60) {
     let best = null;
     let bd = maxDist;
     for (const p of this.peds) {

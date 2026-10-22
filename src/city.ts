@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture } from './utils.js';
+import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture } from './utils';
 
 export const PITCH = 52;
 export const BLOCK = 38;
@@ -11,7 +11,7 @@ export const WORLD_HALF = GRID * PITCH + BLOCK * 0.5;
 const WALLS = ['#e9e7ef', '#dfe6ee', '#f2e7d8', '#d9e4e6', '#efe3ea', '#e6ecdf'];
 const NIGHT = 0x0a0d18;
 
-function windowTexture(wall, style = 'grid') {
+function windowTexture(wall: any, style = 'grid') {
   const map = canvasTexture(128, 128, (ctx, w, h) => {
     if (style === 'bands') {
       // horizontal ribbon windows, common on the reference city blocks
@@ -87,7 +87,7 @@ function windowTexture(wall, style = 'grid') {
   return map;
 }
 
-function shopTexture(hue) {
+function shopTexture(hue: any) {
   return canvasTexture(256, 64, (ctx, w, h) => {
     // facade base
     ctx.fillStyle = hue.wall;
@@ -146,7 +146,40 @@ function emissiveTexture() {
 }
 
 export class City {
-  constructor(scene) {
+  declare scene: any;
+  declare colliders: any[];
+  declare blocks: any[];
+  declare roadLines: any[];
+  declare jumpPads: any[];
+  declare parkedSpots: any[];
+  declare emissiveMats: any[];
+  declare lampMats: any[];
+  declare group: THREE.Group;
+  declare shopTextures: THREE.Texture[];
+  declare shopMats: THREE.MeshStandardMaterial[];
+  declare focusTarget: THREE.Vector3;
+  declare daylight: number;
+  declare propAudit: { name: string; x: number; z: number; bottom: number }[];
+  declare clouds: THREE.Group;
+  declare starMat: THREE.PointsMaterial;
+  declare lampPositions: THREE.Vector3[];
+  declare dayT: any;
+  declare hemi: any;
+  declare fill: any;
+  declare sun: any;
+  declare skyTop: THREE.Color;
+  declare skyBottom: THREE.Color;
+  declare dashMatrices: any[];
+  declare treeTrunks: any[];
+  declare treeCrowns: any[];
+  declare lampPoles: any[];
+  declare lampArms: any[];
+  declare lampHeads: any[];
+  declare lampLights: any[];
+  declare lamplightFactor: number;
+  declare stars: THREE.Points;
+  declare starlightOpacity: any;
+  constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.colliders = [];
     this.blocks = [];
@@ -160,6 +193,7 @@ export class City {
 
     this.dayT = 0.32; // 0..1, 0.25 = sunrise, 0.5 = noon
     this.buildLights();
+    this.buildClouds();
     this.buildGround();
     this.buildSky();
     this.update(0, 0.32);
@@ -190,6 +224,28 @@ export class City {
     this.scene.add(sun);
     this.scene.add(sun.target);
     this.sun = sun;
+  }
+
+  buildClouds() {
+    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, fog: false, depthWrite: false });
+    this.clouds = new THREE.Group();
+    for (let i = 0; i < 14; i++) {
+      const cluster = new THREE.Group();
+      const puffs = 3 + Math.floor(rand(0, 3));
+      for (let k = 0; k < puffs; k++) {
+        const r = rand(6, 11);
+        const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), cloudMat);
+        puff.position.set(k * rand(6, 10) - puffs * 3.5, rand(-1.5, 1.5), rand(-3, 3));
+        puff.scale.y = rand(0.45, 0.65);
+        cluster.add(puff);
+      }
+      const ang = rand(0, Math.PI * 2);
+      const rad = rand(110, 320);
+      cluster.position.set(Math.cos(ang) * rad, rand(55, 95), Math.sin(ang) * rad);
+      cluster.rotation.y = rand(0, Math.PI);
+      this.clouds.add(cluster);
+    }
+    this.scene.add(this.clouds);
   }
 
   buildSky() {
@@ -387,11 +443,15 @@ export class City {
     this.scene.add(this.stars);
   }
 
-  updateNightLights(dayT, focus) {
+  updateNightLights(dayT: any, focus: any) {
     const night = 1 - clamp((this.daylight - 0.05) / 0.4, 0, 1);
     this.starlightOpacity = night;
     this.starMat.opacity = night * 0.9;
     this.stars.rotation.y = dayT * Math.PI * 2;
+    if (this.clouds) {
+      this.clouds.rotation.y = dayT * Math.PI * 0.6;
+      this.clouds.visible = this.daylight > 0.18;
+    }
 
     // pick the 4 lamps closest to the action
     const sorted = this.lampPositions
@@ -461,7 +521,7 @@ export class City {
     this.group.add(headMesh);
   }
 
-  buildBuildings(cx, cz) {
+  buildBuildings(cx: any, cz: any) {
     const count = Math.random() < 0.45 ? 1 : randInt(2, 3);
     const area = BLOCK - 9;
     const cells = count === 1 ? [[0, 0, area, area]] : this.splitLots(area, count, cx, cz);
@@ -471,7 +531,7 @@ export class City {
     }
   }
 
-  splitLots(area, count, cx, cz) {
+  splitLots(area: any, count: any, cx: any, cz: any) {
     if (count === 2) {
       if (Math.random() < 0.5) {
         const w = area * rand(0.42, 0.55);
@@ -495,7 +555,8 @@ export class City {
     ].slice(0, count);
   }
 
-  makeBuilding(x, z, w, d, h) {
+  makeBuilding(x: number, z: number, w: number, d: number, h: number) {
+    const chromeLike = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
     const wall = pick(WALLS);
     const style = pick(['grid', 'bands', 'strips']);
     const tex = windowTexture(wall, style);
@@ -555,10 +616,10 @@ export class City {
         new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.6, emissive: 0xffffff, emissiveMap: boardTex, emissiveIntensity: 0.08 })
       );
       const faces = [
-        [0, d / 2 + 0.3, 0],
-        [0, -d / 2 - 0.3, Math.PI],
-        [w / 2 + 0.3, 0, Math.PI / 2],
-        [-w / 2 - 0.3, 0, -Math.PI / 2],
+        [0, d / 2 + 0.12, 0],
+        [0, -d / 2 - 0.12, Math.PI],
+        [w / 2 + 0.12, 0, Math.PI / 2],
+        [-w / 2 - 0.12, 0, -Math.PI / 2],
       ];
       const face = faces[Math.floor(rand(0, 4))];
       board.position.set(x + face[0], Math.min(h - 1.5, 8.5), z + face[1]);
@@ -570,12 +631,12 @@ export class City {
     // roof furniture
     if (Math.random() < 0.7) {
       const ac = box(rand(1.5, 3), rand(0.8, 1.4), rand(1.5, 3), 0x6c6f74);
-      ac.position.set(x + rand(-w / 3, w / 3), h + 0.2 + ac.geometry.parameters.height / 2, z + rand(-d / 3, d / 3));
+      ac.position.set(x + rand(-w / 3, w / 3), h + 0.2 + (ac.geometry as any).parameters.height / 2, z + rand(-d / 3, d / 3));
       this.group.add(ac);
     }
     if (h > 28 && Math.random() < 0.7) {
       const mast = box(0.22, rand(4, 10), 0.22, 0x8d9199, { metalness: 0.6, roughness: 0.4 });
-      mast.position.set(x + rand(-w / 3, w / 3), h + 0.2 + mast.geometry.parameters.height / 2, z + rand(-d / 3, d / 3));
+      mast.position.set(x + rand(-w / 3, w / 3), h + 0.2 + (mast.geometry as any).parameters.height / 2, z + rand(-d / 3, d / 3));
       this.group.add(mast);
     }
     // ground-floor storefront wrap (all sides) + signs
@@ -614,6 +675,27 @@ export class City {
       ctx.textBaseline = 'middle';
       ctx.fillText(word, cw / 2, ch / 2 - 1);
     });
+    // entrance: door + two steps at the pavement
+    const doorX = x + (w > d ? -w * 0.22 : 0);
+    const doorZ = z + d / 2 + 0.02;
+    const doorMat = new THREE.MeshStandardMaterial({ color: 0x2b3a4a, roughness: 0.5, metalness: 0.2 });
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.35, 2.3, 0.12), doorMat);
+    door.position.set(doorX, 1.42, doorZ + 0.06);
+    this.group.add(door);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), chromeLike);
+    handle.position.set(doorX + 0.45, 1.35, doorZ + 0.14);
+    this.group.add(handle);
+    for (let s2 = 0; s2 < 2; s2++) {
+      const step = new THREE.Mesh(
+        new THREE.BoxGeometry(1.9 - s2 * 0.25, 0.13, 0.5),
+        new THREE.MeshStandardMaterial({ color: 0xbfbfc8, roughness: 0.9 })
+      );
+      step.position.set(doorX, 0.2 + s2 * 0.13, doorZ + 0.28 + s2 * 0.28);
+      step.castShadow = true;
+      step.receiveShadow = true;
+      this.group.add(step);
+    }
+
     const signMat = new THREE.MeshStandardMaterial({
       map: signTex,
       emissive: 0xffffff,
@@ -647,7 +729,7 @@ export class City {
     });
   }
 
-  decorateBlockEdge(cx, cz) {
+  decorateBlockEdge(cx: any, cz: any) {
     const half = BLOCK / 2 - 1.6;
     const lamps = [
       [-half, -half],
@@ -673,7 +755,7 @@ export class City {
     }
   }
 
-  tree(x, z, scale = 1) {
+  tree(x: number, z: number, scale = 1) {
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22 * scale, 0.32 * scale, 3.2 * scale, 6),
       new THREE.MeshStandardMaterial({ color: 0x6b4f34, roughness: 1 })
@@ -690,7 +772,7 @@ export class City {
     }
   }
 
-  decoratePark(cx, cz) {
+  decoratePark(cx: any, cz: any) {
     for (let i = 0; i < 6; i++) {
       this.tree(cx + rand(-13, 13), cz + rand(-13, 13), rand(0.8, 1.3));
     }
@@ -706,7 +788,7 @@ export class City {
     }
   }
 
-  decorateLot(cx, cz) {
+  decorateLot(cx: any, cz: any) {
     const mat = new THREE.MeshStandardMaterial({ color: pick([0x8d3f3f, 0x3f5f8d, 0xd8d2c4, 0x3f7a45, 0xc07a2a]) });
     for (let i = 0; i < 4; i++) {
       const car = new THREE.Group();
@@ -776,7 +858,7 @@ export class City {
     const benchGeo = new THREE.BoxGeometry(1.9, 0.14, 0.55);
     const lightGeo = new THREE.BoxGeometry(0.28, 0.34, 0.28);
 
-    const binM = [], hydM = [], benchM = [], lightM = [], lightLampM = [];
+    const binM = [], hydM = [], benchM = [], lightM = [], lightLampM = [], lightArmM = [], lightBaseM = [];
     for (let i = 0; i < 34; i++) {
       const pt = this.randomSidewalkPoint();
       const which = Math.random();
@@ -796,34 +878,59 @@ export class City {
     // traffic lights on the corner of each block
     for (let i = -GRID; i <= GRID; i++) {
       for (let j = -GRID; j <= GRID; j++) {
-        const cx = i * PITCH + BLOCK / 2 + 1.4;
-        const cz = j * PITCH + BLOCK / 2 + 1.4;
-        const p1 = new THREE.Matrix4().makeTranslation(cx, 2.6, cz);
-        lightM.push(p1);
-        lightLampM.push(new THREE.Matrix4().makeTranslation(cx, 3.05, cz));
+        const cx = i * PITCH + BLOCK / 2 - 1.2;
+        const cz = j * PITCH + BLOCK / 2 - 1.2;
+        lightBaseM.push(new THREE.Matrix4().makeTranslation(cx, 3.9, cz));
+        lightM.push(new THREE.Matrix4().makeTranslation(cx, 2.26, cz));    // 0.26 (kerb top) → 4.26
+        lightArmM.push(new THREE.Matrix4().makeTranslation(cx, 4.24, cz)); // arm on top
+        lightLampM.push(new THREE.Matrix4().makeTranslation(cx, 3.58, cz + 0.17));
       }
     }
-    const addInstanced = (geo, material, matrices, cast = true) => {
+    this.propAudit = [];
+    const addInstanced = (geo: any, material: any, matrices: THREE.Matrix4[], cast = true, name = 'prop') => {
       if (!matrices.length) return null;
       const mesh = new THREE.InstancedMesh(geo, material, matrices.length);
-      matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
+      matrices.forEach((m: THREE.Matrix4, i: number) => mesh.setMatrixAt(i, m));
       mesh.instanceMatrix.needsUpdate = true;
       mesh.castShadow = cast;
       mesh.frustumCulled = false;
+      mesh.name = name;
       this.group.add(mesh);
+      geo.computeBoundingBox();
+      const localBottom = geo.boundingBox.min.y;
+      matrices.forEach((m: THREE.Matrix4) => {
+        const p = new THREE.Vector3().setFromMatrixPosition(m);
+        this.propAudit.push({ name, x: p.x, z: p.z, bottom: p.y + localBottom });
+      });
       return mesh;
     };
-    addInstanced(binGeo, binMat, binM);
-    addInstanced(hydrantGeo, hydrantMat, hydM);
-    addInstanced(benchGeo, benchMat, benchM);
-    addInstanced(lightGeo, poleMat, lightM);
-    addInstanced(new THREE.BoxGeometry(0.24, 0.86, 0.24), new THREE.MeshStandardMaterial({ color: 0x25282e, roughness: 0.8 }), lightM.map((m) => {
+    addInstanced(binGeo, binMat, binM, true, 'bin');
+    addInstanced(hydrantGeo, hydrantMat, hydM, true, 'hydrant');
+    addInstanced(benchGeo, benchMat, benchM, true, 'bench');
+    addInstanced(
+      new THREE.BoxGeometry(0.11, 0.42, 0.45),
+      new THREE.MeshStandardMaterial({ color: 0x2c2f36, roughness: 0.9 }),
+      benchM.flatMap((m) => {
+        const p = new THREE.Vector3().setFromMatrixPosition(m);
+        const rot = new THREE.Euler().setFromRotationMatrix(m);
+        return [-0.72, 0.72].map((off) => {
+          const t = new THREE.Matrix4().makeRotationY(rot.y);
+          t.setPosition(p.x + Math.cos(rot.y) * off, 0.47, p.z - Math.sin(rot.y) * off);
+          return t;
+        });
+      }),
+      true,
+      'bench-leg'
+    );
+    addInstanced(new THREE.BoxGeometry(0.26, 4.0, 0.26), poleMat, lightM, true, 'traffic-mast');
+    addInstanced(new THREE.BoxGeometry(0.9, 0.12, 0.12), poleMat, lightArmM, true, 'traffic-arm');
+    addInstanced(new THREE.BoxGeometry(0.34, 0.86, 0.3), lightGeo, lightBaseM.map((m) => {
       const t = m.clone();
       const p = new THREE.Vector3().setFromMatrixPosition(m);
-      t.makeTranslation(p.x, 1.6, p.z);
+      t.makeTranslation(p.x, 4.0, p.z);
       return t;
-    }));
-    addInstanced(new THREE.BoxGeometry(0.26, 0.16, 0.26), new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0xffb020, emissiveIntensity: 0.5 }), lightLampM, false);
+    }), true, 'traffic-housing');
+    addInstanced(new THREE.BoxGeometry(0.3, 0.2, 0.3), new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0xffb020, emissiveIntensity: 0.6 }), lightLampM, false, 'traffic-lens');
 
     // stunt ramps on straight road segments
     this.addRamp(-PITCH * 1.5, 6, 0);
@@ -832,7 +939,7 @@ export class City {
     this.addRamp(PITCH * 2.5, PITCH * 2.5, -Math.PI / 2);
   }
 
-  addRamp(x, z, rotY) {
+  addRamp(x: number, z: number, rotY: any) {
     const g = new THREE.Group();
     const geo = new THREE.BoxGeometry(5, 0.4, 9);
     const mat = new THREE.MeshStandardMaterial({ color: 0xe0b23a, roughness: 0.7 });
@@ -857,7 +964,7 @@ export class City {
   }
 
   // sidewalk plate height (blocks sit ~26cm above the asphalt)
-  groundHeightAt(x, z) {
+  groundHeightAt(x: number, z: number) {
     const half = BLOCK / 2 - 0.6;
     for (const b of this.blocks) {
       if (Math.abs(x - b.x) < half && Math.abs(z - b.z) < half) return 0.26;
@@ -894,7 +1001,7 @@ export class City {
     return { pos, yaw };
   }
 
-  randomSidewalkPointAround(centre, minR = 14, maxR = 48) {
+  randomSidewalkPointAround(centre: any, minR = 14, maxR = 48) {
     // pick a block in the requested ring, then a point on its sidewalk
     const candidates = this.blocks.filter((b) => {
       const d = Math.hypot(b.x - centre.x, b.z - centre.z);
@@ -930,7 +1037,7 @@ export class City {
     return new THREE.Vector3(b.x + off, 0, b.z + t);
   }
 
-  update(dt, dayT) {
+  update(dt: number, dayT: any) {
     this.dayT = dayT;
     const ang = dayT * TAU - Math.PI / 2;
     const sunY = Math.sin(ang);
@@ -975,9 +1082,4 @@ export class City {
     this.sun.position.set(sunX * dist, Math.max(8, sunY * 130), 42);
   }
 
-  followSun(target) {
-    this.sun.target.position.set(target.x, 0, target.z);
-    this.sun.position.x = target.x + this.sun.position.x * 0 + 60;
-    this.sun.position.z = target.z + 42;
-  }
 }

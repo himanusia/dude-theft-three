@@ -169,6 +169,10 @@
   }
   button#start-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 28px rgba(255,204,51,.28); }
   button#start-btn:disabled { opacity: .55; cursor: wait; }
+  button#resume-btn {
+    font-family: var(--font); font-size: 14px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+    padding: 13px 30px; border: none; border-radius: 6px; background: var(--accent); color: #14140c; cursor: pointer;
+  }
   #loading-text { margin-top: 12px; font-size: 12px; color: rgba(255,255,255,.45); letter-spacing: .06em; min-height: 16px; }
   .credits { margin-top: 24px; font-size: 10.5px; line-height: 1.6; color: rgba(255,255,255,.3); }
   #pause-screen .card { text-align: center; }
@@ -239,6 +243,7 @@
   <div class="card">
     <h2>Paused</h2>
     <div class="sub" style="text-align:center">Click anywhere to jump back in.</div>
+    <button id="resume-btn" style="margin-bottom:18px">Resume</button>
     <div class="keys" style="text-align:left">
       <kbd>F</kbd><span>Enter / exit vehicle</span>
       <kbd>Q</kbd><span>Punch</span>
@@ -248,9 +253,6 @@
   </div>
 </div>
 
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js" } }
-</script>
-<script type="module" src="./src/main.js"></script>
+<script type="module" src="/src/main.ts"></script>
 </body>
 </html>

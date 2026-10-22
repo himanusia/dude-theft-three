@@ -11,12 +11,11 @@
 </head>
 <body>
 <div id="label"></div>
-<script type="importmap">{ "imports": { "three": "../vendor/three.module.js" } }</script>
 <script type="module">
 import * as THREE from 'three';
-import { Car } from '../src/car.js';
-import { Character } from '../src/character.js';
-import { Ragdoll } from '../src/ragdoll.js';
+import { Car } from '../src/car.ts';
+import { Character } from '../src/character.ts';
+import { Ragdoll } from '../src/ragdoll.ts';
 
 // Studio viewer: one subject per page, fixed 3/4 camera, neutral lighting.
 // Used to diff our generated assets against the reference screenshots.

@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { clamp } from './utils.js';
+import { clamp } from './utils';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const tmpQ = new THREE.Quaternion();
 const tmpV = new THREE.Vector3();
 
-function orient(mesh, a, b, sx, sz) {
+function orient(mesh: any, a: THREE.Vector3, b: THREE.Vector3, sx: number, sz: number) {
   tmpV.subVectors(b, a);
   const len = Math.max(0.02, tmpV.length());
   mesh.position.addVectors(a, b).multiplyScalar(0.5);
@@ -16,7 +16,26 @@ function orient(mesh, a, b, sx, sz) {
 
 // Verlet ragdoll: 11 point masses, distance constraints, ground + building collision.
 export class Ragdoll {
-  constructor(scene, opts = {}) {
+  declare scene: any;
+  declare life: number;
+  declare maxLife: any;
+  declare group: THREE.Group;
+  declare points: Record<string, { p: THREE.Vector3; prev: THREE.Vector3; r: number; name: string }>;
+  declare constraints: any[];
+  declare materials: any[];
+  declare headMesh: any;
+  declare torsoMesh: any;
+  declare pelvisMesh: any;
+  declare upperArmL: any;
+  declare upperArmR: any;
+  declare foreArmL: any;
+  declare foreArmR: any;
+  declare thighL: any;
+  declare thighR: any;
+  declare shinL: any;
+  declare shinR: any;
+  declare colliders: any;
+  constructor(scene: THREE.Scene, opts: any = {}) {
     this.scene = scene;
     this.life = 0;
     this.maxLife = opts.maxLife ?? 11;
@@ -29,7 +48,7 @@ export class Ragdoll {
     const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
-    const at = (dx, dy, dz) =>
+    const at = (dx: any, dy: any, dz: any) =>
       new THREE.Vector3(p.x + side.x * dx * scale + fwd.x * dz * scale, p.y + dy * scale, p.z + side.z * dx * scale + fwd.z * dz * scale);
 
     const defs = {
@@ -56,7 +75,7 @@ export class Ragdoll {
       };
     }
 
-    const pair = (a, b) => ({
+    const pair = (a: string, b: string) => ({
       a: this.points[a],
       b: this.points[b],
       len: this.points[a].p.distanceTo(this.points[b].p),
@@ -87,8 +106,8 @@ export class Ragdoll {
     const pantsMat = new THREE.MeshStandardMaterial({ color: opts.pants ?? 0x2f3a52, roughness: 0.92, flatShading: true });
     this.materials = [skinMat, shirtMat, pantsMat];
 
-    const cyl = (mat, r) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 7), mat);
-    const addMesh = (m, cast = true) => {
+    const cyl = (mat: any, r: number) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 7), mat);
+    const addMesh = (m: any, cast: boolean = true) => {
       m.castShadow = cast;
       m.receiveShadow = true;
       m.frustumCulled = false;
@@ -113,9 +132,9 @@ export class Ragdoll {
     this.colliders = opts.colliders ?? [];
   }
 
-  applyVelocity(v) {
+  applyVelocity(v: THREE.Vector3) {
     // shift prev backwards so verlet integration produces velocity v (m/s)
-    const dt = 1 / 120;
+    const dt: number = 1 / 120;
     for (const pt of Object.values(this.points)) {
       pt.prev.addScaledVector(v, -dt);
     }
@@ -125,7 +144,7 @@ export class Ragdoll {
     return this.points.hips.p;
   }
 
-  step(dt) {
+  step(dt: number) {
     const g = -24 * dt * dt;
     const damp = 0.985;
     for (const pt of Object.values(this.points)) {
@@ -190,7 +209,7 @@ export class Ragdoll {
     }
   }
 
-  update(dt, colliders) {
+  update(dt: number, colliders: any) {
     if (colliders) this.colliders = colliders;
     this.life += dt;
     const sub = Math.min(3, Math.max(1, Math.round(dt * 120)));
@@ -200,9 +219,11 @@ export class Ragdoll {
     if (this.life > this.maxLife - 2) {
       const f = clamp((this.maxLife - this.life) / 2, 0, 1);
       this.group.traverse((o) => {
-        if (o.isMesh) {
-          o.material.transparent = true;
-          o.material.opacity = f;
+        const mesh = o as THREE.Mesh;
+        if (mesh.isMesh) {
+          const mat = mesh.material as THREE.Material & { opacity: number };
+          mat.transparent = true;
+          mat.opacity = f;
         }
       });
     }
@@ -227,9 +248,10 @@ export class Ragdoll {
 
   dispose() {
     this.group.traverse((o) => {
-      if (o.isMesh) {
-        o.geometry?.dispose();
-        o.material?.dispose?.();
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.geometry?.dispose();
+        (mesh.material as THREE.Material)?.dispose?.();
       }
     });
     this.scene.remove(this.group);

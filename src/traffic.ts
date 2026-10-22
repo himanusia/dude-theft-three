@@ -1,22 +1,26 @@
 import * as THREE from 'three';
-import { Car } from './car.js';
-import { PITCH, GRID } from './city.js';
-import { clamp, angleDelta, pick, rand } from './utils.js';
+import { Car } from './car';
+import { PITCH, GRID } from './city';
+import { clamp, angleDelta, pick, rand } from './utils';
 
 // Ambient traffic: each car follows intersection-to-intersection waypoints on the lane grid.
 const LANE = 2.6;
 
-function intersection(i, j) {
+function intersection(i: number, j: number) {
   return new THREE.Vector3((i + 0.5) * PITCH, 0, (j + 0.5) * PITCH);
 }
 
 export class Traffic {
-  constructor(scene, city, count = 7) {
+  declare scene: any;
+  declare city: any;
+  declare cars: any[];
+  declare flowTimer: any;
+  constructor(scene: THREE.Scene, city: any, count = 7) {
     this.scene = scene;
     this.city = city;
     this.cars = [];
     const types = ['sedan', 'sedan', 'taxi', 'muscle', 'van'];
-    for (let n = 0; n < count; n++) {
+    for (let n: number = 0; n < count; n++) {
       const i = Math.floor(rand(-2, 3));
       const j = Math.floor(rand(-2, 3));
       const heading = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
@@ -32,7 +36,7 @@ export class Traffic {
     }
   }
 
-  laneTarget(cell, heading) {
+  laneTarget(cell: any, heading: any) {
     // point in the middle of the next intersection, offset into the right-hand lane
     const p = intersection(cell.i + heading[0], cell.j + heading[1]);
     const right = new THREE.Vector3(-heading[1], 0, heading[0]);
@@ -40,7 +44,7 @@ export class Traffic {
     return p;
   }
 
-  pickHeading(cell, heading, wanted) {
+  pickHeading(cell: any, heading: any, wanted: any) {
     const options = [
       heading,
       [heading[1], -heading[0]],
@@ -55,7 +59,7 @@ export class Traffic {
     return Math.random() < 0.55 ? heading : pick(options);
   }
 
-  update(dt, ctx = {}) {
+  update(dt: number, ctx: any = {}) {
     const wanted = ctx.wanted ?? 0;
     const playerPos = ctx.playerPos;
     const playerCar = ctx.playerCar;
@@ -68,7 +72,7 @@ export class Traffic {
       // keep some traffic around the player instead of the whole map
       if (playerPos && this.flowTimer > 3) {
         const d = car.pos.distanceTo(playerPos);
-        if (d > 140) {
+        if (d > 140 && car.pos.distanceTo(playerPos) > 40) {
           const cell = { i: Math.round((playerPos.x + rand(-70, 70)) / PITCH - 0.5), j: Math.round((playerPos.z + rand(-70, 70)) / PITCH - 0.5) };
           const dir = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
           const spawn = intersection(cell.i - dir[0], cell.j - dir[1]);

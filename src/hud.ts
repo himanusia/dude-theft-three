@@ -1,8 +1,14 @@
-import { clamp, formatMoney } from './utils.js';
+import { clamp, formatMoney } from './utils';
 
 export const WORLD_HALF_MAP = 3 * 52 + 19;
 
 export class HUD {
+  declare el: any;
+  declare mapCtx: any;
+  declare mapSize: any;
+  declare lastCash: number;
+  declare hitTimer: number;
+  declare damageTimer: number;
   constructor() {
     this.el = {
       cash: document.getElementById('cash'),
@@ -33,14 +39,14 @@ export class HUD {
     this.damageTimer = 0;
   }
 
-  setCash(n) {
+  setCash(n: number) {
     const v = Math.floor(n);
     if (v === this.lastCash) return;
     this.lastCash = v;
     this.el.cash.textContent = formatMoney(v);
   }
 
-  setHealth(hp) {
+  setHealth(hp: any) {
     const pct = clamp(hp, 0, 100);
     this.el.health.style.width = pct + '%';
     this.el.health.style.background =
@@ -48,7 +54,7 @@ export class HUD {
     this.el.healthNum.textContent = Math.round(pct);
   }
 
-  setAmmo(cur, max, reloading) {
+  setAmmo(cur: any, max: any, reloading: any) {
     if (reloading) {
       this.el.ammo.textContent = 'RELOADING';
       this.el.ammo.style.opacity = 0.6;
@@ -58,7 +64,7 @@ export class HUD {
     }
   }
 
-  setStars(n) {
+  setStars(n: number) {
     let s = '';
     for (let i = 0; i < 5; i++) s += `<span class="${i < n ? 'on' : 'off'}">★</span>`;
     if (this.el.stars.dataset.n !== String(n)) {
@@ -68,23 +74,23 @@ export class HUD {
     }
   }
 
-  setPrompt(text) {
+  setPrompt(text: string) {
     if (this.el.prompt.dataset.t === (text ?? '')) return;
     this.el.prompt.dataset.t = text ?? '';
     this.el.prompt.textContent = text ?? '';
     this.el.prompt.classList.toggle('show', !!text);
   }
 
-  setObjective(text) {
+  setObjective(text: string) {
     if (this.el.objective.textContent !== text) this.el.objective.textContent = text;
   }
 
-  setSpeed(kmh, show) {
+  setSpeed(kmh: any, show: any) {
     this.el.speedo.classList.toggle('show', show);
     if (show) this.el.speedVal.textContent = String(Math.round(Math.abs(kmh)));
   }
 
-  setCrosshair(show) {
+  setCrosshair(show: any) {
     this.el.crosshair.classList.toggle('show', show);
   }
 
@@ -100,7 +106,7 @@ export class HUD {
     this.el.damage.classList.add('flash');
   }
 
-  toast(text, kind = 'info', ms = 2200) {
+  toast(text: string, kind = 'info', ms = 2200) {
     const d = document.createElement('div');
     d.className = 'toast ' + kind;
     d.textContent = text;
@@ -112,27 +118,27 @@ export class HUD {
     while (this.el.toasts.children.length > 3) this.el.toasts.firstChild.remove();
   }
 
-  setFps(v) {
+  setFps(v: number) {
     this.el.fps.textContent = String(v);
   }
 
-  showStart(show) {
+  showStart(show: any) {
     this.el.start.classList.toggle('hidden', !show);
   }
 
-  showPause(show) {
+  showPause(show: any) {
     this.el.pause.classList.toggle('hidden', !show);
   }
 
-  setLoading(text) {
+  setLoading(text: string) {
     this.el.loading.textContent = text;
   }
 
-  drawMinimap(state) {
+  drawMinimap(state: any) {
     const ctx = this.mapCtx;
     const S = this.mapSize;
     const half = WORLD_HALF_MAP * 1.12;
-    const toMap = (x, z) => [((x / half) * 0.5 + 0.5) * S, ((z / half) * 0.5 + 0.5) * S];
+    const toMap = (x: number, z: number) => [((x / half) * 0.5 + 0.5) * S, ((z / half) * 0.5 + 0.5) * S];
 
     ctx.clearRect(0, 0, S, S);
     ctx.save();

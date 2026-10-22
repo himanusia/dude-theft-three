@@ -1,9 +1,18 @@
 import * as THREE from 'three';
-import { Car } from './car.js';
-import { clamp, angleDelta, rand } from './utils.js';
+import { Car } from './car';
+import { clamp, angleDelta, rand } from './utils';
 
 export class Police {
-  constructor(scene, city, audio) {
+  declare scene: any;
+  declare city: any;
+  declare audio: any;
+  declare cars: any[];
+  declare wanted: number;
+  declare crimeCooldown: number;
+  declare shootTimer: number;
+  declare arrestProgress: number;
+  declare maxCars: number;
+  constructor(scene: THREE.Scene, city: any, audio: any) {
     this.scene = scene;
     this.city = city;
     this.audio = audio;
@@ -19,7 +28,7 @@ export class Police {
     return Math.floor(clamp(this.wanted, 0, 5));
   }
 
-  addWanted(n) {
+  addWanted(n: number) {
     const before = this.starCount;
     this.wanted = clamp(this.wanted + n, 0, 5);
     this.crimeCooldown = 26;
@@ -35,11 +44,11 @@ export class Police {
     this.audio.siren(false);
   }
 
-  spawnCar(playerPos) {
+  spawnCar(playerPos: any) {
     // spawn on the road nearest the player, driving straight at them
-    const zLines = this.city.roadLines.filter((l) => l.axis === 'x').map((l) => l.coord);
-    const xLines = this.city.roadLines.filter((l) => l.axis === 'z').map((l) => l.coord);
-    const nearest = (arr, v) => arr.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), arr[0]);
+    const zLines = this.city.roadLines.filter((l: any) => l.axis === 'x').map((l: any) => l.coord);
+    const xLines = this.city.roadLines.filter((l: any) => l.axis === 'z').map((l: any) => l.coord);
+    const nearest = (arr: any, v: number) => arr.reduce((a: number, b: number) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), arr[0]);
 
     const travelX = Math.random() < 0.5;
     let p;
@@ -61,7 +70,7 @@ export class Police {
     return entry;
   }
 
-  update(dt, ctx) {
+  update(dt: number, ctx: any) {
     const { playerPos, onFoot } = ctx;
 
     if (this.wanted > 0) {
@@ -157,7 +166,7 @@ export class Police {
     });
   }
 
-  panFor(pos, listener) {
+  panFor(pos: any, listener: any) {
     const dx = pos.x - listener.x;
     const dz = pos.z - listener.z;
     const d = Math.hypot(dx, dz) || 1;

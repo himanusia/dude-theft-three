@@ -8,16 +8,22 @@ Repo: https://github.com/himanusia/dude-theft-three (private)
 
 ![street](screenshots/hero-street.png)
 
-## Run it
+## Stack
+
+**TypeScript (strict) + Vite.** No JS source left: `src/*.ts`, `tsc --noEmit` clean under
+`"strict": true`. Three.js comes from npm (no vendored copy).
 
 ```bash
-./run.sh                 # serves on http://localhost:8765 and opens the browser
-# or
-python3 serve.py 8765    # threaded server, listens on IPv4 + IPv6 loopback
+npm install
+npm run dev        # http://localhost:5173 (hot reload)
+npm run typecheck  # tsc --noEmit, strict
+npm run build      # typecheck + bundle to dist/
+./run.sh           # install (if needed) + build + serve dist/ on :8765
+python3 serve.py   # serve the built dist/ (threaded, IPv4 + IPv6 loopback)
 ```
 
-Needs a local HTTP server (ES modules + audio `fetch` do not work from `file://`).
-Desktop Chrome/Safari/Firefox with WebGL2. No build step, no dependencies to install.
+`file://` does not work (ES modules + audio fetch); always serve over HTTP.
+Desktop Chrome/Safari/Firefox with WebGL2.
 
 ## Controls
 
@@ -52,6 +58,20 @@ Assets were built by diffing against real *Dude Theft Wars* screenshots (kept lo
 Residual gap: the reference has hand-authored props (interiors, hats, weapon models, bespoke
 vehicle silhouettes). This is a procedural interpretation, not a 1:1 copy.
 
+## Floating-geometry audit
+
+`window.__game._test.audit()` walks the live scene and reports every actor/prop whose lowest
+point is not on the ground (`groundHeightAt(x,z)` per sidewalk/road):
+
+```
+{ "peds": [], "cars": [], "player": 0, "ragdolls": [], "props": [], "buildings": [] }
+```
+
+It found and fixed real floaters: benches with no legs, traffic-light heads hanging above the
+mast, billboards 11 cm off the facade, police lightbars floating above the roof, shoes 1 cm into
+the pavement, and pedestrians that lifted both feet during the walk cycle (the body now drops by
+the pendulum lift, so the planted foot always touches the ground — works for LOD-frozen poses too).
+
 ## Verification
 
 Automated harness (`puppeteer-core`) drives the real page and asserts **state**, not screenshots:
@@ -60,24 +80,31 @@ Automated harness (`puppeteer-core`) drives the real page and asserts **state**,
 19/19 checks pass — boot, walk, sprint, jump+land, sidewalk step-up, enter/exit vehicle,
 acceleration, shooting + ammo, punch, ragdoll settle, police spawn/approach, death respawn,
 cash pickup, night lighting, pause/resume, perf budget, zero console errors
+audit: 0 floating actors, 0 floating props
 ```
 
-Current numbers: 80–140 fps (headless SwiftShader), 220–1200 draw calls depending on what is in
-frame, 40–60k triangles, 44 pedestrians (recycled around the player), 9 parked cars, 12 traffic
-cars, ~140 colliders.
+Current numbers: 100–140 fps (headless SwiftShader), ~550–900 draw calls, 60–90k triangles,
+44 pedestrians (recycled around the player, detail LOD beyond 42 m), 9 parked cars, 12 traffic cars,
+~140 colliders, dynamic resolution scaling to protect frame time.
 
-Bugs found and fixed in this pass: per-frame damage on car/ped collisions (now cooldown-gated),
-`Esc` pause not firing without pointer lock, vehicles able to park on top of the player, cars
-driving through each other, missing `pickups` on the debug handle, ghosted toast overlap, and a
-crowd-placement bug that kept every pedestrian 40 m+ away (now recycled into a 14–48 m ring).
+Bugs found and fixed across these passes:
+
+- per-frame collision damage (one cruiser could kill in a second) → timestamp cooldowns
+- `Esc` pause not firing without pointer lock; Resume immediately re-pausing because the lock
+  request fires a transient unlock event (now suppressed for 600 ms)
+- vehicles could park on top of the player; cars drove through each other; the driven car could be
+  shoved by the separation pass
+- crowd kept every pedestrian 40 m+ away (now recycled into a 14–48 m ring)
+- floating props/limbs (see audit above), ghosted toast stack, missing debug handles
+- traffic recycling could teleport a car on top of the player (now excluded within 40 m)
 
 ## What is implemented
 
 - **City**: 7×7 block grid, ~350 m across. Procedural towers (3 window styles, parapets, billboards,
-  readable shop signs, awnings), parks, parking lots, street lamps (4 point lights re-parked on the
-  nearest lamps each frame), textured asphalt/pavement, bins, hydrants, benches, traffic lights,
-  sidewalk trees, stunt ramps, crosswalks. Day/night cycle (~5 min) with emissive windows,
-  street lighting, stars, moonlight.
+  readable shop signs, awnings, doors with steps), parks, parking lots, street lamps (4 point lights
+  re-parked on the nearest lamps each frame), textured asphalt/pavement, bins, hydrants, benches with
+  legs, kerb-mounted traffic lights, sidewalk trees, stunt ramps, crosswalks, drifting clouds.
+  Day/night cycle (~5 min) with emissive windows, street lighting, stars, moonlight.
 - **On foot**: third-person controller, sprint, jump, sidewalk step-up, building collision,
   solid vehicles, slow health regen out of combat.
 - **Vehicles**: arcade bicycle-model physics, collisions, damage, wreck explosions, air time off
