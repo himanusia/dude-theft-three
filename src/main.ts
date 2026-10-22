@@ -620,6 +620,11 @@ function nearestShopDoor(maxDist = 3.6) {
 function enterInterior(door: { kind: InteriorKind; name: string }) {
   const room = city.roomFor(door.kind);
   if (!room) return;
+  // never leave the player in two worlds at once: seated in a car you must get out first
+  if (player.inCar) {
+    hud.toast('Keluar dari mobil dulu', 'warn', 1600);
+    return;
+  }
   player.savedPos = player.pos.clone();
   player.savedCamYaw = camYaw;
   room.group.visible = true;
@@ -1261,7 +1266,7 @@ function update(dt: number) {
     hud.setPrompt(nearExit ? 'E — keluar toko' : 'E — keluar toko (dekat pintu)');
   } else if (player.inCar) {
     hud.setPrompt('F — exit vehicle');
-  } else if (nearestShopDoor()) {
+  } else if (nearestShopDoor() && !player.inCar) {
     const door = nearestShopDoor()!;
     hud.setPrompt(`E — masuk ${door.name}`);
   } else {
