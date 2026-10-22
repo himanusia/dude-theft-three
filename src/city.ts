@@ -173,6 +173,9 @@ export class City {
   declare skyTop: THREE.Color;
   declare skyBottom: THREE.Color;
   declare dashMatrices: any[];
+  declare doorMatrices: THREE.Matrix4[];
+  declare handleMatrices: THREE.Matrix4[];
+  declare stepMatrices: { m: THREE.Matrix4; scale: number }[];
   declare treeTrunks: any[];
   declare treeCrowns: any[];
   declare lampPoles: any[];

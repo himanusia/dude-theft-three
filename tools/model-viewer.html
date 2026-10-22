@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>DTA model viewer</title>
+<style>
+  body { margin: 0; font: 13px ui-sans-serif, system-ui, sans-serif; color: var(--foreground, #eee); }
+  #stage { width: 620px; height: 340px; position: relative; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .bar { display: flex; gap: 6px; align-items: center; padding: 6px 0 0; }
+  button { font: inherit; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border, #444);
+           background: var(--card, #222); color: var(--foreground, #eee); cursor: pointer; }
+  button.on { background: var(--accent, #4af); color: #06121a; border-color: transparent; }
+  .hint { color: var(--muted-foreground, #999); font-size: 11px; margin-left: auto; }
+</style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div class="bar" id="tabs"></div>
+  <div class="hint">drag: orbit · scroll: zoom</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const MODELS = window.__MODELS__ || {};
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, stage.clientWidth / stage.clientHeight, 0.1, 200);
+camera.position.set(4.2, 2.6, 5.4);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x40444a, 2.4);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xfff4e0, 2.6);
+key.position.set(5, 9, 6);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x88bbff, 1.1);
+rim.position.set(-6, 4, -5);
+scene.add(rim);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1.5;
+controls.maxDistance = 18;
+
+const loader = new GLTFLoader();
+let current = null;
+
+function frame(root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  root.position.sub(center);
+  root.position.y += size.y / 2;
+  const radius = Math.max(size.x, size.y, size.z);
+  camera.position.set(radius * 1.5, radius * 0.9, radius * 1.9);
+  controls.target.set(0, size.y * 0.45, 0);
+  controls.update();
+}
+
+async function show(name) {
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.name === name));
+  if (current) { scene.remove(current); current = null; }
+  const b64 = MODELS[name];
+  if (!b64) return;
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const gltf = await loader.parseAsync(bytes.buffer, '');
+  current = gltf.scene;
+  scene.add(current);
+  frame(current);
+}
+
+const tabs = document.getElementById('tabs');
+Object.keys(MODELS).forEach((name, i) => {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.dataset.name = name;
+  b.onclick = () => show(name);
+  tabs.appendChild(b);
+  if (i === 0) setTimeout(() => show(name), 0);
+});
+
+function tick() {
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+addEventListener('resize', () => {
+  renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+  camera.aspect = stage.clientWidth / stage.clientHeight;
+  camera.updateProjectionMatrix();
+});
+</script>
+</body>
+</html>
