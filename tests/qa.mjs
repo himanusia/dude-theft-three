@@ -220,10 +220,10 @@ function check(name, ok, detail) {
   const resumed = await page.evaluate(() => window.__game.state.paused === false);
   check('pause and resume', paused === true && resumed, { paused, resumed });
 
-  // perf: draw calls are a structural budget, so measure three times from ONE fixed
-  // vantage point and keep the leanest frame. fps is context only — the host may be busy.
-  // deterministic structural budget: four vantage points looking down a street, take the
-  // heaviest frame. Camera-following a mouse turn made this number meaningless before.
+  // perf: draw calls are a structural budget, so measure from four fixed vantage points
+  // looking down streets and report the heaviest frame — that is the worst case the player
+  // can walk into. fps is context only: the host may be running other workers.
+  // (Sampling wherever the camera happened to point made the same build report 669-1819.)
   const vantage = [[26, -40, 0], [26, 60, Math.PI], [-90, 0, Math.PI / 2], [90, 0, -Math.PI / 2]];
   let perf = { calls: 0, tris: 0, fps: '0' };
   for (const [vx, vz, yaw] of vantage) {
@@ -235,7 +235,12 @@ function check(name, ok, detail) {
   check('perf budget', Number(perf.calls) < 1600, perf);
 
   check('no console/page errors', errs.length === 0, errs.slice(0, 6));
-  console.log('SUMMARY ' + JSON.stringify({ pass: results.filter(r => r.ok).length, total: results.length }));
-  console.log('FAILED ' + JSON.stringify(results.filter(r => !r.ok)));
+  const failed = results.filter(r => !r.ok);
+  console.log('SUMMARY ' + JSON.stringify({ pass: results.length - failed.length, total: results.length }));
+  console.log('FAILED ' + JSON.stringify(failed));
   await b.close();
+  if (failed.length) {
+    console.error(`qa: ${failed.length}/${results.length} checks failed`);
+    process.exitCode = 1;
+  }
 })().catch(e => { console.error('HARNESS FAIL', e.message); process.exit(1); });

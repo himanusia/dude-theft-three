@@ -2,6 +2,12 @@
 import puppeteer from 'puppeteer-core';
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const results = [];
+function check(name, ok, detail) {
+  results.push({ name, ok: !!ok });
+  console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail !== undefined ? ' :: ' + JSON.stringify(detail) : ''));
+}
+
 (async () => {
   const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio'], defaultViewport: { width: 1400, height: 900 } });
   const page = await b.newPage();
@@ -27,6 +33,19 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await sleep(3000);
   const report = await page.evaluate(() => window.__game._test.audit());
   console.log('AUDIT', JSON.stringify(report, null, 1));
-  console.log('errors', JSON.stringify(errs.slice(0, 4)));
+
+  check('no floating pedestrians', report.peds.length === 0, report.peds.slice(0, 5));
+  check('no floating ragdolls', report.ragdolls.length === 0, report.ragdolls.slice(0, 5));
+  check('no floating cars', report.cars.length === 0, report.cars.slice(0, 5));
+  check('no floating props', report.props.length === 0, report.props.slice(0, 5));
+  check('no floating buildings', report.buildings.length === 0, report.buildings.slice(0, 5));
+  check('no page errors', errs.length === 0, errs.slice(0, 4));
+
+  const failed = results.filter(r => !r.ok);
+  console.log('SUMMARY', JSON.stringify({ pass: results.length - failed.length, total: results.length }));
   await b.close();
+  if (failed.length) {
+    console.error(`audit: ${failed.length}/${results.length} checks failed`);
+    process.exitCode = 1;
+  }
 })().catch(e => { console.error('FAIL', e.message); process.exit(1); });
