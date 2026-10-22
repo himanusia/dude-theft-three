@@ -115,6 +115,14 @@ exit, all four kinds reachable, audit clean indoors
 audit: 0 floating actors, 0 floating props
 ```
 
+## CI
+
+`.github/workflows/ci.yml` gates every PR to `main` (plus manual `workflow_dispatch`): Node 20,
+cached npm, the Chrome build that `puppeteer-core` pins, `npm run typecheck`, `npm run build`,
+then `tests/qa.mjs`, `tests/interior.mjs` and `tests/audit.mjs` against `dist/` served on :8765.
+Each suite exits non-zero when any check prints `FAIL`, so one red assertion fails the job; logs
+and screenshots from a failed run are uploaded as the `ci-failure-evidence` artifact.
+
 Current numbers: 85–140 fps (headless SwiftShader), ~900–1300 draw calls, ~100k triangles,
 34 pedestrians (recycled around the player, detail LOD beyond 30 m), 9 parked cars, 10 traffic cars
 (built "simple": no mirrors/plate/exhaust), instanced building doors, handles and steps
