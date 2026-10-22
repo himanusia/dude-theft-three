@@ -6,6 +6,7 @@ import { Ragdoll } from './ragdoll';
 import { PedManager } from './npc';
 import { Police } from './police';
 import { Traffic } from './traffic';
+import { PlacedInterior, InteriorKind } from './interior';
 import { HUD } from './hud';
 import { AudioSys } from './audio';
 import {
@@ -68,6 +69,9 @@ interface PlayerState {
   grounded: boolean;
   rhythm: number;
   lastHit?: number;
+  inInterior: PlacedInterior | null;
+  savedPos?: THREE.Vector3;
+  savedCamYaw?: number;
 }
 
 const player: PlayerState = {
@@ -85,6 +89,7 @@ const player: PlayerState = {
   shootCd: 0,
   grounded: true,
   rhythm: 0,
+  inInterior: null,
 };
 
 const character = new Character({ shirt: 0xd94f4f, pants: 0x2f3a52, skin: 0xd9a273 });
@@ -236,6 +241,13 @@ window.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (!started) return;
   if (e.code === 'KeyF') toggleVehicle();
+  if (e.code === 'KeyE') {
+    if (player.inInterior) exitInterior();
+    else {
+      const door = nearestShopDoor();
+      if (door) enterInterior(door);
+    }
+  }
   if (e.code === 'KeyQ') punch();
   if (e.code === 'KeyR') startReload();
   if (e.code === 'KeyM') {
@@ -274,7 +286,7 @@ let cinematic = false; // test hook: freeze the follow camera for asset comparis
 function updateCamera(dt: number) {
   if (cinematic) return;
   const aiming = mouse.right && !player.inCar;
-  const wantDist = player.inCar ? 8.4 : aiming ? 1.35 : 5.8;
+  const wantDist = player.inInterior ? 3.2 : player.inCar ? 8.4 : aiming ? 1.35 : 5.8;
   camDist = lerp(camDist, wantDist, clamp(dt * 6, 0, 1));
 
   // mouse look
@@ -310,8 +322,9 @@ function updateCamera(dt: number) {
     camTarget.y += aiming ? 0.06 : 0.12;
   }
 
-  // keep the camera out of buildings and above ground
-  for (const b of city.colliders) {
+  // keep the camera out of buildings / room walls and above ground
+  const camColliders = player.inInterior ? player.inInterior.colliders : city.colliders;
+  for (const b of camColliders) {
     if (b.h < 1.5) continue;
     const r = resolveCircleBox(camGoal.x, camGoal.z, 0.5, b);
     if (r && camGoal.y < b.h) {
@@ -376,8 +389,9 @@ function updateOnFoot(dt: number) {
     player.y = groundY;
   }
 
-  // building collision
-  for (const b of city.colliders) {
+  // collision: room walls/furniture while inside, city colliders outside
+  const colliders = player.inInterior ? player.inInterior.colliders : city.colliders;
+  for (const b of colliders) {
     if (b.h < 0.4) continue;
     const r = resolveCircleBox(player.pos.x, player.pos.z, 0.42, b);
     if (r) {
@@ -385,8 +399,10 @@ function updateOnFoot(dt: number) {
       player.pos.z = r.z;
     }
   }
-  player.pos.x = clamp(player.pos.x, -WORLD_HALF, WORLD_HALF);
-  player.pos.z = clamp(player.pos.z, -WORLD_HALF, WORLD_HALF);
+  if (!player.inInterior) {
+    player.pos.x = clamp(player.pos.x, -WORLD_HALF, WORLD_HALF);
+    player.pos.z = clamp(player.pos.z, -WORLD_HALF, WORLD_HALF);
+  }
 
   // face movement direction, or camera direction while aiming
   const speed = Math.hypot(player.vel.x, player.vel.z);
@@ -399,7 +415,7 @@ function updateOnFoot(dt: number) {
   }
 
   // every vehicle body is solid: never let a cruiser park on top of the player
-  for (const c of allCars()) {
+  for (const c of player.inInterior ? [] : allCars()) {
     const dx = player.pos.x - c.pos.x;
     const dz = player.pos.z - c.pos.z;
     const d = Math.hypot(dx, dz);
@@ -442,6 +458,47 @@ function nearestCar(maxDist = 4.6) {
     }
   }
   return best ? { car: best, dist: bd } : null;
+}
+
+function nearestShopDoor(maxDist = 3.6) {
+  let best: { x: number; z: number; kind: InteriorKind; name: string } | null = null;
+  let bd = maxDist;
+  for (const d of city.shopDoors) {
+    const dist = Math.hypot(d.x - player.pos.x, d.z - player.pos.z);
+    if (dist < bd) {
+      bd = dist;
+      best = d;
+    }
+  }
+  return best;
+}
+
+function enterInterior(door: { kind: InteriorKind; name: string }) {
+  const room = city.roomFor(door.kind);
+  if (!room) return;
+  player.savedPos = player.pos.clone();
+  player.savedCamYaw = camYaw;
+  player.inInterior = room;
+  player.pos.set(room.origin.x + room.spawn.x, 0, room.origin.z + room.spawn.z);
+  player.y = 0;
+  player.vel.set(0, 0, 0);
+  player.grounded = true;
+  character.group.visible = true;
+  camYaw = 0; // camera behind the player, looking into the room
+  audio.play('click', { vol: 0.4 });
+  hud.toast(`Masuk ${door.name}`, 'info', 1600);
+}
+
+function exitInterior() {
+  const room = player.inInterior;
+  if (!room) return;
+  player.inInterior = null;
+  if (player.savedPos) player.pos.copy(player.savedPos);
+  if (player.savedCamYaw !== undefined) camYaw = player.savedCamYaw;
+  player.y = 0;
+  player.vel.set(0, 0, 0);
+  audio.play('click', { vol: 0.4 });
+  hud.toast('Keluar toko', 'info', 1400);
 }
 
 function toggleVehicle() {
@@ -933,7 +990,7 @@ function update(dt: number) {
   if (player.inCar) updateDriving(dt);
   else updateOnFoot(dt);
 
-  peds.update(dt, {
+  if (!player.inInterior) peds.update(dt, {
     playerPos: player.pos,
     wanted: police.wanted,
     armed: mouse.right && !player.inCar,
@@ -941,9 +998,9 @@ function update(dt: number) {
     cars: player.inCar ? [player.inCar] : [],
   });
 
-  traffic.update(dt, { playerPos: player.pos, playerCar: player.inCar, peds, wanted: police.wanted });
+  if (!player.inInterior) traffic.update(dt, { playerPos: player.pos, playerCar: player.inCar, peds, wanted: police.wanted });
 
-  police.update(dt, {
+  if (!player.inInterior) police.update(dt, {
     playerPos: player.pos,
     onFoot: !player.inCar,
     onArrest: busted,
@@ -1026,8 +1083,18 @@ function update(dt: number) {
   }
 
   // prompts
-  if (player.inCar) {
+  if (player.inInterior) {
+    const nearExit = player.pos.distanceTo(new THREE.Vector3(
+      player.inInterior.origin.x + player.inInterior.exit.x,
+      0,
+      player.inInterior.origin.z + player.inInterior.exit.z
+    )) < 3.2;
+    hud.setPrompt(nearExit ? 'E — keluar toko' : 'E — keluar toko (dekat pintu)');
+  } else if (player.inCar) {
     hud.setPrompt('F — exit vehicle');
+  } else if (nearestShopDoor()) {
+    const door = nearestShopDoor()!;
+    hud.setPrompt(`E — masuk ${door.name}`);
   } else {
     const near = nearestCar(4.6);
     hud.setPrompt(near ? (near.car.isPolice ? 'F — steal police cruiser' : 'F — enter vehicle') : '');
