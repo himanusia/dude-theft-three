@@ -1,3 +1,5 @@
+import { POIS } from './jakartamap';
+import { buildHalte } from './halte';
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
@@ -535,6 +537,9 @@ export class City {
     this.buildRoadRibbons();
     this.buildWater();
     this.buildDistrictProps();
+    // buildHaltes() is written but not switched on: the platform colliders land on the verge
+    // where cars park, and qa caught a car stuck against one at 8 km/h. It goes live once the
+    // verge spacing is worked out against parking spots.
 
     // road markings (instanced): dashed centre lines along the roads the map defines
     const mtx = new THREE.Matrix4();
@@ -722,6 +727,42 @@ export class City {
         const z = cz + (i ? half + 0.9 : -half - 0.9);
         this.washMats.push(m.clone().makeTranslation(cx, 3.1 + i * 0.2, z));
       }
+    }
+  }
+
+
+  /**
+   * TransJakarta haltes, where the map says they are: on the verge of the arterial they serve,
+   * parallel to it, roof over the platform and the tactile edge facing the carriageway.
+   */
+  buildHaltes() {
+    for (const poi of POIS) {
+      if (poi.kind !== 'halte') continue;
+      let best = { d: Infinity, yaw: 0, nx: 0, nz: 1, half: 10 };
+      for (const a of ARTERIALS) {
+        for (let i = 0; i < a.path.length - 1; i++) {
+          const [x1, z1] = a.path[i];
+          const [x2, z2] = a.path[i + 1];
+          const dx = x2 - x1;
+          const dz = z2 - z1;
+          const len2 = dx * dx + dz * dz || 1;
+          const t = clamp(((poi.x - x1) * dx + (poi.z - z1) * dz) / len2, 0, 1);
+          const cx = x1 + dx * t;
+          const cz = z1 + dz * t;
+          const d = Math.hypot(poi.x - cx, poi.z - cz);
+          if (d < best.d) {
+            const len = Math.sqrt(len2) || 1;
+            best = { d, yaw: Math.atan2(dx, dz), nx: -dz / len, nz: dx / len, half: a.width / 2 };
+          }
+        }
+      }
+      if (best.d > 90) continue;
+      // stand it on the verge on the far side of the kerb, never in a traffic lane
+      const off = best.half + 3.4;
+      const px = poi.x + best.nx * off;
+      const pz = poi.z + best.nz * off;
+      const g = buildHalte({ group: this.group, colliders: this.colliders, audit: this.propAudit }, px, pz, best.yaw);
+      g.position.y = terrainHeight(px, pz);
     }
   }
 

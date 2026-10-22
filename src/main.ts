@@ -533,7 +533,9 @@ function updateCamera(dt: number) {
   // The boom may never be shorter than the body it orbits: after a crash into a wall the
   // shortest legal distance put the camera inside the car, which filled the screen with the
   // car's paint. Better to clip the wall than to sit inside the vehicle.
-  const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 1.1;
+  // On foot the camera may not come closer than 2.4 m: at 1.1 m the character's own head filled
+  // a third of the screen whenever a kerb or a wall pulled the boom in.
+  const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 2.4;
   const allowed = boomHit ? Math.max(minBoom, boomHit.dist - 0.45) : camDist;
   camDistActual = lerp(camDistActual, allowed, clamp(dt * (allowed < camDistActual ? 20 : 4.5), 0, 1));
 
