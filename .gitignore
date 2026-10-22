@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+*.log
+.server.pid
+# third-party reference screenshots (not ours to redistribute)
+reference/
+# throwaway comparison renders
+screenshots/cmp-*.png
