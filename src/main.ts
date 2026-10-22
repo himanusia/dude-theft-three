@@ -9,6 +9,7 @@ import { Traffic } from './traffic';
 import { PlacedInterior, InteriorKind } from './interior';
 import { HUD } from './hud';
 import { AudioSys } from './audio';
+import { TouchControls } from './touch';
 import {
   clamp,
   lerp,
@@ -258,6 +259,7 @@ window.addEventListener('keydown', (e) => {
     togglePause();
     return;
   }
+  if (e.code === 'KeyP' && !e.repeat) togglePause();
   if (e.code === 'KeyT') {
     dayT = (dayT + 0.12) % 1;
     hud.toast(dayT > 0.2 && dayT < 0.55 ? 'Morning' : dayT < 0.78 ? 'Afternoon' : 'Night');
@@ -265,6 +267,40 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
+
+// ---------------------------------------------------------------- touch
+// The on-screen layer only feeds the state above: axes for walking, deltas for
+// the camera, hooks for the discrete actions. Desktop never activates it.
+const touch = new TouchControls({
+  activate() {
+    hud.setTouchMode(true);
+  },
+  look(dx, dy) {
+    if (!started || paused) return;
+    mouse.dx += dx;
+    mouse.dy += dy;
+  },
+  pause() {
+    if (!started) return;
+    togglePause();
+  },
+  vehicle() {
+    if (!started || paused) return;
+    toggleVehicle();
+  },
+  interact() {
+    if (!started || paused) return;
+    if (player.inInterior) exitInterior();
+    else {
+      const door = nearestShopDoor();
+      if (door) enterInterior(door);
+    }
+  },
+  punch() {
+    if (!started || paused) return;
+    punch();
+  },
+});
 
 function togglePause(force?: boolean) {
   const next = force === undefined ? !paused : !!force;
@@ -356,12 +392,23 @@ function updateOnFoot(dt: number) {
   if (keys.has('KeyS')) wish.sub(forward);
   if (keys.has('KeyD')) wish.add(right);
   if (keys.has('KeyA')) wish.sub(right);
+  if (touch.state.active) {
+    wish.addScaledVector(forward, touch.state.moveY);
+    wish.addScaledVector(right, touch.state.moveX);
+  }
   const moving = wish.lengthSq() > 0.001;
-  if (moving) wish.normalize();
+  // the stick is analog: keyboard input is always full strength, a half-pushed
+  // stick walks at half speed and still keeps its direction
+  let analog = 1;
+  if (moving) {
+    analog = clamp(touch.state.active ? wish.length() : 1, 0, 1);
+    wish.normalize();
+  }
 
-  const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.state.sprint;
   const aiming = mouse.right;
   let targetSpeed = aiming ? 2.4 : sprint ? RUN : WALK;
+  targetSpeed *= analog;
   targetSpeed *= player.hp > 30 ? 1 : 0.82;
 
   const targetVel = wish.multiplyScalar(moving ? targetSpeed : 0);
@@ -373,7 +420,7 @@ function updateOnFoot(dt: number) {
 
   // jump + sidewalk step-up
   const groundY = city.groundHeightAt(player.pos.x, player.pos.z);
-  if (keys.has('Space') && player.grounded) {
+  if ((keys.has('Space') || touch.state.jump) && player.grounded) {
     player.vy = 6.8;
     player.grounded = false;
   }
@@ -541,12 +588,14 @@ function toggleVehicle() {
 function updateDriving(dt: number) {
   const car = player.inCar;
   if (!car) return;
-  const throttle = keys.has('KeyW') ? 1 : 0;
-  const straightBack = keys.has('KeyS');
+  const touchY = touch.state.active ? touch.state.moveY : 0;
+  const touchX = touch.state.active ? touch.state.moveX : 0;
+  const throttle = (keys.has('KeyW') || touchY > 0.3) ? 1 : 0;
+  const straightBack = keys.has('KeyS') || touchY < -0.3;
   const brake = straightBack && car.speed > 0.6;
   const reverse = straightBack && car.speed <= 0.6;
-  const steer = (keys.has('KeyA') ? 1 : 0) - (keys.has('KeyD') ? 1 : 0);
-  const handbrake = keys.has('Space');
+  const steer = (keys.has('KeyA') ? 1 : 0) - (keys.has('KeyD') ? 1 : 0) + (touchX > 0.25 ? -1 : touchX < -0.25 ? 1 : 0);
+  const handbrake = keys.has('Space') || touch.state.jump;
 
   const hit = car.update(
     dt,
@@ -860,7 +909,7 @@ function completeObjective(id: ObjectiveId) {
 function objectiveText() {
   if (police.starCount >= 3) return 'Lose the cops — 3 stars and rising';
   if (police.starCount >= 1) return `Lose the cops — ${police.starCount} star${police.starCount > 1 ? 's' : ''} on you`;
-  if (!flags.drove) return 'Steal a car — walk up to one and press F';
+  if (!flags.drove) return touch.state.active ? 'Steal a car — walk up to one and tap CAR' : 'Steal a car — walk up to one and press F';
   if (!flags.chaos) return 'Cause chaos — hit a pedestrian with a car or a fist';
   if (!flags.stars) return `Reach a 3-star wanted level (${police.starCount}/3)`;
   if (!flags.escape) return 'Lose the cops — get all stars to zero';
@@ -931,7 +980,8 @@ function updateCombat(dt: number) {
       audio.play('click', { vol: 0.45, rate: 1.2 });
     }
   }
-  if (mouse.left && !player.inCar && pointerLocked) shoot();
+  // fire: mouse while pointer-locked on desktop, the FIRE button on touch
+  if (!player.inCar && ((mouse.left && pointerLocked) || (touch.state.active && touch.state.fire))) shoot();
 }
 
 // ---------------------------------------------------------------- pickups
@@ -1182,6 +1232,7 @@ window.__game = {
   ragdolls,
   audio,
   hud,
+  touch,
   get state() {
     return {
       paused,
@@ -1206,6 +1257,7 @@ window.__game = {
       objective: hud.el.objective.textContent,
       camYaw: +camYaw.toFixed(2),
       vel: +Math.hypot(player.vel.x, player.vel.z).toFixed(2),
+      touch: { ...touch.state },
     };
   },
   _test: {
