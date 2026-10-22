@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: typecheck + build + headless suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DTA_URL: http://127.0.0.1:8765
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chrome for the harness
+        run: |
+          set -euo pipefail
+          # Match the exact Chrome build this puppeteer-core was released against.
+          CHROME_VERSION=$(node -p "require('puppeteer-core/lib/cjs/puppeteer/revisions.js').PUPPETEER_REVISIONS.chrome")
+          echo "puppeteer-core expects chrome@$CHROME_VERSION"
+          CHROME_BIN=$(node_modules/.bin/browsers install "chrome@$CHROME_VERSION" --path "$HOME/.cache/puppeteer" | tail -n 1 | awk '{print $2}')
+          test -x "$CHROME_BIN"
+          "$CHROME_BIN" --version
+          echo "CHROME_PATH=$CHROME_BIN" >> "$GITHUB_ENV"
+
+      - name: Typecheck and production build
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run build
+
+      - name: Serve dist and wait for HTTP 200
+        run: |
+          set -euo pipefail
+          python3 serve.py 8765 > server.log 2>&1 &
+          echo "server pid $!"
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$DTA_URL/index.html" || true)
+            if [ "$code" = "200" ]; then
+              echo "server ready: HTTP $code on $DTA_URL/index.html"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "server never answered 200 (last: $code)"
+          cat server.log
+          exit 1
+
+      - name: Headless gameplay + interior + audit suites
+        run: |
+          set -euo pipefail
+          npm run test:qa 2>&1 | tee qa.log
+          npm run test:interior 2>&1 | tee interior.log
+          npm run test:audit 2>&1 | tee audit.log
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-evidence
+          path: |
+            qa.log
+            interior.log
+            audit.log
+            server.log
+            screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop the static server
+        if: always()
+        run: pkill -f "serve.py 8765" || true
