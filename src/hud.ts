@@ -31,12 +31,33 @@ export class HUD {
       pause: document.getElementById('pause-screen'),
       loading: document.getElementById('loading-text'),
       wantedLabel: document.getElementById('wanted-label'),
+      hints: document.getElementById('hints'),
+      helpBtn: document.getElementById('help-btn'),
+      help: document.getElementById('help-sheet'),
+      helpClose: document.getElementById('help-close'),
     };
     this.mapCtx = this.el.minimap.getContext('2d');
     this.mapSize = this.el.minimap.width;
     this.lastCash = -1;
     this.hitTimer = 0;
     this.damageTimer = 0;
+    this.el.helpBtn?.addEventListener('click', () => this.toggleHelp());
+    this.el.helpClose?.addEventListener('click', () => this.toggleHelp(false));
+    this.el.help?.addEventListener('click', (e: Event) => {
+      if (e.target === this.el.help) this.toggleHelp(false);
+    });
+  }
+
+  /** Phones and tablets: keyboard hints give way to the "?" sheet, CSS re-lays the HUD. */
+  setTouchMode(on: boolean) {
+    document.body.classList.toggle('touch-mode', on);
+    if (!on) this.toggleHelp(false);
+  }
+
+  toggleHelp(force?: boolean) {
+    const open = force === undefined ? !this.el.help.classList.contains('show') : !!force;
+    this.el.help.classList.toggle('show', open);
+    this.el.helpBtn.setAttribute('aria-expanded', String(open));
   }
 
   setCash(n: number) {

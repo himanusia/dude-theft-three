@@ -5,12 +5,19 @@ import { clamp, lerp, rand, pick, resolveCircleBox, shadowBlob, roundedBox, canv
 const CAR_COLORS = [0xff3399, 0xd02b2b, 0x2f6fd0, 0xffce2e, 0x2fa89a, 0xf0f0f4, 0x24242c, 0xe86a2b, 0x39b54a];
 
 const SPECS = {
-  sedan: { maxSpeed: 30, accel: 11, brake: 22, turn: 1.5, mass: 1, grip: 7 },
-  muscle: { maxSpeed: 38, accel: 15, brake: 20, turn: 1.35, mass: 1.1, grip: 6 },
-  van: { maxSpeed: 23, accel: 8, brake: 18, turn: 1.2, mass: 1.4, grip: 8 },
-  police: { maxSpeed: 34, accel: 14, brake: 24, turn: 1.6, mass: 1.05, grip: 8 },
-  taxi: { maxSpeed: 31, accel: 12, brake: 22, turn: 1.55, mass: 1, grip: 7.5 },
+  sedan: { maxSpeed: 30, accel: 12, brake: 22, turn: 1.5, mass: 1, grip: 7 },
+  muscle: { maxSpeed: 38, accel: 16, brake: 20, turn: 1.35, mass: 1.1, grip: 6 },
+  van: { maxSpeed: 23, accel: 9, brake: 18, turn: 1.2, mass: 1.4, grip: 8 },
+  police: { maxSpeed: 34, accel: 15, brake: 24, turn: 1.6, mass: 1.05, grip: 8 },
+  taxi: { maxSpeed: 31, accel: 13, brake: 22, turn: 1.55, mass: 1, grip: 7.5 },
 };
+
+// coast-down drag: only applied with the throttle released (or above the spec
+// top speed), so it never caps the engine's own acceleration curve
+const COAST_DRAG = 0.55;
+const WRECK_DRAG = 1.6;
+// reverse tops out at 42 % of the forward spec, same as before the retune
+const REVERSE_CAP = 0.42;
 
 export class Car {
   declare scene: any;
@@ -352,6 +359,25 @@ export class Car {
     return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
   }
 
+  /** absolute speed in km/h, the number the HUD and the harness read */
+  get kmh() {
+    return Math.abs(this.speed) * 3.6;
+  }
+
+  /**
+   * 0..1 engine note across 5 gear steps: within a gear the value climbs, then
+   * drops on the shift, so the audio follows road speed with a stepped curve
+   * instead of one flat drone.
+   */
+  get engineRpm01() {
+    const gears = 5;
+    const v = clamp(Math.abs(this.speed) / Math.max(1, this.maxSpeed), 0, 0.999);
+    const span = 1 / gears;
+    const gear = Math.min(gears - 1, Math.floor(v / span));
+    const inGear = clamp((v - gear * span) / span, 0, 1);
+    return clamp((gear + inGear) / gears, 0, 1);
+  }
+
   applyDamage(n: number) {
     if (this.wrecked) return;
     this.health = clamp(this.health - n, 0, 100);
@@ -376,15 +402,35 @@ export class Car {
     const maxSpeed = this.wrecked ? 0 : this.maxSpeed;
     const accel = this.wrecked ? 0 : this.accel;
 
-    if (throttle > 0.05) this.speed += accel * throttle * dt;
-    else if (throttle < -0.05) this.speed += accel * 0.7 * throttle * dt;
+    // Engine curve: acceleration tapers quadratically as the car closes on its
+    // spec top speed, so the gearbox pulls hard off the line and then eases
+    // into maxSpeed instead of stalling against a linear drag wall
+    // (the old `speed -= speed * 0.55 * dt` capped the sedan at 20 m/s).
+    if (throttle > 0.05) {
+      const r = clamp(this.speed / maxSpeed, 0, 1);
+      this.speed += accel * throttle * (1 - r * r) * dt;
+    } else if (throttle < -0.05) {
+      const r = clamp(-this.speed / (maxSpeed * REVERSE_CAP), 0, 1);
+      this.speed += accel * 0.7 * throttle * (1 - r * r) * dt;
+    }
 
-    if (braking) this.speed -= Math.sign(this.speed) * this.brake * dt;
-    if (handbrake) this.speed -= Math.sign(this.speed) * 10 * dt;
+    if (braking && this.speed !== 0) {
+      const drop = this.brake * dt;
+      this.speed = Math.abs(this.speed) <= drop ? 0 : this.speed - Math.sign(this.speed) * drop;
+    }
+    if (handbrake && this.speed !== 0) {
+      const drop = 10 * dt;
+      this.speed = Math.abs(this.speed) <= drop ? 0 : this.speed - Math.sign(this.speed) * drop;
+    }
 
-    // drag + rolling resistance
-    this.speed -= this.speed * (this.wrecked ? 1.6 : 0.55) * dt;
-    this.speed = clamp(this.speed, -maxSpeed * 0.42, maxSpeed * 1.08);
+    // rolling resistance + aero drag, only when the engine is not pulling:
+    // coasting, or over the spec speed after a ramp launch / collision kick
+    const coasting = Math.abs(throttle) <= 0.05;
+    const cap = maxSpeed * (this.speed < 0 ? REVERSE_CAP : 1);
+    if (coasting || Math.abs(this.speed) > cap) {
+      this.speed -= this.speed * (this.wrecked ? WRECK_DRAG : COAST_DRAG) * dt;
+    }
+    this.speed = clamp(this.speed, -maxSpeed * REVERSE_CAP, maxSpeed * 1.08);
     if (Math.abs(this.speed) < 0.12) this.speed = 0;
 
     // steering: grip falls as speed rises
