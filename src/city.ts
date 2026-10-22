@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from './utils';
+import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls } from './jakarta';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 import { Car } from './car';
 
@@ -421,8 +422,9 @@ export class City {
       for (let j = -GRID; j <= GRID; j++) {
         const cx = i * PITCH;
         const cz = j * PITCH;
-        const isPark = Math.random() < 0.13;
-        const isLot = !isPark && Math.random() < 0.16;
+        const landmark = landmarkAt(cx, cz);
+        const isPark = !landmark && Math.random() < 0.13;
+        const isLot = !landmark && !isPark && Math.random() < 0.16;
 
         const plate = new THREE.Mesh(new THREE.BoxGeometry(BLOCK, 0.26, BLOCK), sidewalkMat);
         plate.position.set(cx, 0.13, cz);
@@ -436,7 +438,14 @@ export class City {
         curb.receiveShadow = true;
         this.group.add(curb);
 
-        if (isPark) {
+        if (landmark) {
+          if (!this.propAudit) this.propAudit = [];
+          const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+          if (landmark === 'monas') buildMonas(ctx, cx, cz);
+          else if (landmark === 'bundaran') buildBundaran(ctx, cx, cz);
+          else buildKotaTua(ctx, cx, cz);
+          this.blocks.push({ x: cx, z: cz, type: 'landmark', landmark });
+        } else if (isPark) {
           const lawn = new THREE.Mesh(new THREE.BoxGeometry(BLOCK - 6, 0.12, BLOCK - 6), parkMat);
           lawn.position.set(cx, 0.28, cz);
           lawn.receiveShadow = true;
@@ -647,12 +656,23 @@ export class City {
   }
 
   buildBuildings(cx: any, cz: any) {
-    const count = Math.random() < 0.45 ? 1 : randInt(2, 3);
+    // A block belongs to a Jakarta district, and the district decides how tall, how dense and
+    // what colour it is: Thamrin towers, a kampung is single storey with tiled roofs, Kota Tua
+    // is white plaster under red clay, Tanah Abang is a wall of awnings.
+    const id = districtAt(cx, cz);
+    const style = DISTRICTS[id];
+    const count = Math.random() < 0.35 ? style.lots[0] : randInt(style.lots[0], style.lots[1]);
     const area = BLOCK - 9;
     const cells = count === 1 ? [[0, 0, area, area]] : this.splitLots(area, count, cx, cz);
     for (const [ox, oz, w, d] of cells) {
-      const h = count === 1 ? rand(14, 46) : rand(7, 24);
-      this.makeBuilding(cx + ox, cz + oz, w, d, h, cx, cz);
+      const [lo, hi] = style.heights;
+      const h = rand(lo, hi);
+      this.makeBuilding(cx + ox, cz + oz, w, d, h, cx, cz, style);
+    }
+    // market districts get tarpaulin stalls spilled onto the pavement
+    if (id === 'tanahabang' || id === 'glodok') {
+      if (!this.propAudit) this.propAudit = [];
+      buildMarketStalls({ group: this.group, colliders: this.colliders, audit: this.propAudit }, cx, cz, 5);
     }
   }
 
@@ -680,11 +700,11 @@ export class City {
     ].slice(0, count);
   }
 
-  makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z) {
+  makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z, style: any = null) {
     const chromeLike = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
-    const wall = pick(WALLS);
-    const style = pick(['grid', 'bands', 'strips']);
-    const tex = windowTexture(wall, style);
+    const wall = style ? pick(style.walls) : pick(WALLS);
+    const facade = style ? pick(['grid', 'bands', 'strips']) : pick(['grid', 'bands', 'strips']);
+    const tex = windowTexture(wall, facade);
     const emis = emissiveTexture();
     const rx = Math.max(1, Math.round(w / 6.5));
     const ry = Math.max(1, Math.round(h / 6.5));
@@ -702,7 +722,7 @@ export class City {
       metalness: 0.06,
     });
     this.emissiveMats.push(sideMat);
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0x4a4a4c, roughness: 0.95 });
+    const roofMat = new THREE.MeshStandardMaterial({ color: style ? style.roof : 0x4a4a4c, roughness: 0.95 });
     const mats = [sideMat, sideMat, roofMat, roofMat, sideMat, sideMat];
 
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats);
@@ -722,7 +742,7 @@ export class City {
 
     // occasional billboard with real text, like the reference storefronts
     if (Math.random() < 0.6 && h < 34) {
-      const words = ['DISKON', 'MURAH', 'PROMO', 'GRATIS ONGKIR', 'BUKA 24 JAM', 'KOPI ENAK', 'SERVIS AC', 'KOSONG'];
+      const words = style ? [...style.signs, 'DISKON', 'MURAH', 'BUKA 24 JAM'] : ['DISKON', 'MURAH', 'PROMO', 'GRATIS ONGKIR', 'BUKA 24 JAM', 'KOPI ENAK', 'SERVIS AC', 'KOSONG'];
       const word = pick(words);
       const bg = pick(['#e94f4f', '#2f6fd0', '#f2b134', '#39b54a', '#8a3ad9']);
       const boardTex = canvasTexture(256, 96, (ctx, cw, ch) => {
