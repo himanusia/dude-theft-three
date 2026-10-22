@@ -2036,15 +2036,7 @@ export class City {
               // slab: a warung awning over half the shopfronts, a parapet along every roof, and
               // a rooftop water tank (toren) on the taller ones. Silhouette is what the eye
               // uses to tell one building from the next.
-              const parapet = new THREE.Mesh(
-                new THREE.BoxGeometry(w + 0.12, 0.55, 0.22),
-                new THREE.MeshStandardMaterial({ color: pick(['#b9b2a4', '#8d8579', '#cfc7b8']), roughness: 0.95 })
-              );
-              parapet.position.set(0, h + 0.3, -d / 2 + 0.11);
-              parapet.castShadow = true;
-              group.add(parapet);
-
-              if (rand(0, 1) < 0.55) {
+              if (rand(0, 1) < 0.3) {
                 const aw = new THREE.Mesh(
                   new THREE.BoxGeometry(w * rand(0.55, 0.92), 0.06, rand(1.1, 1.9)),
                   new THREE.MeshStandardMaterial({ color: pick(['#c0392b', '#2e7d32', '#1565c0', '#e67e22', '#f1c40f']), roughness: 0.85 })
@@ -2054,7 +2046,7 @@ export class City {
                 aw.castShadow = true;
                 group.add(aw);
               }
-              if (h > 9 && rand(0, 1) < 0.55) {
+              if (h > 9 && rand(0, 1) < 0.28) {
                 const tank = new THREE.Mesh(
                   new THREE.CylinderGeometry(0.62, 0.62, 1.25, 10),
                   new THREE.MeshStandardMaterial({ color: pick(['#e67e22', '#2d6cb5', '#cfd8dc', '#37474f']), roughness: 0.7 })
