@@ -90,12 +90,14 @@ export class Ped {
     }
 
     this.pos.y = this.city.groundHeightAt(this.pos.x, this.pos.z);
-    this.char.group.visible = playerDist < 150;
+    this.char.group.visible = playerDist < 110;
 
     const moving = Math.min(1, this.speed / 5);
     this.char.group.position.set(this.pos.x, this.pos.y, this.pos.z);
     this.char.group.rotation.y = this.yaw;
-    this.char.animate(dt, moving);
+    // animation LOD: full cycle up close, frozen pose further away
+    if (playerDist < 55) this.char.animate(dt, moving);
+    this.animPhase = (this.animPhase ?? 0) + dt;
   }
 
   kill(velocity, colliders) {
@@ -116,10 +118,27 @@ export class PedManager {
       this.peds.push(new Ped(scene, city, city.randomSidewalkPointNear(110)));
     }
     this.respawnTimer = 0;
+    this.flowTimer = 0;
   }
 
   update(dt, ctx) {
     for (const p of this.peds) p.update(dt, ctx);
+
+    // keep the crowd near the player: far pedestrians get re-placed around him
+    this.flowTimer += dt;
+    if (this.flowTimer > 2.2 && ctx.playerPos) {
+      this.flowTimer = 0;
+      for (const p of this.peds) {
+        if (p.dead) continue;
+        const d = p.pos.distanceTo(ctx.playerPos);
+        if (d > 80) {
+          const spot = this.city.randomSidewalkPointAround(ctx.playerPos, 14, 48);
+          p.pos.copy(spot);
+          p.target = this.city.randomSidewalkPointAround(ctx.playerPos, 14, 48);
+          p.char.group.position.copy(p.pos);
+        }
+      }
+    }
 
     // recycle dead ones after a while so the street never empties
     this.respawnTimer += dt;

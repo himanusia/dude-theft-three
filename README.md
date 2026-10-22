@@ -46,7 +46,7 @@ Assets were built by diffing against real *Dude Theft Wars* screenshots (kept lo
 |---|---|---|---|
 | Character | 1.75 m, head ≈ ¼ of height, no neck, blocky limbs, decal face | **8/10** | Head rebuilt to 0.44 m cube (4.4 heads tall), bevels 0.07 → 0.035 so faces read flat, chunky hands/shoes, 256² painted faces (eyes/brows/mouth), six expressions incl. sunglasses + moustache, five hair silhouettes, short-sleeve variant, nose geometry |
 | Muscle car | 4.7 × 1.85 m, low, long hood, big wheels, open cockpit | **9/10** | Beveled body via `RoundedBoxGeometry`, wheel radius 0.34 → 0.40 with wheel wells + fender flares, full-width raked framed windshield, cockpit tub/dash/steering wheel, "POLICE" door decals, mirrors, plate, exhausts, hood stripes |
-| City block | light facades, blue glass, storefronts, signage | **7/10** | Reference palette (sky `#35A8F0`, asphalt `#8D86A8`, sidewalk `#C8C8D0`, grass `#37C24A`), three window styles, parapets, readable shop signs ("PIZZA", "GYM", "24/7"…), billboards, textured asphalt + paving, bins/hydrants/benches/traffic lights |
+| City block | light facades, blue glass, storefronts, signage | **8.5/10** | Reference palette (sky `#35A8F0`, asphalt `#8D86A8`, sidewalk `#C8C8D0`, grass `#37C24A`), three window styles, parapets, readable shop signs ("PIZZA", "GYM", "24/7"…), billboards, textured asphalt + paving, bins/hydrants/benches/traffic lights |
 | Ragdoll | chunky body, reads as the same dude | **7/10** | Limb radius 0.075 → 0.095, cube head, flat-shaded materials matching the character palette |
 
 Residual gap: the reference has hand-authored props (interiors, hats, weapon models, bespoke
@@ -62,12 +62,14 @@ acceleration, shooting + ammo, punch, ragdoll settle, police spawn/approach, dea
 cash pickup, night lighting, pause/resume, perf budget, zero console errors
 ```
 
-Current numbers: ~112 fps (headless SwiftShader), ~1.0–1.1k draw calls, ~79k triangles,
-60 pedestrians, 9 parked cars, 16 traffic cars, 136 colliders.
+Current numbers: 80–140 fps (headless SwiftShader), 220–1200 draw calls depending on what is in
+frame, 40–60k triangles, 44 pedestrians (recycled around the player), 9 parked cars, 12 traffic
+cars, ~140 colliders.
 
 Bugs found and fixed in this pass: per-frame damage on car/ped collisions (now cooldown-gated),
 `Esc` pause not firing without pointer lock, vehicles able to park on top of the player, cars
-driving through each other, missing `pickups` on the debug handle, ghosted toast overlap.
+driving through each other, missing `pickups` on the debug handle, ghosted toast overlap, and a
+crowd-placement bug that kept every pedestrian 40 m+ away (now recycled into a 14–48 m ring).
 
 ## What is implemented
 

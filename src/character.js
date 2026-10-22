@@ -160,7 +160,6 @@ export class Character {
     root.add(torso);
     make(GEO.torso, shirtMat, 0, 0.31, 0, torso);
     make(GEO.hips, pantsMat, 0, 0.03, 0, torso);
-    make(GEO.collar, shirtMat, 0, 0.58, 0, torso, false);
 
     const head = new THREE.Group();
     head.position.y = 0.62;
@@ -190,7 +189,6 @@ export class Character {
         head.add(tuft);
       }
     }
-    for (const sx of [-1, 1]) make(GEO.ear, skinMat, sx * 0.225, 0.21, 0, head, false);
 
     const faceKind = opts.face ?? pick(['calm', 'calm', 'angry', 'shades', 'smirk', 'stache']);
     const face = new THREE.Mesh(

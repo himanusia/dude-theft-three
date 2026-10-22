@@ -59,10 +59,30 @@ export class Traffic {
     const wanted = ctx.wanted ?? 0;
     const playerPos = ctx.playerPos;
     const playerCar = ctx.playerCar;
+    this.flowTimer = (this.flowTimer ?? 0) + dt;
 
     for (const entry of this.cars) {
       const car = entry.car;
       if (car === playerCar) continue;
+
+      // keep some traffic around the player instead of the whole map
+      if (playerPos && this.flowTimer > 3) {
+        const d = car.pos.distanceTo(playerPos);
+        if (d > 140) {
+          const cell = { i: Math.round((playerPos.x + rand(-70, 70)) / PITCH - 0.5), j: Math.round((playerPos.z + rand(-70, 70)) / PITCH - 0.5) };
+          const dir = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
+          const spawn = intersection(cell.i - dir[0], cell.j - dir[1]);
+          car.pos.copy(spawn);
+          car.yaw = Math.atan2(dir[0], dir[1]);
+          car.speed = 6;
+          car.mesh.position.copy(car.pos);
+          car.mesh.rotation.y = car.yaw;
+          entry.cell = cell;
+          entry.heading = dir;
+          entry.target = this.laneTarget(cell, dir);
+          continue;
+        }
+      }
       if (car.wrecked) {
         car.update(dt, { throttle: 0, steer: 0, brake: true }, this.city.colliders, 220);
         continue;
@@ -132,5 +152,6 @@ export class Traffic {
         }
       }
     }
+    if (this.flowTimer > 3) this.flowTimer = 0;
   }
 }

@@ -61,9 +61,9 @@ const character = new Character({ shirt: 0xd94f4f, pants: 0x2f3a52, skin: 0xd9a2
 character.group.position.copy(player.pos);
 scene.add(character.group);
 
-const peds = new PedManager(scene, city, 60);
+const peds = new PedManager(scene, city, 44);
 const police = new Police(scene, city, audio);
-const traffic = new Traffic(scene, city, 16);
+const traffic = new Traffic(scene, city, 12);
 
 // headlight rig that follows whichever car the player is driving
 const headlight = new THREE.SpotLight(0xfff2cc, 0, 55, 0.55, 0.45, 1.6);
@@ -807,7 +807,9 @@ hud.el.startBtn.addEventListener('click', async () => {
 });
 
 document.getElementById('pause-screen').addEventListener('click', () => {
-  togglePause(false);
+  paused = false;
+  hud.showPause(false);
+  lockPointer();
 });
 
 window.addEventListener('resize', () => {
@@ -1058,6 +1060,8 @@ window.__game = {
       copCars: police.cars.length,
       peds: peds.peds.length,
       fps: hud.el.fps.textContent,
+      pedsNear: peds.peds.filter((p) => !p.dead && p.pos.distanceTo(player.pos) < 70).length,
+      carsNear: allCars().filter((c) => c.pos.distanceTo(player.pos) < 70).length,
       calls: renderer.info.render.calls,
       tris: renderer.info.render.triangles,
       objective: hud.el.objective.textContent,

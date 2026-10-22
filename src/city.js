@@ -894,6 +894,23 @@ export class City {
     return { pos, yaw };
   }
 
+  randomSidewalkPointAround(centre, minR = 14, maxR = 48) {
+    // pick a block in the requested ring, then a point on its sidewalk
+    const candidates = this.blocks.filter((b) => {
+      const d = Math.hypot(b.x - centre.x, b.z - centre.z);
+      return d >= minR && d <= maxR;
+    });
+    if (!candidates.length) return this.randomSidewalkPointNear(maxR + 20);
+    const b = pick(candidates);
+    const half = BLOCK / 2 - 2.2;
+    const t = rand(-half, half);
+    const side = randInt(0, 3);
+    if (side === 0) return new THREE.Vector3(b.x + t, 0, b.z - half);
+    if (side === 1) return new THREE.Vector3(b.x + t, 0, b.z + half);
+    if (side === 2) return new THREE.Vector3(b.x - half, 0, b.z + t);
+    return new THREE.Vector3(b.x + half, 0, b.z + t);
+  }
+
   randomSidewalkPointNear(maxR = 120) {
     for (let i = 0; i < 14; i++) {
       const p = this.randomSidewalkPoint();
