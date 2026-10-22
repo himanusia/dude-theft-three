@@ -199,6 +199,7 @@ const muzzleTex = canvasTexture(64, 64, (ctx, w, h) => {
   ctx.stroke();
 });
 function addMuzzle(pos: THREE.Vector3) {
+  (window as any).__lastMuzzleAt = performance.now();
   const mat = new THREE.SpriteMaterial({
     map: muzzleTex,
     blending: THREE.AdditiveBlending,

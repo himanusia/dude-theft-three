@@ -120,12 +120,15 @@ const muzzleAt = await p.evaluate(() => {
   v.project(g.camera);
   return { x: Math.round((v.x * 0.5 + 0.5) * window.innerWidth), y: Math.round((-v.y * 0.5 + 0.5) * window.innerHeight) };
 });
+// hold an automatic weapon so a flash is on screen in most frames, instead of racing a
+// 0.12 s semi-auto flash against a screenshot
+await p.keyboard.press('Digit4');
+await sleep(350);
+await p.mouse.move(750, 450);
+await p.mouse.down();
 let bestFlash = { px: -1, b64: null };
 for (let i = 0; i < 10; i++) {
-  // semi-auto weapons need a fresh press per shot, so pull the trigger every frame we sample
-  await p.mouse.down();
   const b64 = await p.screenshot({ encoding: 'base64' });
-  await p.mouse.up();
   const px = await p.evaluate(async ({ b64, cx, cy }) => {
     const img = new Image();
     img.src = 'data:image/png;base64,' + b64;
@@ -146,6 +149,7 @@ for (let i = 0; i < 10; i++) {
   if (px > bestFlash.px) bestFlash = { px, b64 };
   if (bestFlash.px > 150) break;
 }
+await p.mouse.up();
 if (bestFlash.b64) fs.writeFileSync(path.join(OUT, 'feel-shoot.png'), Buffer.from(bestFlash.b64, 'base64'));
 const flash = { sprites: await p.evaluate(() => window.__game.scene.children.filter(o => o.isSprite).length), pixels: bestFlash.px };
 await sleep(400);
@@ -202,8 +206,8 @@ note('errors', errs.slice(0, 4));
 check('sedan accelerates past 100 km/h by 5 s', samples.length === 5 && samples[4] >= 100, samples);
 check('sedan holds 105-112 km/h at 8 s', speed8 >= 105 && speed8 <= 112, { speed8 });
 check('pointer-lock-free click spends one round', ammo0 === 12 && ammo1 === 11, { before: ammo0, after: ammo1 });
-// The flash is a 0.12 s sprite parented to the character, so counting scene-level
-// sprites says nothing. Judge the frame: warm pixels right where the muzzle projects.
+// Holding an automatic weapon keeps a flash on screen across frames, so the assertion is
+// about the pixels at the muzzle, not about beating a 0.12 s timer with a screenshot.
 check('muzzle flash visible in the captured frame', flash.pixels > 25, flash);
 check('camera yaw exposed and turns', Number.isFinite(cam.yaw) && cam.yaw !== yawBefore, { before: yawBefore, after: cam.yaw });
 check('player sole sits on the ground', audit.player === 0, { player: audit.player });
