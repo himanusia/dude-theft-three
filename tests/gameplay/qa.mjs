@@ -80,15 +80,22 @@ function check(name, ok, detail) {
     // sample the peak instead of a single frame
     for (let i = 0; i < 12; i++) {
       await sleep(40);
-      airborne = Math.max(airborne, await page.evaluate(() => window.__game.player.y));
+      airborne = Math.max(
+        airborne,
+        await page.evaluate(() => window.__game.player.y - window.__game.city.groundHeightAt(window.__game.player.pos.x, window.__game.player.pos.z))
+      );
     }
     await page.keyboard.up('Space');
     await sleep(1200);
-    landed = await page.evaluate(() => ({ y: window.__game.player.y, grounded: window.__game.player.grounded }));
-    if (airborne > 0.15 && landed.grounded && landed.y < 0.35) break;
+    landed = await page.evaluate(() => ({
+      y: window.__game.player.y,
+      above: +(window.__game.player.y - window.__game.city.groundHeightAt(window.__game.player.pos.x, window.__game.player.pos.z)).toFixed(3),
+      grounded: window.__game.player.grounded,
+    }));
+    if (airborne > 0.15 && landed.grounded && Math.abs(landed.above) < 0.35) break;
     await sleep(300);
   }
-  check('jump + land', airborne > 0.15 && landed.grounded && landed.y < 0.35, { airborne: +airborne.toFixed(2), landed });
+  check('jump + land', airborne > 0.15 && landed.grounded && Math.abs(landed.above) < 0.35, { airborne: +airborne.toFixed(2), landed });
 
   // sidewalk step-up
   const step = await page.evaluate(() => {
@@ -134,7 +141,11 @@ function check(name, ok, detail) {
   const drive = await page.evaluate(() => ({ kmh: Math.round(Math.abs(window.__game.player.inCar.speed) * 3.6), hp: window.__game.player.hp }));
   check('vehicle accelerates', drive.kmh > 15, drive);
   await page.keyboard.press('f'); await sleep(500);
-  const outCar = await page.evaluate(() => !window.__game.player.inCar && window.__game.player.y >= 0);
+  const outCar = await page.evaluate(() => {
+    const p = window.__game.player;
+    const ground = window.__game.city.groundHeightAt(p.pos.x, p.pos.z);
+    return !p.inCar && p.y >= ground - 0.05;
+  });
   check('exit vehicle with F', outCar);
 
   // shooting a pedestrian
@@ -208,9 +219,14 @@ function check(name, ok, detail) {
   const settle = await page.evaluate(() => {
     const r = window.__game.ragdolls[0];
     if (!r) return null;
-    return { hips: r.points.hips.p.toArray().map(v => +v.toFixed(2)), head: r.points.head.p.toArray().map(v => +v.toFixed(2)) };
+    const ground = window.__game.city.groundHeightAt(r.points.hips.p.x, r.points.hips.p.z);
+    return {
+      hips: r.points.hips.p.toArray().map(v => +v.toFixed(2)),
+      head: r.points.head.p.toArray().map(v => +v.toFixed(2)),
+      above: +(r.points.hips.p.y - ground).toFixed(2),
+    };
   });
-  check('ragdoll body is on the ground', settle && settle.hips[1] < 1.2, settle);
+  check('ragdoll body is on the ground', settle && settle.above < 1.2, settle);
 
   // wanted level -> police spawn -> arrest
   await page.evaluate(() => { const g = window.__game; g._test.teleport(26, 24); g.police.addWanted(3); });

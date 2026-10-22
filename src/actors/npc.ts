@@ -686,7 +686,11 @@ export class Ped {
         return;
       }
       this.finishCrossing(mgr);
+      return;
     }
+    // something (a car, a body, a shop wall overhanging the far kerb) kept me off the exit
+    // point: the crossing is over once I have walked it and then some
+    if (this.crossT > this.crossLen / CROSS_SPEED + 4) this.finishCrossing(mgr);
   }
 
   private finishCrossing(mgr: any) {
@@ -1304,7 +1308,6 @@ export class PedManager {
     }
     const pool = nearCrossing.length ? nearCrossing : all;
     if (!pool.length) return null;
-    let fallback: any = null;
     for (let attempt = 0; attempt < 24; attempt++) {
       const leg = this.legs[pool[Math.floor(rand(0, pool.length))]];
       const t = rand(0, leg.len);
@@ -1312,17 +1315,18 @@ export class PedManager {
       const z = leg.az + leg.uz * t;
       const d = Math.hypot(x - cx, z - cz);
       if (d < minR || d > maxR) continue;
-      const spot = new THREE.Vector3(x, this.city.groundHeightAt(x, z), z);
-      if (this.clearOfBuildings(x, z)) return spot;
-      if (!fallback) fallback = spot;
+      // a spot the body can actually stand in: the shop rows overhang the pavement with
+      // their axis-aligned colliders, and dropping a body inside one wedges it there
+      if (!this.clearOfBuildings(x, z)) continue;
+      return new THREE.Vector3(x, this.city.groundHeightAt(x, z), z);
     }
-    // every sample landed under a shop row overhang: hand back one anyway and let the
-    // body's own push-out settle it, rather than teleporting the crowd across the map
-    return fallback;
+    return null;
   }
 
   randomPavementPoint() {
-    for (let attempt = 0; attempt < 24; attempt++) {
+    const near = this.pavementPointNear(0, 0, 0, 110);
+    if (near) return near;
+    for (let attempt = 0; attempt < 200; attempt++) {
       const leg = this.legs[Math.floor(rand(0, this.legs.length))];
       const t = rand(0, leg.len);
       const x = leg.ax + leg.ux * t;
@@ -1423,6 +1427,9 @@ export class PedManager {
       for (let i = 0; i < this.peds.length; i++) {
         const p = this.peds[i];
         if (p.dead) continue;
+        // never yank a body off a crossing: a teleport on the zebra both loses the crossing
+        // and looks broken. The lane walk is what gets recycled.
+        if (p.mode === 'cross') continue;
         if (p.pos.distanceTo(ctx.playerPos) > 80) {
           const spot = this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 14, 48) ||
             this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 8, 120);
