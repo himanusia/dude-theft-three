@@ -365,7 +365,7 @@
 
   /* ---------------------------------------------------------------- tokens
      One scale factor (--hud-scale, 0.8–1.4) is derived from the viewport
-     min-dimension by HUD.layout() in src/hud.ts; every panel size and offset
+     min-dimension by HUD.layout() in src/ui/hud.ts; every panel size and offset
      is expressed through it plus the safe-area insets. Layout mode classes
      (hud-narrow / hud-short) come from the same pass and only decide where
      the corner stacks sit. */
@@ -794,11 +794,11 @@
   /* bottom-right stack: minimap is the anchor, everything else sits above it */
   #minimap { width: var(--hud-map); height: var(--hud-map); }
   #ammo-wrap { bottom: calc(var(--hud-map) + 18px * var(--s)); right: calc(18px * var(--s)); }
-  #speedo { bottom: calc(var(--hud-map) + 88px * var(--s)); right: calc(18px * var(--s)); }
+  #speedo { bottom: calc(var(--hud-map) + 104px * var(--s)); right: calc(18px * var(--s)); }
   body.hud-narrow #ammo-wrap,
   body.hud-short #ammo-wrap { bottom: calc(var(--hud-map) + 14px * var(--s)); }
   body.hud-narrow #speedo,
-  body.hud-short #speedo { bottom: calc(var(--hud-map) + 80px * var(--s)); }
+  body.hud-short #speedo { bottom: calc(var(--hud-map) + 96px * var(--s)); }
   /* the prompt must never eat more than 40% of the width, whatever the input mode */
   #prompt, body.touch-mode #prompt { max-width: 40vw; }
 
@@ -813,7 +813,7 @@
   body.hud-short #speedo { bottom: calc(var(--t-band) + 118px * var(--s)); }
 
   /* speedo rides above the ammo chip, on every layout mode */
-  #speedo { bottom: calc(var(--hud-map) + 122px * var(--s)); }
+  #speedo { bottom: calc(var(--hud-map) + 146px * var(--s)); }
   body.hud-narrow #speedo { bottom: calc(var(--t-band) + 182px * var(--s)); }
   body.hud-short #speedo { bottom: calc(var(--t-band) + 166px * var(--s)); right: calc(18px * var(--s)); }
   body.hud-short #toasts { bottom: calc(var(--t-band) + 96px * var(--s)); }
