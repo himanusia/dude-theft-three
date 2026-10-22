@@ -1998,9 +1998,12 @@ export class City {
         for (const side of [-1, 1]) {
           let t = 6;
           while (t < len - 6) {
-            const w = rand(11, 22);       // frontage width along the street
+            const w = rand(8, 26);        // frontage width along the street
             const d = rand(12, 20);       // depth behind the facade
-            const h = rand(7, 26);
+            // A real row mixes shop-houses with towers. A 7-26 m band produced one flat
+            // skyline; one in five is now a taller building and one in six a low shophouse.
+            const r = rand(0, 1);
+            const h = r < 0.16 ? rand(4.5, 7) : r < 0.8 ? rand(8, 22) : rand(24, 46);
             const px = x1 + dx * (t + w / 2) + nx * side * (road.width / 2 + 2.2 + d / 2);
             const pz = z1 + dz * (t + w / 2) + nz * side * (road.width / 2 + 2.2 + d / 2);
             const district = districtAtPoint(px, pz);
@@ -2014,10 +2017,18 @@ export class City {
               const group = new THREE.Group();
               group.position.set(px, terrainHeight(px, pz), pz);
               group.rotation.y = Math.atan2(dx, dz);
-              const wall = pick(style.walls);
-              const tex = windowTexture(wall, 'strips');
+              // Facade variety: Jakarta rows are cream, mint, pink and grey shophouses next to
+              // tiled offices, not one glass curtain wall repeated. The material is per
+              // building anyway, so mixing the palette and the window type costs no draw calls.
+              const PASTELS = [0xd9cdb4, 0xe8dfcb, 0xc9d8c4, 0xe4c9c2, 0xb9c7d4, 0xd6c9a8, 0xcfcfc8, 0xb8a894];
+              const wall = rand(0, 1) < 0.45 ? pick(PASTELS) : pick(style.walls);
+              const facade = pick(['strips', 'grid', 'bands'] as const);
+              const tex = windowTexture(wall, facade);
               tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-              tex.repeat.set(Math.max(1, w / 8), Math.max(1, h / 6));
+              tex.repeat.set(
+                Math.max(1, w / (facade === 'strips' ? 10 : 6)),
+                Math.max(1, h / (facade === 'strips' ? 9 : 4.5))
+              );
               const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
               const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
               body.position.y = h / 2 + 0.3;

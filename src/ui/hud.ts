@@ -589,8 +589,12 @@ export class HUD {
   drawMinimap(state: any) {
     const ctx = this.mapCtx;
     const S = this.mapSize;
-    const half = WORLD_HALF_MAP * 1.12;
-    const toMap = (x: number, z: number) => [((x / half) * 0.5 + 0.5) * S, ((z / half) * 0.5 + 0.5) * S];
+    // A local window, not the whole 2.5 km sheet: at world scale every block was two pixels and
+    // the minimap read as scattered dots. 280 m across is about four streets in each direction.
+    const half = 140;
+    const px0 = state.player?.x ?? 0;
+    const pz0 = state.player?.z ?? 0;
+    const toMap = (x: number, z: number) => [(((x - px0) / half) * 0.5 + 0.5) * S, (((z - pz0) / half) * 0.5 + 0.5) * S];
 
     ctx.clearRect(0, 0, S, S);
     ctx.save();
@@ -603,7 +607,7 @@ export class HUD {
     // blocks
     for (const b of state.blocks) {
       const [mx, mz] = toMap(b.x, b.z);
-      const w = (38 / half) * 0.5 * S;
+      const w = Math.max(3, ((b.size ?? 38) / half) * 0.5 * S);
       ctx.fillStyle = b.type === 'park' ? '#2f5f36' : b.type === 'lot' ? '#23262c' : '#3a3f47';
       ctx.fillRect(mx - w / 2, mz - w / 2, w, w);
     }
@@ -617,6 +621,19 @@ export class HUD {
       ctx.beginPath();
       ctx.moveTo(ax, az);
       ctx.lineTo(bx, bz);
+      ctx.stroke();
+    }
+
+    // the roads the map actually defines, in the same local window: without them the blocks
+    // float on black and the minimap tells you nothing about where to drive
+    for (const road of state.mapRoads || []) {
+      ctx.strokeStyle = '#4a5563';
+      ctx.lineWidth = Math.max(1.5, ((road.width || 12) / half) * 0.5 * S);
+      ctx.beginPath();
+      (road.path as [number, number][]).forEach(([x, z], i) => {
+        const [mx, mz] = toMap(x, z);
+        if (i === 0) ctx.moveTo(mx, mz); else ctx.lineTo(mx, mz);
+      });
       ctx.stroke();
     }
 
