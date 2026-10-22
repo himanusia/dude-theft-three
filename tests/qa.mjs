@@ -118,15 +118,32 @@ function check(name, ok, detail) {
     g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.08);
     return { before: g.ragdolls.length, ped: ped.pos.toArray() };
   });
+  // Street dressing can park a vehicle between the player and the target, so try a few
+  // lane offsets and require one clear line of fire — that is the behaviour under test.
   await sleep(800);
-  const shot = await page.evaluate(() => {
-    const g = window.__game;
-    const magBefore = g.player.mag;
-    g._test.shoot();
-    return { magBefore, magAfter: g.player.mag, hit: window.__lastShot, rag: g.ragdolls.length };
-  });
-  await sleep(700);
-  const afterShot = await page.evaluate(() => ({ rag: window.__game.ragdolls.length, wanted: +window.__game.police.wanted.toFixed(2) }));
+  let shot = null;
+  let afterShot = { rag: 0, wanted: 0 };
+  for (const dx of [0, 3, -3, 6, -6, 9]) {
+    await page.evaluate((off) => {
+      const g = window.__game;
+      const ped = g.peds.peds.find(p => !p.dead);
+      if (!ped) return;
+      ped.pos.set(26 + off, g.city.groundHeightAt(26 + off, -32), -32);
+      ped.target = ped.pos.clone(); ped.speed = 0.0001;
+      g._test.teleport(26 + off, -40); g._test.setCam(Math.PI, 0.08);
+    }, dx);
+    await sleep(650);
+    shot = await page.evaluate(() => {
+      const g = window.__game;
+      const magBefore = g.player.mag;
+      const ragBefore = g.ragdolls.length;
+      g._test.shoot();
+      return { magBefore, magAfter: g.player.mag, hit: window.__lastShot, ragBefore, rag: g.ragdolls.length };
+    });
+    await sleep(600);
+    afterShot = await page.evaluate(() => ({ rag: window.__game.ragdolls.length, wanted: +window.__game.police.wanted.toFixed(2) }));
+    if (shot.magAfter < shot.magBefore && afterShot.rag > shot.ragBefore) break;
+  }
   check('shoot consumes ammo and ragdolls a ped', shot.magAfter < shot.magBefore && afterShot.rag > 0, { shot, afterShot });
 
   // melee
@@ -203,13 +220,17 @@ function check(name, ok, detail) {
   const resumed = await page.evaluate(() => window.__game.state.paused === false);
   check('pause and resume', paused === true && resumed, { paused, resumed });
 
-  // perf: draw calls are a structural budget, so sample three times and keep the leanest
-  // frame. fps is reported for context only — the host may be running other workers.
-  let perf = { fps: '0', calls: 99999, tris: 0 };
-  for (let i = 0; i < 3; i++) {
-    await sleep(900);
+  // perf: draw calls are a structural budget, so measure three times from ONE fixed
+  // vantage point and keep the leanest frame. fps is context only — the host may be busy.
+  // deterministic structural budget: four vantage points looking down a street, take the
+  // heaviest frame. Camera-following a mouse turn made this number meaningless before.
+  const vantage = [[26, -40, 0], [26, 60, Math.PI], [-90, 0, Math.PI / 2], [90, 0, -Math.PI / 2]];
+  let perf = { calls: 0, tris: 0, fps: '0' };
+  for (const [vx, vz, yaw] of vantage) {
+    await page.evaluate(([x, z, y]) => { window.__game._test.teleport(x, z); window.__game._test.setCam(y, 0.12); }, [vx, vz, yaw]);
+    await sleep(700);
     const sample = await page.evaluate(() => ({ fps: window.__game.state.fps, calls: window.__game.state.calls, tris: window.__game.state.tris }));
-    if (Number(sample.calls) < Number(perf.calls)) perf = sample;
+    if (Number(sample.calls) > Number(perf.calls)) perf = sample;
   }
   check('perf budget', Number(perf.calls) < 1600, perf);
 
