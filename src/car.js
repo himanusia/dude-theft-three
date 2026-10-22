@@ -32,7 +32,7 @@ export class Car {
     this.health = 100;
     this.wrecked = false;
     this.honk = 0;
-    this.wheelRadius = this.type === 'van' ? 0.44 : 0.37;
+    this.wheelRadius = this.type === 'van' ? 0.46 : 0.4;
     this.length = this.type === 'van' ? 5.4 : this.type === 'muscle' ? 4.7 : 4.6;
     this.width = this.type === 'van' ? 2.05 : 1.85;
     this.radius = Math.max(this.width, this.length) * 0.42;
@@ -84,13 +84,13 @@ export class Car {
     g.add(skirt);
 
     // wheels first so arches can be placed around them
-    const wheelGeo = new THREE.CylinderGeometry(this.wheelRadius, this.wheelRadius, 0.3, 14);
+    const wheelGeo = new THREE.CylinderGeometry(this.wheelRadius, this.wheelRadius, 0.34, 14);
     const wheelMat = new THREE.MeshStandardMaterial({ color: 0x141419, roughness: 0.92, flatShading: true });
-    const hubGeo = new THREE.CylinderGeometry(this.wheelRadius * 0.5, this.wheelRadius * 0.5, 0.32, 10);
+    const hubGeo = new THREE.CylinderGeometry(this.wheelRadius * 0.5, this.wheelRadius * 0.5, 0.36, 10);
     const hubMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.75 });
     this.wheels = [];
     const wz = L * 0.33;
-    const wx = W * 0.5 + 0.02;
+    const wx = W * 0.5 + 0.05;
     for (const [sx, sz, front] of [[-1, 1, true], [1, 1, true], [-1, -1, false], [1, -1, false]]) {
       const pivot = new THREE.Group();
       pivot.position.set(sx * wx, this.wheelRadius, sz * wz);
@@ -104,9 +104,12 @@ export class Car {
       g.add(pivot);
       this.wheels.push({ pivot, wheel, front });
 
-      // chunky fender flare over each wheel
-      const flare = new THREE.Mesh(rb(0.16, 0.2, 1.0, 0.05, 1), paint);
-      flare.position.set(sx * (W * 0.5 - 0.02), this.wheelRadius + 0.28, sz * wz);
+      // wheel well + chunky fender flare
+      const liner = new THREE.Mesh(rb(0.1, 0.5, 0.9, 0.06, 1), new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 0.95 }));
+      liner.position.set(sx * (W * 0.47), this.wheelRadius + 0.1, sz * wz);
+      g.add(liner);
+      const flare = new THREE.Mesh(rb(0.2, 0.18, 1.05, 0.06, 1), paint);
+      flare.position.set(sx * (W * 0.49), this.wheelRadius + 0.33, sz * wz);
       g.add(flare);
     }
 
@@ -137,19 +140,22 @@ export class Car {
         // open cockpit: windshield + two seats, no roof (like the pink convertible in the reference)
         const windshield = new THREE.Mesh(rb(W * 0.86, 0.52, 0.06, 0.02, 1), glass);
         windshield.position.set(0, 1.24, L * 0.13);
-        windshield.rotation.x = -0.2;
+        windshield.rotation.x = -0.3;
         g.add(windshield);
         // A-pillars + header rail so the glass is not a floating pane
         const frameMat = new THREE.MeshStandardMaterial({ color: 0x1a1a20, roughness: 0.6 });
         for (const sx of [-1, 1]) {
-          const apillar = new THREE.Mesh(rb(0.06, 0.56, 0.08, 0.02, 1), frameMat);
+          const apillar = new THREE.Mesh(rb(0.045, 0.54, 0.06, 0.015, 1), frameMat);
           apillar.position.set(sx * W * 0.43, 1.24, L * 0.13);
-          apillar.rotation.x = -0.2;
+          apillar.rotation.x = -0.3;
           g.add(apillar);
         }
-        const header = new THREE.Mesh(rb(W * 0.88, 0.07, 0.09, 0.02, 1), frameMat);
-        header.position.set(0, 1.5, L * 0.08);
+        const header = new THREE.Mesh(rb(W * 0.87, 0.05, 0.07, 0.015, 1), frameMat);
+        header.position.set(0, 1.49, L * 0.08);
         g.add(header);
+        const sill = new THREE.Mesh(rb(W * 0.87, 0.05, 0.07, 0.015, 1), frameMat);
+        sill.position.set(0, 0.99, L * 0.19);
+        g.add(sill);
         // cockpit tub, dash, steering wheel, console
         const tub = new THREE.Mesh(rb(W * 0.78, 0.22, L * 0.3, 0.04, 1), new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.9 }));
         tub.position.set(0, 0.92, -0.18);
@@ -157,8 +163,8 @@ export class Car {
         const dash = new THREE.Mesh(rb(W * 0.8, 0.24, 0.16, 0.03, 1), new THREE.MeshStandardMaterial({ color: 0x23232a, roughness: 0.85 }));
         dash.position.set(0, 1.02, L * 0.06);
         g.add(dash);
-        const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.035, 6, 12), new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 0.8 }));
-        wheel.position.set(-0.4, 1.12, -0.02);
+        const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.04, 6, 12), new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 0.8 }));
+        wheel.position.set(-0.4, 1.16, 0.02);
         wheel.rotation.x = -1.15;
         g.add(wheel);
         const column = new THREE.Mesh(rb(0.05, 0.05, 0.22, 0.01, 1), frameMat);
@@ -172,6 +178,12 @@ export class Car {
           const back = new THREE.Mesh(rb(0.5, 0.46, 0.14, 0.06, 1), seatMat);
           back.position.set(sx * 0.42, 1.3, -0.44);
           g.add(back);
+        }
+        const stripeMat = new THREE.MeshStandardMaterial({ color: 0xf4f4ea, roughness: 0.5 });
+        for (const sx of [-1, 1]) {
+          const stripe = new THREE.Mesh(rb(0.16, 0.03, L * 0.29, 0.01, 1), stripeMat);
+          stripe.position.set(sx * 0.13, 1.06, L * 0.3);
+          g.add(stripe);
         }
         const scoop = new THREE.Mesh(rb(0.66, 0.14, 0.72, 0.05, 1), trim);
         scoop.position.set(0, 1.08, L * 0.3);

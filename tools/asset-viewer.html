@@ -83,9 +83,9 @@ if (kind === 'car') {
   document.getElementById('label').textContent = 'ragdoll · settled';
 } else {
   const chars = [
-    new Character({ shirt: 0x3346a8, pants: 0x1b1f2e }),
-    new Character({ shirt: 0xd93b3b, pants: 0x2f3a52 }),
-    new Character({ shirt: 0x5a2c8a, pants: 0x2b2b31 }),
+    new Character({ shirt: 0x3346a8, pants: 0x1b1f2e, face: 'calm', hair: 'cap' }),
+    new Character({ shirt: 0xd93b3b, pants: 0x2f3a52, face: 'stache', hair: 'back' }),
+    new Character({ shirt: 0xffd23f, pants: 0x2b2b31, skin: 0x7a4a2e, face: 'shades', hair: 'bald' }),
   ];
   chars.forEach((c, i) => {
     c.group.position.set((i - 1) * 1.15, 0, 0);

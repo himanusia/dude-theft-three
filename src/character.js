@@ -91,13 +91,22 @@ function faceTexture(kind = 'calm') {
       ctx.strokeStyle = '#231812';
       ctx.lineWidth = 11;
       ctx.lineCap = 'round';
-      const tilt = kind === 'angry' ? 9 : 0;
+      const tilt = kind === 'angry' ? 9 : kind === 'smirk' ? 5 : 0;
       for (const sx of [-1, 1]) {
+        const asym = kind === 'smirk' && sx < 0 ? 6 : 0;
         ctx.beginPath();
-        ctx.moveTo(cx + sx * (eyeDX + 20), eyeY - 40 + sx * tilt);
+        ctx.moveTo(cx + sx * (eyeDX + 20), eyeY - 40 + sx * tilt + asym);
         ctx.lineTo(cx + sx * (eyeDX - 20), eyeY - 34 - sx * tilt);
         ctx.stroke();
       }
+    }
+
+    // moustache for some dudes
+    if (kind === 'stache') {
+      ctx.fillStyle = '#241812';
+      ctx.beginPath();
+      ctx.ellipse(cx, h * 0.665, 46, 16, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // mouth
@@ -108,6 +117,9 @@ function faceTexture(kind = 'calm') {
     if (kind === 'angry') {
       ctx.moveTo(cx - 32, h * 0.73);
       ctx.lineTo(cx + 32, h * 0.69);
+    } else if (kind === 'smirk') {
+      ctx.moveTo(cx - 30, h * 0.69);
+      ctx.quadraticCurveTo(cx + 14, h * 0.76, cx + 34, h * 0.66);
     } else {
       ctx.arc(cx, h * 0.62, 38, 0.22 * Math.PI, 0.78 * Math.PI);
     }
@@ -156,7 +168,7 @@ export class Character {
     make(GEO.head, skinMat, 0, 0.22, 0, head);
     make(GEO.hair, hairMat, 0, 0.45, 0, head, false);
     // hair silhouettes so the crowd is not one repeated model
-    const hairStyle = pick(['cap', 'cap', 'back', 'beanie', 'none']);
+    const hairStyle = opts.hair ?? pick(['cap', 'cap', 'back', 'beanie', 'bald', 'mohawk']);
     if (hairStyle === 'back' || hairStyle === 'beanie') {
       make(GEO.hairBack, hairMat, 0, 0.34, -0.13, head, false);
       for (const sx of [-1, 1]) make(GEO.hairSide, hairMat, sx * 0.235, 0.35, -0.02, head, false);
@@ -167,10 +179,20 @@ export class Character {
       beanie.scale.set(1.02, 1.35, 1.02);
       head.add(beanie);
     }
-    if (hairStyle === 'none') hairMat.visible = true;
+    if (hairStyle === 'bald') {
+      head.children[1].visible = false; // hide the hair slab
+    }
+    if (hairStyle === 'mohawk') {
+      head.children[1].visible = false;
+      for (let k = 0; k < 5; k++) {
+        const tuft = new THREE.Mesh(roundedBox(0.1, 0.16, 0.09, 0.02, 1), hairMat);
+        tuft.position.set(0, 0.46 + (k === 2 ? 0.06 : 0), -0.16 + k * 0.08);
+        head.add(tuft);
+      }
+    }
     for (const sx of [-1, 1]) make(GEO.ear, skinMat, sx * 0.225, 0.21, 0, head, false);
 
-    const faceKind = pick(['calm', 'calm', 'angry', 'shades']);
+    const faceKind = opts.face ?? pick(['calm', 'calm', 'angry', 'shades', 'smirk', 'stache']);
     const face = new THREE.Mesh(
       GEO.face,
       new THREE.MeshStandardMaterial({
@@ -184,6 +206,9 @@ export class Character {
     face.position.set(0, 0.21, 0.222);
     head.add(face);
     this.face = face;
+    const nose = new THREE.Mesh(roundedBox(0.075, 0.09, 0.06, 0.02, 1), skinMat);
+    nose.position.set(0, 0.18, 0.235);
+    head.add(nose);
 
     // short sleeves on some dudes, like the reference crowd
     const shortSleeves = Math.random() < 0.45;
