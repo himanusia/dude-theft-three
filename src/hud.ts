@@ -76,6 +76,7 @@ export class HUD {
       settingsBtn: document.getElementById('settings-btn'),
       pauseSettings: document.getElementById('pause-settings'),
       settings: document.getElementById('settings-sheet'),
+      uncapped: document.getElementById('set-uncapped'),
       settingsClose: document.getElementById('settings-close'),
       setSens: document.getElementById('set-sens'),
       setInvert: document.getElementById('set-invert'),
@@ -313,13 +314,14 @@ export class HUD {
       if (el.setBgm) settings.bgm = Number(el.setBgm.value);
       if (el.setScale) settings.renderScale = Number(el.setScale.value);
       if (el.setFpsShow) settings.showFps = !!el.setFpsShow.checked;
+      if (el.uncapped) settings.uncapped = !!el.uncapped.checked;
       this.syncSettingsLabels(settings);
       this.onSettings?.(settings);
     };
     for (const input of [el.setSens, el.setMaster, el.setSfx, el.setBgm, el.setScale]) {
       input?.addEventListener('input', push);
     }
-    for (const box of [el.setInvert, el.setFpsShow]) {
+    for (const box of [el.setInvert, el.setFpsShow, el.uncapped]) {
       box?.addEventListener('change', push);
     }
     this.syncSettings(settings);
@@ -334,6 +336,7 @@ export class HUD {
     if (el.setBgm) el.setBgm.value = String(settings.bgm);
     if (el.setScale) el.setScale.value = String(settings.renderScale);
     if (el.setFpsShow) el.setFpsShow.checked = !!settings.showFps;
+    if (el.uncapped) el.uncapped.checked = !!settings.uncapped;
     this.syncSettingsLabels(settings);
   }
 

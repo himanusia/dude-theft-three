@@ -49,6 +49,8 @@ export interface Settings {
   bgm: number;
   renderScale: number;
   showFps: boolean;
+  /** drive the loop from a timer instead of requestAnimationFrame, past the refresh rate */
+  uncapped: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bgm: 1,
   renderScale: 1,
   showFps: true,
+  uncapped: false,
 };
 
 // one warning per key per page load: the start screen and the boot path both
@@ -205,6 +208,7 @@ export function loadSettings(): Settings {
     bgm: clampNum(parsed.bgm, 0, 1, DEFAULT_SETTINGS.bgm),
     renderScale: clampNum(parsed.renderScale, 0.5, 1.5, DEFAULT_SETTINGS.renderScale),
     showFps: parsed.showFps !== false,
+    uncapped: parsed.uncapped === true,
   };
 }
 

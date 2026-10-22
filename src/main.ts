@@ -42,7 +42,11 @@ function maxPixelRatio() {
   return clamp(BASE_PIXEL_RATIO * settings.renderScale, 0.5, 2.5);
 }
 
+let uncappedLoop = false;
+
 function applySettings() {
+  // switching to the timer loop has to take effect immediately, not on the next reload
+  uncappedLoop = !!settings.uncapped;
   pixelRatio = maxPixelRatio();
   renderer.setPixelRatio(pixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1876,8 +1880,19 @@ function update(dt: number) {
   });
 }
 
+
+/**
+ * requestAnimationFrame is tied to the display's refresh, so on a 60 Hz panel the game can
+ * never exceed 60 fps. The optional uncapped mode drives the same loop from a timer instead,
+ * which trades vsync (and the odd tear) for as many frames as the GPU can push.
+ */
+function scheduleFrame() {
+  if (uncappedLoop) setTimeout(animate, 0);
+  else requestAnimationFrame(animate);
+}
+
 function animate() {
-  requestAnimationFrame(animate);
+  scheduleFrame();
   const rawDt = clock.getDelta();
   const dt = Math.min(0.05, rawDt);
 
