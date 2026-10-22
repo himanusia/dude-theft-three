@@ -78,11 +78,22 @@ export class Police {
     this.audio.siren(false);
   }
 
-  spawnCar(playerPos: any) {
-    // drop the cruiser on the nearest road lane, 42-68 m out, facing the player
-    const angle = Math.random() * Math.PI * 2;
-    const radius = rand(42, 68);
-    const snap = this.nav.snapToRoad(playerPos.x + Math.cos(angle) * radius, playerPos.z + Math.sin(angle) * radius);
+  spawnCar(playerPos: any, camYaw = 0) {
+    // Drop the cruiser on a road lane behind or beside the camera, never in shot: the first
+    // candidate inside the 130-degree view cone is rejected, so a chase starts off-screen.
+    let snap = null as any;
+    let best = null as any;
+    for (let attempt = 0; attempt < 14; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = rand(55, 95);
+      const candidate = this.nav.snapToRoad(playerPos.x + Math.cos(angle) * radius, playerPos.z + Math.sin(angle) * radius);
+      const toSpawn = Math.atan2(candidate.x - playerPos.x, candidate.z - playerPos.z);
+      const behind = Math.abs(angleDelta(camYaw, toSpawn)) > (130 * Math.PI) / 360;
+      best = candidate;
+      if (behind) { snap = candidate; break; }
+    }
+    if (!snap) snap = best;
+    if (!snap) return;
     const along = snap.axis === 0 ? (playerPos.z >= snap.z ? 1 : -1) : (playerPos.x >= snap.x ? 1 : -1);
     const dx = snap.axis === 0 ? 0 : along;
     const dz = snap.axis === 0 ? along : 0;
@@ -196,7 +207,7 @@ export class Police {
   }
 
   update(dt: number, ctx: any) {
-    const { playerPos, onFoot } = ctx;
+    const { playerPos, onFoot, camYaw = 0 } = ctx;
 
     if (this.wanted > 0) {
       this.crimeCooldown -= dt;
@@ -206,7 +217,7 @@ export class Police {
     }
 
     const targetCount = Math.min(this.maxCars, this.starCount);
-    while (this.cars.length < targetCount) this.spawnCar(playerPos);
+    while (this.cars.length < targetCount) this.spawnCar(playerPos, camYaw);
 
     if (this.wanted > 0) this.audio.siren(true);
     else this.audio.siren(false);
