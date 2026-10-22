@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { City, PITCH, WORLD_HALF } from './city';
 import { Character } from './character';
 import { Car, driverLook } from './car';
+import { loadCarModels } from './carmodels';
+import { districtAt } from './jakarta';
 import { Ragdoll } from './ragdoll';
 import { PedManager } from './npc';
 import { Police } from './police';
@@ -132,9 +134,9 @@ const character = new Character({ shirt: 0xd94f4f, pants: 0x2f3a52, skin: 0xd9a2
 character.group.position.copy(player.pos);
 scene.add(character.group);
 
-const peds = new PedManager(scene, city, 34);
+const peds = new PedManager(scene, city, 40);
 const police = new Police(scene, city, audio);
-const traffic = new Traffic(scene, city, 12);
+const traffic = new Traffic(scene, city, 14);
 
 // headlight rig that follows whichever car the player is driving
 const headlight = new THREE.SpotLight(0xfff2cc, 0, 55, 0.55, 0.45, 1.6);
@@ -145,13 +147,23 @@ scene.add(headlight.target);
 let headlightAttached: Car | null = null;
 
 const cityCars: Car[] = [];
-for (let i = 0; i < 9; i++) {
+// Street parking scales with the map now: 15 cars, drawn in the cheap variant (no mirrors,
+// plate or exhaust pipes) so the extra bodies cost ~12 draws instead of ~40 each.
+for (let i = 0; i < 12; i++) {
   const spot = city.randomParkingSpot();
-  const type = pick(['sedan', 'sedan', 'muscle', 'van', 'taxi']);
-  const c = new Car(scene, { type, position: spot.pos, yaw: spot.yaw });
+  const type = pick(['sedan', 'sedan', 'muscle', 'van', 'taxi', 'angkot']);
+  const c = new Car(scene, { type, position: spot.pos, yaw: spot.yaw, simple: true });
   c.addDriver(...driverLook());
   cityCars.push(c);
 }
+
+// Real car bodies arrive asynchronously; the procedural ones hold the road until then.
+loadCarModels().then(() => {
+  for (const c of allCars()) {
+    c.rebuild();
+    c.setDriverVisible(player.inCar !== c);
+  }
+});
 
 function allCars() {
   return [...cityCars, ...traffic.cars.map((e) => e.car), ...police.cars.map((e) => e.car)];
@@ -667,7 +679,9 @@ function updateOnFoot(dt: number) {
   }
 
   character.setArmed(true);
-  character.group.visible = !mouse.right;
+  // the body model must never show while driving: it stands at the player position, which is
+  // inside the cabin, so its head pokes through the roof
+  character.group.visible = !mouse.right && !player.inCar;
   character.group.position.set(player.pos.x, player.y, player.pos.z);
   character.group.rotation.y = player.yaw;
   const weaponUp = aiming || player.aimHold > 0;
@@ -1947,6 +1961,7 @@ animate();
 
 window.__game = {
   THREE,
+  districtAt,
   scene,
   camera,
   renderer,
