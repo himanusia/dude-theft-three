@@ -974,6 +974,21 @@ export class City {
     return g;
   }
 
+  /** A path pushed sideways by `dist`: used for the pavements that flank every road. */
+  offsetPath(path: [number, number][], dist: number): [number, number][] {
+    const out: [number, number][] = [];
+    for (let i = 0; i < path.length; i++) {
+      const [x, z] = path[i];
+      const prev = path[Math.max(0, i - 1)];
+      const next = path[Math.min(path.length - 1, i + 1)];
+      const dx = next[0] - prev[0];
+      const dz = next[1] - prev[1];
+      const len = Math.hypot(dx, dz) || 1;
+      out.push([x - (dz / len) * dist, z + (dx / len) * dist]);
+    }
+    return out;
+  }
+
   buildRoadRibbons() {
     // The road network as data, so actors (pedestrians) navigate the streets the map draws
     // instead of a lattice constant. One list, one width per road.
@@ -998,6 +1013,24 @@ export class City {
     const r = new THREE.Mesh(this.ribbon(RING_ROAD, 20, 0.04), ring);
     r.receiveShadow = true;
     this.group.add(r);
+
+    // Pavements. Without a kerb the buildings meet the asphalt and every street reads as a
+    // corridor between walls; Jakarta roads all have a raised trotoar with a kerb stone.
+    const trotoar = new THREE.MeshStandardMaterial({ color: 0x8f8b82, roughness: 0.98 });
+    const kerbMat = new THREE.MeshStandardMaterial({ color: 0xb9b4a8, roughness: 0.95 });
+    for (const road of [...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })), { path: RING_ROAD as [number, number][], width: 20 }]) {
+      for (const side of [-1, 1]) {
+        const walk = this.offsetPath(road.path, side * (road.width / 2 + 1.9));
+        const m = new THREE.Mesh(this.ribbon(walk, 3.6, 0.24), trotoar);
+        m.receiveShadow = true;
+        this.group.add(m);
+        // the kerb face itself, 12 cm proud of the walk
+        const edge = this.offsetPath(road.path, side * (road.width / 2 + 0.15));
+        const k = new THREE.Mesh(this.ribbon(edge, 0.3, 0.3), kerbMat);
+        k.receiveShadow = true;
+        this.group.add(k);
+      }
+    }
     for (const rv of RIVERS) {
       const m = new THREE.Mesh(this.ribbon(rv.path, rv.width, 0.05), water);
       m.receiveShadow = true;
