@@ -238,6 +238,7 @@ export class City {
       const room = buildInterior(kind);
       const origin = new THREE.Vector3(600 + i * 60, 0, 0);
       room.group.position.copy(origin);
+      room.group.visible = false; // only rendered while the player is inside
       this.scene.add(room.group);
       // world-space colliders (walls + furniture) so the player and camera stay inside
       const hw = (room.bounds.maxX - room.bounds.minX) / 2;
@@ -355,6 +356,9 @@ export class City {
     const dashMat = new THREE.MeshStandardMaterial({ color: 0xf7f5e8, roughness: 0.6 });
     const dashGeo = new THREE.BoxGeometry(0.42, 0.02, 2.6);
     this.dashMatrices = [];
+    this.doorMatrices = [];
+    this.handleMatrices = [];
+    this.stepMatrices = [];
     this.treeTrunks = [];
     this.treeCrowns = [];
     this.lampPoles = [];
@@ -450,6 +454,7 @@ export class City {
     stripeMesh.frustumCulled = false;
     this.group.add(stripeMesh);
 
+    this.buildEntranceInstances();
     this.buildLampInstances();
     this.buildTreeInstances();
     this.buildNightLights();
@@ -527,6 +532,37 @@ export class City {
     crowns.castShadow = true;
     crowns.frustumCulled = false;
     this.group.add(crowns);
+  }
+
+  buildEntranceInstances() {
+    const doorMat = new THREE.MeshStandardMaterial({ color: 0x2b3a4a, roughness: 0.5, metalness: 0.2 });
+    const chromeMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
+    const stepMat = new THREE.MeshStandardMaterial({ color: 0xbfbfc8, roughness: 0.9 });
+
+    const doors = new THREE.InstancedMesh(new THREE.BoxGeometry(1.35, 2.3, 0.12), doorMat, this.doorMatrices.length);
+    this.doorMatrices.forEach((m, i) => doors.setMatrixAt(i, m));
+    doors.instanceMatrix.needsUpdate = true;
+    doors.frustumCulled = false;
+    this.group.add(doors);
+
+    const handles = new THREE.InstancedMesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), chromeMat, this.handleMatrices.length);
+    this.handleMatrices.forEach((m, i) => handles.setMatrixAt(i, m));
+    handles.instanceMatrix.needsUpdate = true;
+    handles.frustumCulled = false;
+    this.group.add(handles);
+
+    // steps differ in width, so one instanced mesh per row
+    for (const row of [0, 1]) {
+      const items = this.stepMatrices.filter((_, i) => i % 2 === row);
+      if (!items.length) continue;
+      const geo = new THREE.BoxGeometry(items[0].scale, 0.13, 0.5);
+      const mesh = new THREE.InstancedMesh(geo, stepMat, items.length);
+      items.forEach((it, i) => mesh.setMatrixAt(i, it.m));
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      this.group.add(mesh);
+    }
   }
 
   buildLampInstances() {
@@ -719,13 +755,8 @@ export class City {
     // entrance: door + two steps at the pavement
     const doorX = x + (w > d ? -w * 0.22 : 0);
     const doorZ = z + d / 2 + 0.02;
-    const doorMat = new THREE.MeshStandardMaterial({ color: 0x2b3a4a, roughness: 0.5, metalness: 0.2 });
-    const door = new THREE.Mesh(new THREE.BoxGeometry(1.35, 2.3, 0.12), doorMat);
-    door.position.set(doorX, 1.42, doorZ + 0.06);
-    this.group.add(door);
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), chromeLike);
-    handle.position.set(doorX + 0.45, 1.35, doorZ + 0.14);
-    this.group.add(handle);
+    this.doorMatrices.push(new THREE.Matrix4().makeTranslation(doorX, 1.42, doorZ + 0.06));
+    this.handleMatrices.push(new THREE.Matrix4().makeTranslation(doorX + 0.45, 1.35, doorZ + 0.14));
     // remember this entrance as an enterable shop
     if (w > 8 && d > 8) {
       const kind = pick(['minimarket', 'minimarket', 'warteg', 'kopi', 'bengkel'] as InteriorKind[]);
@@ -742,32 +773,32 @@ export class City {
           ctx.textBaseline = 'middle';
           ctx.fillText(room.name, cw / 2, ch / 2 + 1);
         });
+        const withBoard = Math.random() < 0.5;
         const board = new THREE.Mesh(
           new THREE.BoxGeometry(4.4, 0.9, 0.16),
           new THREE.MeshStandardMaterial({ map: boardTex, emissive: 0xffffff, emissiveMap: boardTex, emissiveIntensity: 0.25, roughness: 0.55 })
         );
-        board.position.set(doorX, 3.55, doorZ + 0.18);
-        board.castShadow = true;
-        this.group.add(board);
+        if (withBoard) {
+          board.position.set(doorX, 3.55, doorZ + 0.18);
+          board.castShadow = true;
+          this.group.add(board);
+        }
         // welcome mat
         const mat2 = new THREE.Mesh(
           new THREE.BoxGeometry(2.0, 0.04, 0.8),
           new THREE.MeshStandardMaterial({ color: kind === 'minimarket' ? 0xc0392b : 0x3f6b4a, roughness: 0.95 })
         );
-        mat2.position.set(doorX, 0.29, doorZ + 0.55);
-        this.group.add(mat2);
+        if (withBoard) {
+          mat2.position.set(doorX, 0.29, doorZ + 0.55);
+          this.group.add(mat2);
+        }
       }
     }
 
     for (let s2 = 0; s2 < 2; s2++) {
-      const step = new THREE.Mesh(
-        new THREE.BoxGeometry(1.9 - s2 * 0.25, 0.13, 0.5),
-        new THREE.MeshStandardMaterial({ color: 0xbfbfc8, roughness: 0.9 })
-      );
-      step.position.set(doorX, 0.2 + s2 * 0.13, doorZ + 0.28 + s2 * 0.28);
-      step.castShadow = true;
-      step.receiveShadow = true;
-      this.group.add(step);
+      const m = new THREE.Matrix4().makeScale(1, 1, 1);
+      m.setPosition(doorX, 0.2 + s2 * 0.13, doorZ + 0.28 + s2 * 0.28);
+      this.stepMatrices.push({ m, scale: 1.9 - s2 * 0.25 });
     }
 
     const signMat = new THREE.MeshStandardMaterial({

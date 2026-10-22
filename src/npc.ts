@@ -107,7 +107,7 @@ export class Ped {
     this.char.group.rotation.y = this.yaw;
     // animation LOD: full cycle up close, frozen pose further away
     if (playerDist < 55) this.char.animate(dt, moving);
-    this.char.setDetail(playerDist < 42);
+    this.char.setDetail(playerDist < 30);
     this.char.group.position.y -= this.char.footLift ?? 0;
   }
 

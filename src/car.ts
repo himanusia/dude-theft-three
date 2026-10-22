@@ -38,6 +38,7 @@ export class Car {
   declare tailMat: any;
   declare mesh: any;
   declare brakeLight: boolean;
+  declare simple: boolean;
   declare lightRed: THREE.MeshStandardMaterial;
   declare lightBlue: THREE.MeshStandardMaterial;
   declare maxSpeed: number;
@@ -54,6 +55,7 @@ export class Car {
     Object.assign(this, spec);
     this.color = opts.color ?? pick(CAR_COLORS);
     this.isPolice = opts.police ?? false;
+    this.simple = opts.simple ?? false;
     this.yaw = opts.yaw ?? 0;
     this.pos = (opts.position ?? new THREE.Vector3()).clone();
     this.pos.y = 0;
@@ -262,9 +264,11 @@ export class Car {
       const bumper = new THREE.Mesh(rb(W * 0.94, 0.16, 0.18, 0.05, 1), chrome);
       bumper.position.set(0, 0.52, sz * (L * 0.5 - 0.02));
       g.add(bumper);
-      const grille = new THREE.Mesh(rb(W * 0.46, 0.2, 0.07, 0.02, 1), isFront ? trim : trim);
-      grille.position.set(0, 0.78, sz * (L * 0.49));
-      g.add(grille);
+      if (!this.simple) {
+        const grille = new THREE.Mesh(rb(W * 0.46, 0.2, 0.07, 0.02, 1), trim);
+        grille.position.set(0, 0.78, sz * (L * 0.49));
+        g.add(grille);
+      }
     }
 
     // lights
@@ -316,20 +320,22 @@ export class Car {
       }
     }
 
-    // mirrors, plate, exhaust tips
-    for (const sx of [-1, 1]) {
+    // mirrors, plate, exhaust tips (skipped on ambient traffic to save draw calls)
+    if (!this.simple) for (const sx of [-1, 1]) {
       const mirror = new THREE.Mesh(rb(0.1, 0.09, 0.16, 0.02, 1), chrome);
       mirror.position.set(sx * (W * 0.56), 1.02, L * 0.1);
       g.add(mirror);
     }
-    const plate = new THREE.Mesh(rb(0.44, 0.14, 0.04, 0.01, 1), new THREE.MeshStandardMaterial({ color: 0xf4f4ea, roughness: 0.6 }));
-    plate.position.set(0, 0.6, -L * 0.5 - 0.02);
-    g.add(plate);
-    for (const sx of [-1, 1]) {
-      const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.18, 8), chrome);
-      pipe.rotation.x = Math.PI / 2;
-      pipe.position.set(sx * 0.28, 0.36, -L * 0.5 + 0.02);
-      g.add(pipe);
+    if (!this.simple) {
+      const plate = new THREE.Mesh(rb(0.44, 0.14, 0.04, 0.01, 1), new THREE.MeshStandardMaterial({ color: 0xf4f4ea, roughness: 0.6 }));
+      plate.position.set(0, 0.6, -L * 0.5 - 0.02);
+      g.add(plate);
+      for (const sx of [-1, 1]) {
+        const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.18, 8), chrome);
+        pipe.rotation.x = Math.PI / 2;
+        pipe.position.set(sx * 0.28, 0.36, -L * 0.5 + 0.02);
+        g.add(pipe);
+      }
     }
 
     const blob = shadowBlob(W * 1.25, L * 1.05, 0.4);

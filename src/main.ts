@@ -96,7 +96,7 @@ const character = new Character({ shirt: 0xd94f4f, pants: 0x2f3a52, skin: 0xd9a2
 character.group.position.copy(player.pos);
 scene.add(character.group);
 
-const peds = new PedManager(scene, city, 44);
+const peds = new PedManager(scene, city, 34);
 const police = new Police(scene, city, audio);
 const traffic = new Traffic(scene, city, 12);
 
@@ -478,6 +478,7 @@ function enterInterior(door: { kind: InteriorKind; name: string }) {
   if (!room) return;
   player.savedPos = player.pos.clone();
   player.savedCamYaw = camYaw;
+  room.group.visible = true;
   player.inInterior = room;
   player.pos.set(room.origin.x + room.spawn.x, 0, room.origin.z + room.spawn.z);
   player.y = 0;
@@ -492,6 +493,7 @@ function enterInterior(door: { kind: InteriorKind; name: string }) {
 function exitInterior() {
   const room = player.inInterior;
   if (!room) return;
+  room.group.visible = false;
   player.inInterior = null;
   if (player.savedPos) player.pos.copy(player.savedPos);
   if (player.savedCamYaw !== undefined) camYaw = player.savedCamYaw;

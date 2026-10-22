@@ -25,7 +25,7 @@ export class Traffic {
       const j = Math.floor(rand(-2, 3));
       const heading = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
       const start = intersection(i, j);
-      const car = new Car(scene, { type: pick(types), position: start, yaw: Math.atan2(heading[0], heading[1]) });
+      const car = new Car(scene, { type: pick(types), position: start, yaw: Math.atan2(heading[0], heading[1]), simple: true });
       this.cars.push({
         car,
         cell: { i, j },
