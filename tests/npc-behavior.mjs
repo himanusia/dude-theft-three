@@ -429,23 +429,24 @@ function stopServer() {
   });
 
   // Flee screenshot: a second, tighter scare so the hands-up pose fills the frame.
-  // Five people stand in front of the player, one real trigger pull, then the camera
-  // is placed 5.5 m from the running group.
+  // Five people stand in front of the player, one real trigger pull into the sky
+  // (so nobody is hit and nobody peels off to fetch the cops), then the camera is
+  // placed outside the running group.
   const fleeShot = await page.evaluate(async () => {
     const g = window.__game;
     g.police.clearWanted();
     g._test.cinematic(false);
     g._test.teleport(26, 0);
-    g._test.setCam(0, 0.02);
+    g._test.setCam(0, 0.9); // muzzle up: the shot scares the block, it does not hit anyone
     g.player.mag = g.player.magSize;
     g.player.shootCd = 0;
     g.player.reloading = 0;
     const spots = [
-      [24.6, -5.4],
-      [27.4, -5.2],
-      [23.2, -7.6],
-      [28.8, -7.4],
-      [24.8, -9.8],
+      [24.4, -5.2],
+      [27.6, -5.0],
+      [23.6, -8.0],
+      [28.4, -7.8],
+      [26.0, -10.4],
     ];
     const alive = g.peds.peds.filter((p) => !p.dead);
     for (let i = 0; i < spots.length && i < alive.length; i++) {
