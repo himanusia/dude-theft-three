@@ -10,6 +10,7 @@ import { PlacedInterior, InteriorKind } from './interior';
 import { HUD } from './hud';
 import { AudioSys } from './audio';
 import { TouchControls } from './touch';
+import { WEAPONS, WEAPON_ORDER, weaponBySlot, buildWeaponModel, STARTING_WEAPONS, WeaponId } from './weapons';
 import {
   clamp,
   lerp,
@@ -68,6 +69,8 @@ interface PlayerState {
   magSize: number;
   reloading: number;
   shootCd: number;
+  weapon: WeaponId;
+  ammo: Record<string, { mag: number; reserve: number }>;
   grounded: boolean;
   rhythm: number;
   lastHit?: number;
@@ -89,6 +92,8 @@ const player: PlayerState = {
   magSize: 12,
   reloading: 0,
   shootCd: 0,
+  weapon: 'pistol',
+  ammo: {},
   grounded: true,
   rhythm: 0,
   inInterior: null,
@@ -244,7 +249,7 @@ function lockPointer() {
 
 // ---------------------------------------------------------------- input
 const keys = new Set();
-const mouse = { dx: 0, dy: 0, left: false, right: false, down: false };
+const mouse = { dx: 0, dy: 0, left: false, right: false, down: false, firedSinceDown: false };
 let camYaw = Math.PI * 0.25;
 let camPitch = 0.1;
 let camDist = 5.8;
@@ -286,6 +291,12 @@ document.addEventListener('mousemove', (e) => {
   mouse.dy += e.movementY;
 });
 
+document.addEventListener('wheel', (e) => {
+  if (!started || paused || player.inCar) return;
+  if (Math.abs(e.deltaY) < 6) return;
+  switchSlot(e.deltaY > 0 ? 1 : -1);
+}, { passive: true });
+
 document.addEventListener('mousedown', (e) => {
   if (!started) return;
   if (e.button === 0) {
@@ -298,7 +309,7 @@ document.addEventListener('mousedown', (e) => {
   if (e.button === 2) mouse.right = true;
 });
 document.addEventListener('mouseup', (e) => {
-  if (e.button === 0) mouse.left = false;
+  if (e.button === 0) { mouse.left = false; mouse.firedSinceDown = false; }
   if (e.button === 2) mouse.right = false;
 });
 document.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -308,6 +319,10 @@ window.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (!started) return;
   if (e.code === 'KeyF') toggleVehicle();
+  if (/^Digit[1-6]$/.test(e.code)) {
+    const id = weaponBySlot(Number(e.code.slice(5)));
+    if (id) equipWeapon(id);
+  }
   if (e.code === 'KeyE') {
     if (player.inInterior) exitInterior();
     else {
@@ -827,25 +842,71 @@ function updateDriving(dt: number) {
 
 // ---------------------------------------------------------------- combat
 function startReload() {
-  if (player.inCar || player.reloading > 0 || player.mag === player.magSize) return;
-  player.reloading = 1.35;
+  const spec = WEAPONS[player.weapon];
+  if (spec.melee) return;
+  const a = ammoFor(player.weapon);
+  if (player.inCar || player.reloading > 0 || player.mag === spec.magSize || a.reserve <= 0) return;
+  player.reloading = spec.reload;
   audio.play('click', { vol: 0.5, rate: 0.8 });
 }
 
-function shoot() {
-  if (player.inCar || player.reloading > 0 || player.shootCd > 0) return;
-  if (player.mag <= 0) {
-    startReload();
-    return;
-  }
-  player.mag--;
-  player.shootCd = 0.17;
-  audio.play('shot_pistol', { vol: 0.5, rate: rand(0.94, 1.06), pan: rand(-0.2, 0.2) });
-  camPitch = clamp(camPitch - 0.014, -0.55, 1.05);
-  setShake(0.035, 0.1);
+function finishReload() {
+  const spec = WEAPONS[player.weapon];
+  const a = ammoFor(player.weapon);
+  const need = spec.magSize - player.mag;
+  const take = Math.min(need, a.reserve);
+  a.reserve -= take;
+  player.mag += take;
+  a.mag = player.mag;
+  hud.setWeapon(spec.name, spec.slot, a.reserve);
+}
 
+function ammoFor(id: WeaponId) {
+  if (!player.ammo[id]) player.ammo[id] = { mag: WEAPONS[id].magSize, reserve: WEAPONS[id].reserve };
+  return player.ammo[id];
+}
+
+let heldModel: THREE.Object3D | null = null;
+function equipWeapon(id: WeaponId) {
+  const spec = WEAPONS[id];
+  if (heldModel) {
+    character.armR.remove(heldModel);
+    heldModel = null;
+  }
+  player.weapon = id;
+  const a = ammoFor(id);
+  player.mag = a.mag;
+  player.magSize = spec.magSize;
+  player.reloading = 0;
+  player.shootCd = 0;
+  const model = buildWeaponModel(id);
+  model.position.set(...spec.heldPose.position);
+  model.rotation.set(...spec.heldPose.rotation);
+  character.armR.add(model);
+  heldModel = model;
+  character.gun.visible = false;
+  hud.setWeapon(spec.name, spec.slot, a.reserve);
+  hud.setAmmo(player.mag, spec.magSize, false);
+  audio.play('click', { vol: 0.35 });
+}
+
+function switchSlot(delta: number) {
+  const i = WEAPON_ORDER.indexOf(player.weapon);
+  const next = WEAPON_ORDER[(i + delta + WEAPON_ORDER.length) % WEAPON_ORDER.length];
+  equipWeapon(next);
+}
+
+function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
   const origin = camera.position.clone();
   const dir = camera.getWorldDirection(new THREE.Vector3()).normalize();
+  if (spreadDeg > 0) {
+    // cone: rotate the shot direction by a random angle inside the half-angle
+    const a = (rand(-1, 1) * spreadDeg * Math.PI) / 180;
+    const b = (rand(-1, 1) * spreadDeg * Math.PI) / 180;
+    const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, dir).normalize();
+    dir.addScaledVector(right, Math.tan(a)).addScaledVector(up, Math.tan(b)).normalize();
+  }
   // gun muzzle: ahead of the shoulder (not inside the torso) so the flash is
   // never hidden by the player model from the follow camera
   const muzzleRight = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
@@ -854,10 +915,8 @@ function shoot() {
     player.y + 1.32,
     player.pos.z - Math.cos(camYaw) * 0.75 + muzzleRight.z * 0.28
   );
-  addMuzzle(muzzle);
-
-  const wallHit = rayVsColliders(origin, dir, 110, city.colliders);
-  let bestDist = wallHit ? wallHit.dist : 110;
+  const wallHit = rayVsColliders(origin, dir, range, city.colliders);
+  let bestDist = wallHit ? wallHit.dist : range;
   let hitPoint = origin.clone().addScaledVector(dir, bestDist);
   let hitKind = wallHit ? 'wall' : null;
   // ignore targets hugging the camera (they are behind/beside the player, not in the line of fire)
@@ -896,11 +955,11 @@ function shoot() {
     v.y = Math.max(2.5, v.y + 4);
     ragdollPed(hitPed, v);
     hud.hitmarker();
-    addCash(15);
+    addCash(8 + dmg);
     police.addWanted(0.8);
     flags.chaos = true;
   } else if (hitKind === 'car') {
-    hitCar.applyDamage(11);
+    hitCar.applyDamage(dmg);
     addSpark(hitPoint, 0xffcf7a);
     hud.hitmarker();
     police.addWanted(0.35);
@@ -925,6 +984,40 @@ function shoot() {
     camPitch: +camPitch.toFixed(3),
   };
   if (player.mag === 0) startReload();
+}
+
+function muzzlePos() {
+  const right = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
+  return new THREE.Vector3(
+    player.pos.x - Math.sin(camYaw) * 0.75 + right.x * 0.28,
+    player.y + 1.32,
+    player.pos.z - Math.cos(camYaw) * 0.75 + right.z * 0.28
+  );
+}
+
+/** One trigger pull: spends a round (or swings), then fires every pellet of the weapon. */
+function shoot() {
+  if (player.inCar || player.reloading > 0 || player.shootCd > 0) return;
+  const spec = WEAPONS[player.weapon];
+  if (spec.melee) {
+    punch();
+    player.shootCd = 60 / spec.rpm;
+    return;
+  }
+  if (player.mag <= 0) {
+    startReload();
+    return;
+  }
+  player.mag--;
+  ammoFor(player.weapon).mag = player.mag;
+  player.shootCd = 60 / spec.rpm;
+  audio.play(spec.sound, { vol: spec.soundVol, rate: spec.soundRate * rand(0.96, 1.04), pan: rand(-0.2, 0.2) });
+  camPitch = clamp(camPitch - spec.recoil, -0.55, 1.05);
+  setShake(spec.shake, 0.1);
+  addMuzzle(muzzlePos());
+  for (let i = 0; i < spec.pellets; i++) firePelletRaw(spec.spread, spec.damage, spec.range);
+  hud.setWeapon(spec.name, spec.slot, ammoFor(player.weapon).reserve);
+  hud.setAmmo(player.mag, spec.magSize, false);
 }
 
 function raySphere(origin: any, dir: any, center: any, radius: number) {
@@ -1124,13 +1217,19 @@ function updateCombat(dt: number) {
   if (player.reloading > 0) {
     player.reloading -= dt;
     if (player.reloading <= 0) {
-      player.mag = player.magSize;
+      finishReload();
       audio.play('click', { vol: 0.45, rate: 1.2 });
     }
   }
   // mouse no longer needs pointer lock (headless/iframe contexts refuse it); the touch
   // FIRE button drives the same path so both inputs share one gate
-  if ((mouse.left || (touch.state.active && touch.state.fire)) && canShootNow()) shoot();
+  const spec = WEAPONS[player.weapon];
+  const trigger = mouse.left || (touch.state.active && touch.state.fire);
+  // semi-auto weapons need a fresh click; the automatics keep firing while held
+  if (trigger && canShootNow() && (spec.auto || spec.melee || !mouse.firedSinceDown)) {
+    shoot();
+    mouse.firedSinceDown = true;
+  }
 }
 
 // ---------------------------------------------------------------- pickups
@@ -1360,6 +1459,8 @@ hud.setHealth(player.hp);
 hud.setStars(0);
 hud.setAmmo(player.mag, player.magSize, false);
 hud.setObjective(objectiveText());
+// start with the pistol equipped so the HUD and the held model agree from frame one
+equipWeapon(STARTING_WEAPONS.includes('pistol') ? 'pistol' : WEAPON_ORDER[0]);
 hud.setPrompt('');
 animate();
 
@@ -1368,6 +1469,10 @@ window.__game = {
   camera,
   renderer,
   player,
+  equipWeapon,
+  get weaponSpec() {
+    return WEAPONS[player.weapon];
+  },
   city,
   police,
   peds,
