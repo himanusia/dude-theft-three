@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>HUD comparison — reference vs build</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 26px; background: #0e1013; color: #e9eef2;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 21px; letter-spacing: -.01em; }
+  p.sub { margin: 0 0 20px; color: #8e9ba7; font-size: 12.5px; max-width: 980px; line-height: 1.55; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .card { border: 1px solid #232931; border-radius: 6px; overflow: hidden; background: #14171b; }
+  .card h2 { margin: 0; padding: 9px 13px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #cdd6df; }
+  .card h2 em { font-style: normal; color: #77838f; text-transform: none; letter-spacing: 0; }
+  .frame { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #000; }
+  .frame img { position: absolute; display: block; }
+  /* the reference file is a 2x2 promo grid; show only its bottom-left gameplay panel */
+  .frame.ref img { width: 200%; height: 200%; left: 0; top: -100%; }
+  .frame.build img { width: 100%; height: 100%; left: 0; top: 0; }
+  .tag { position: absolute; bottom: 8px; right: 9px; font-size: 10.5px; letter-spacing: .06em;
+    text-transform: uppercase; color: #cfd8e0; background: rgba(0,0,0,.55); padding: 3px 7px; border-radius: 3px; }
+  .notes { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; font-size: 12.5px; line-height: 1.55; color: #a7b4bf; }
+  .notes b { color: #e9eef2; display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  td { padding: 4px 0; border-bottom: 1px solid #1e242b; vertical-align: top; }
+  td:first-child { color: #77838f; width: 42%; }
+  .ok { color: #5ccf7a; }
+  .diff { color: #e8b84a; }
+  ul { margin: 0; padding-left: 17px; }
+</style>
+</head>
+<body>
+  <h1>HUD — reference vs build, side by side</h1>
+  <p class="sub">Left: the reference game's real in-game HUD, cropped from the bottom-left gameplay panel of its
+     store imagery. Right: this build at 1280×720. Same frame width, so positions, weight and colour can be
+     compared directly instead of described.</p>
+  <div class="row">
+    <div class="card">
+      <h2>Reference <em>— in-game HUD</em></h2>
+      <div class="frame ref">
+        <img src="../reference/dtw-06.png" alt="reference hud" />
+        <span class="tag">reference</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Current <em>— dude-theft-three</em></h2>
+      <div class="frame build">
+        <img src="../screenshots/proof/hero-01-street.png" alt="current hud" />
+        <span class="tag">current</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div>
+      <b>Element by element</b>
+      <table>
+        <tr><td>Minimap</td><td class="diff">reference: top-left — ours: bottom-right</td></tr>
+        <tr><td>Money</td><td class="ok">both: green, next to the minimap</td></tr>
+        <tr><td>Weapon</td><td class="diff">reference: big weapon icon — ours: text + calibre</td></tr>
+        <tr><td>Health</td><td class="ok">both: thin bar, bottom-left</td></tr>
+        <tr><td>Plate style</td><td class="ok">both: flat dark, no borders, no blur</td></tr>
+      </table>
+    </div>
+    <div>
+      <b>What it means for the build</b>
+      <ul>
+        <li>The flat-plate direction is right: no accent bars, no glass, no drop shadows.</li>
+        <li>Real mismatch is <strong>hierarchy</strong>: the reference keeps map and money together in the
+            top-left so "where am I / how much" reads in one glance; ours splits them across two corners.</li>
+        <li>Second mismatch: the reference treats the weapon as a <strong>picture</strong>, ours as a string,
+            which is why the ammo line has to carry the weapon name too.</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>
