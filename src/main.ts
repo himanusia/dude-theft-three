@@ -582,7 +582,10 @@ function plantFeet(ch: any, groundY: number) {
     lowest = Math.min(lowest, _footV.y - 0.075 * scale);
   }
   if (lowest === Infinity) return;
-  ch.group.position.y = groundY + (groundY - lowest);
+  // relative shift from where the group already sits. The old form added groundY a second
+  // time, which was invisible while the world was flat (groundY = 0) and put every character
+  // twice the ground height into the air once the city had terrain.
+  ch.group.position.y += groundY - lowest;
 }
 
 // ---------------------------------------------------------------- player on foot
