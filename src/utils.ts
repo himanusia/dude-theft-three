@@ -7,9 +7,32 @@ export const clamp = (v: number, a: number, b: number): number => (v < a ? a : v
 export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 export const damp = (a: number, b: number, lambda: number, dt: number): number => lerp(a, b, 1 - Math.exp(-lambda * dt));
 export const rand = (a = 0, b = 1): number => a + Math.random() * (b - a);
+export const chance = (p: number): boolean => Math.random() < p;
 export const randInt = (a: number, b: number): number => Math.floor(rand(a, b + 1));
 export const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 export const sign = (v: number): number => (v < 0 ? -1 : v > 0 ? 1 : 0);
+
+// Deterministic RNG. Generated textures (road, paving, grass, facade weathering) must be
+// identical on every load: a random road patch under the camera moved the measured frame
+// mean by +/- 10 RGB between reloads, which made the palette gate meaningless.
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
 // shortest angle difference, wrapped to [-PI, PI]
 export function angleDelta(a: number, b: number): number {
@@ -60,8 +83,63 @@ export function canvasTexture(w: number, h: number, draw: DrawFn): THREE.CanvasT
   draw(ctx, w, h);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  // 8x: the facade louvres are 2-3 px lines, and at 4x they shimmered into moire at
+  // street distance where the constant world tile compresses most.
+  tex.anisotropy = 8;
   return tex;
+}
+
+// One texture per (pattern, palette) combination, drawn once and reused by every mesh
+// that shares it. Drawing a canvas per building cost ~240 canvases for the city.
+const _texCache = new Map<string, THREE.CanvasTexture>();
+
+export function cachedTexture(key: string, w: number, h: number, draw: DrawFn): THREE.CanvasTexture {
+  const hit = _texCache.get(key);
+  if (hit) return hit;
+  const tex = canvasTexture(w, h, draw);
+  // tilable by default: facade + band UVs run past 1 so one texture can cover any facade
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  _texCache.set(key, tex);
+  return tex;
+}
+
+export function textureCacheCount(): number {
+  return _texCache.size;
+}
+
+// Scale a box geometry's UVs so a shared tiling texture keeps a constant world size on
+// every face, which lets one cached texture serve buildings of any footprint.
+export function tileBoxUV(
+  geo: THREE.BufferGeometry,
+  w: number,
+  h: number,
+  d: number,
+  tile: number,
+  offU = 0,
+  offV = 0,
+  tileV = tile
+): void {
+  const uv = geo.attributes.uv as THREE.BufferAttribute;
+  const rep = (span: number, t: number) => Math.max(1, Math.round(span / t));
+  const ru = (span: number) => rep(span, tile);
+  const rv = (span: number) => rep(span, tileV);
+  const faces: [number, number][] = [
+    [ru(d), rv(h)], // +x
+    [ru(d), rv(h)], // -x
+    [1, 1], // +y (roof, untextured)
+    [1, 1], // -y
+    [ru(w), rv(h)], // +z
+    [ru(w), rv(h)], // -z
+  ];
+  for (let f = 0; f < 6; f++) {
+    const [fx, fy] = faces[f];
+    for (let i = 0; i < 4; i++) {
+      const k = f * 4 + i;
+      // the phase offset keeps neighbouring buildings off the same texel grid
+      uv.setXY(k, uv.getX(k) * fx + offU, uv.getY(k) * fy + offV);
+    }
+  }
+  uv.needsUpdate = true;
 }
 
 // circle (x,z,r) vs axis aligned box -> pushes the circle out, returns hit flag
