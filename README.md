@@ -104,6 +104,7 @@ Automated harness (`puppeteer-core`) drives the real page and asserts **state**,
 npm run test:qa        # 19/19 gameplay assertions
 npm run test:interior  # 11/11 interior assertions
 npm run test:audit     # floating-geometry audit
+node tests/npc-behavior.mjs  # 13/13 pedestrian AI assertions (starts its own server on :8795)
 ```
 
 ```
