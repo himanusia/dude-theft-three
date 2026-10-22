@@ -596,65 +596,125 @@ export class City {
   }
 
   buildGround() {
-    // asphalt base
-    const asphaltTex = canvasTexture(256, 256, (ctx, w, h) => {
-      ctx.fillStyle = '#8a84a2';
+    // ---- asphalt: neutral-violet base with visible warm/cool tint patches and tar
+    // seams, so the road carries colour without washing the whole frame one way
+    const S = PALETTE.streets;
+    const seeded = (seed: number) => {
+      const R = mulberry32(seed);
+      return {
+        r: (a = 0, b = 1) => a + R() * (b - a),
+        ri: (a: number, b: number) => Math.floor(a + R() * (b - a + 1)),
+      };
+    };
+    const { r: ar, ri: ari } = seeded(0x0a59a17);
+    const { r: pr, ri: pri } = seeded(0x9a7e1);
+    const { r: gr, ri: gri } = seeded(0x6a55);
+    const asphaltTex = cachedTexture('asphalt', 256, 256, (ctx, w, h) => {
+      const rand = ar, randInt = ari;
+      ctx.fillStyle = S.asphalt;
       ctx.fillRect(0, 0, w, h);
-      for (let i = 0; i < 2600; i++) {
-        const v = rand(0.75, 1.15);
-        ctx.fillStyle = `rgba(${Math.round(120 * v)},${Math.round(114 * v)},${Math.round(140 * v)},0.5)`;
-        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 3), rand(1, 3));
-      }
-      for (let i = 0; i < 6; i++) {
-        ctx.fillStyle = 'rgba(90,86,110,0.32)';
+      // warm / cool patches: the mean stays neutral while the surface gains colour
+      // many small tint patches instead of a few big blobs: the road reads as worn
+      // asphalt with patch repairs, not as a wet painted surface
+      // warm / cool patches: the road tints locally, the pair averages neutral across a
+      // tile so the frame mean does not depend on which patch the camera stands on
+      for (let i = 0; i < 30; i++) {
+        ctx.fillStyle = i % 2 ? S.asphaltWarm : S.asphaltCool;
+        ctx.globalAlpha = rand(0.45, 0.8);
         ctx.beginPath();
-        ctx.ellipse(rand(0, w), rand(0, h), rand(12, 42), rand(8, 26), rand(0, 3), 0, Math.PI * 2);
+        ctx.ellipse(rand(0, w), rand(0, h), rand(28, 96), rand(20, 62), rand(0, 3), 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.strokeStyle = 'rgba(70,66,88,0.45)';
-      ctx.lineWidth = 1.4;
-      for (let i = 0; i < 8; i++) {
+      ctx.globalAlpha = 1;
+      for (let i = 0; i < 4200; i++) {
+        const v = rand(0.72, 1.16);
+        ctx.fillStyle = `rgba(${Math.round(136 * v)},${Math.round(130 * v)},${Math.round(122 * v)},0.5)`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 2.2), rand(1, 2.2));
+      }
+      // tar seams
+      ctx.strokeStyle = S.seam;
+      for (const [x0, y0, x1, y1] of [[20, 0, 20, h], [0, 168, w, 168], [150, 0, 150, h]]) {
+        ctx.globalAlpha = 0.45;
+        ctx.lineWidth = 2.6;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.globalAlpha = 0.8;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(84,80,74,0.5)';
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < 7; i++) {
         ctx.beginPath();
         let x = rand(0, w);
         let y = rand(0, h);
         ctx.moveTo(x, y);
         for (let k = 0; k < 4; k++) {
-          x += rand(-26, 26);
-          y += rand(-26, 26);
+          x += rand(-22, 22);
+          y += rand(-22, 22);
           ctx.lineTo(x, y);
         }
         ctx.stroke();
       }
     });
-    asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
-    asphaltTex.repeat.set(70, 70);
+    asphaltTex.repeat.set(35, 35);
     const asphalt = new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.96 });
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), asphalt);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.group.add(ground);
 
-    // sidewalk plates + block contents
-    const pavingTex = canvasTexture(128, 128, (ctx, w, h) => {
-      ctx.fillStyle = '#cbcbd4';
-      ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = 'rgba(150,150,164,0.7)';
-      ctx.lineWidth = 2;
-      for (let x = 0; x <= w; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-      for (let y = 0; y <= h; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-      for (let i = 0; i < 320; i++) {
-        ctx.fillStyle = `rgba(120,120,134,${rand(0.03, 0.08)})`;
-        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 4), rand(1, 4));
+    // ---- pavement: large slabs, dirt packed into the joints
+    const pavingTex = cachedTexture('paving', 256, 256, (ctx, w, h) => {
+      const rand = pr, randInt = pri;
+      const slab = w / 2;
+      for (let sy = 0; sy < 2; sy++) {
+        for (let sx = 0; sx < 2; sx++) {
+          ctx.fillStyle = (sx + sy) % 2 ? S.pavingAlt : S.paving;
+          ctx.fillRect(sx * slab, sy * slab, slab, slab);
+          ctx.fillStyle = `rgba(120,104,80,${rand(0.03, 0.09)})`;
+          ctx.fillRect(sx * slab + 2, sy * slab + 2, slab - 4, slab - 4);
+        }
+      }
+      ctx.fillStyle = S.joint;
+      for (let x = 0; x <= w; x += slab) ctx.fillRect(x - 1.5, 0, 3, h);
+      for (let y = 0; y <= h; y += slab) ctx.fillRect(0, y - 1.5, w, 3);
+      for (let i = 0; i < 900; i++) {
+        ctx.fillStyle = `rgba(${randInt(88, 132)},${randInt(80, 120)},${randInt(66, 100)},${rand(0.15, 0.4)})`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 3), rand(1, 3));
+      }
+      for (let i = 0; i < 10; i++) {
+        ctx.fillStyle = `rgba(96,84,64,${rand(0.05, 0.12)})`;
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(6, 22), rand(4, 14), 0, 0, Math.PI * 2);
+        ctx.fill();
       }
     });
-    pavingTex.wrapS = pavingTex.wrapT = THREE.RepeatWrapping;
-    pavingTex.repeat.set(BLOCK / 4, BLOCK / 4);
+    pavingTex.repeat.set(BLOCK / 3.8, BLOCK / 3.8);
     const sidewalkMat = new THREE.MeshStandardMaterial({ map: pavingTex, roughness: 0.9 });
-    const curbMat = new THREE.MeshStandardMaterial({ color: 0xb4b4be, roughness: 0.9 });
-    const parkMat = new THREE.MeshStandardMaterial({ color: 0x37c24a, roughness: 1 });
-    const lotMat = new THREE.MeshStandardMaterial({ color: 0x9a94b0, roughness: 0.95 });
+    const curbMat = new THREE.MeshStandardMaterial({ color: S.curb, roughness: 0.9 });
 
-    const dashMat = new THREE.MeshStandardMaterial({ color: 0xf7f5e8, roughness: 0.6 });
+    // ---- grass: mottled turf instead of a flat green card
+    const grassTex = cachedTexture('grass', 256, 256, (ctx, w, h) => {
+      const rand = gr, randInt = gri;
+      ctx.fillStyle = '#46c248';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 40; i++) {
+        ctx.fillStyle = i % 3 === 0 ? 'rgba(126,194,72,0.35)' : i % 3 === 1 ? 'rgba(46,150,58,0.35)' : 'rgba(88,210,98,0.32)';
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(10, 46), rand(8, 30), rand(0, 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      for (let i = 0; i < 2400; i++) {
+        ctx.fillStyle = `rgba(${randInt(40, 96)},${randInt(140, 196)},${randInt(50, 96)},${rand(0.2, 0.5)})`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 2), rand(1, 3));
+      }
+    });
+    grassTex.repeat.set(6, 6);
+    const parkMat = new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 });
+    const lotMat = new THREE.MeshStandardMaterial({ color: S.lot, roughness: 0.95 });
+
+    const dashMat = new THREE.MeshStandardMaterial({ color: S.line, roughness: 0.6 });
     const dashGeo = new THREE.BoxGeometry(0.42, 0.02, 2.6);
     this.dashMatrices = [];
     this.doorMatrices = [];
@@ -671,8 +731,8 @@ export class City {
       for (let j = -GRID; j <= GRID; j++) {
         const cx = i * PITCH;
         const cz = j * PITCH;
-        const isPark = Math.random() < 0.13;
-        const isLot = !isPark && Math.random() < 0.16;
+        const isPark = chance(0.13);
+        const isLot = !isPark && chance(0.16);
 
         const plate = new THREE.Mesh(new THREE.BoxGeometry(BLOCK, 0.26, BLOCK), sidewalkMat);
         plate.position.set(cx, 0.13, cz);
@@ -732,7 +792,7 @@ export class City {
     this.group.add(dashMesh);
 
     // crosswalks at intersections (instanced)
-    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xe4e2ea, roughness: 0.85 });
+    const stripeMat = new THREE.MeshStandardMaterial({ color: S.line, roughness: 0.85 });
     const stripeGeo = new THREE.BoxGeometry(0.7, 0.02, 3.2);
     const stripeMatrices = [];
     for (let i = -GRID - 1; i <= GRID; i++) {
