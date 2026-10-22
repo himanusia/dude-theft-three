@@ -3,6 +3,7 @@ import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from 
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
 import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater, pointInPoly } from './jakartamap';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
+import { terrainHeight } from './terrain';
 import { Car, driverLook } from '../vehicles/car';
 
 // City-block scale. A block is 140 m and the pitch is 170 m, so the street between two
@@ -404,8 +405,22 @@ export class City {
     concreteTex.wrapS = concreteTex.wrapT = THREE.RepeatWrapping;
     concreteTex.repeat.set(90, 90);
     const pavement = new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0.97 });
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_HALF * 2 + 900, WORLD_HALF * 2 + 900), pavement);
-    ground.rotation.x = -Math.PI / 2;
+    const groundGeo = new THREE.PlaneGeometry(WORLD_HALF * 2 + 900, WORLD_HALF * 2 + 900, 190, 190);
+    groundGeo.rotateX(-Math.PI / 2);
+    {
+      // displace the plane with the terrain function: the shore, the canal banks and the
+      // southern rise all come from src/world/terrain.ts, the same function physics uses
+      const pos = groundGeo.attributes.position as any;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        pos.setY(i, terrainHeight(x, z));
+      }
+      groundGeo.computeVertexNormals();
+    }
+    const ground = new THREE.Mesh(groundGeo, pavement);
+    // geometry was rotated and displaced already; rotating the mesh again stood the city on
+    // its edge and left the sky showing where the ground should be
     ground.receiveShadow = true;
     this.group.add(ground);
 
@@ -456,6 +471,7 @@ export class City {
       // One group per block: a 2.5 km city cannot draw every block, so each block toggles by
       // distance (see updateCulling). Everything the block owns goes into its own group.
       const blockGroup = new THREE.Group();
+      blockGroup.position.y = terrainHeight(cx, cz);
       blockLayer.add(blockGroup);
       this.group = blockGroup;
       this.blockGroups.push({ x: cx, z: cz, group: blockGroup });
@@ -499,7 +515,11 @@ export class City {
     // Landmarks sit exactly where the map puts them
     for (const lm of LANDMARKS) {
       if (!this.propAudit) this.propAudit = [];
-      const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+      // landmarks are modelled on a flat origin, so they get a parent lifted to their ground
+      const lmGroup = new THREE.Group();
+      lmGroup.position.y = terrainHeight(lm.x, lm.z);
+      this.group.add(lmGroup);
+      const ctx = { group: lmGroup, colliders: this.colliders, audit: this.propAudit };
       if (lm.id === 'monas') buildMonas(ctx, lm.x, lm.z);
       else if (lm.id === 'bundaran-hi') buildBundaran(ctx, lm.x, lm.z);
       else if (lm.id === 'stadhuis') buildKotaTua(ctx, lm.x, lm.z);
@@ -888,7 +908,11 @@ export class City {
       const nx = (-dz / len) * (width / 2);
       const nz = (dx / len) * (width / 2);
       const base = pos.length / 3;
-      pos.push(x1 + nx, y, z1 + nz, x1 - nx, y, z1 - nz, x2 + nx, y, z2 + nz, x2 - nx, y, z2 - nz);
+      const y1a = y + terrainHeight(x1 + nx, z1 + nz);
+      const y1b = y + terrainHeight(x1 - nx, z1 - nz);
+      const y2a = y + terrainHeight(x2 + nx, z2 + nz);
+      const y2b = y + terrainHeight(x2 - nx, z2 - nz);
+      pos.push(x1 + nx, y1a, z1 + nz, x1 - nx, y1b, z1 - nz, x2 + nx, y2a, z2 + nz, x2 - nx, y2b, z2 - nz);
       idx.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
     }
     const g = new THREE.BufferGeometry();
@@ -1907,7 +1931,7 @@ export class City {
             const style = DISTRICTS[styleKey] || DISTRICTS.kampung;
             if (!isWater(px, pz)) {
               const group = new THREE.Group();
-              group.position.set(px, 0, pz);
+              group.position.set(px, terrainHeight(px, pz), pz);
               group.rotation.y = Math.atan2(dx, dz);
               const wall = pick(style.walls);
               const tex = windowTexture(wall, 'strips');
@@ -1941,13 +1965,13 @@ export class City {
 
   // sidewalk plate height (blocks sit ~26cm above the asphalt)
   groundHeightAt(x: number, z: number) {
-    // measured against the plates that actually exist, not the old lattice: with organic
-    // blocks a point can be on a kerb that is nowhere near a grid cell centre
+    // terrain first, then the kerb: the city sits on ground that is no longer a table
+    let h = terrainHeight(x, z);
     for (const b of this.blocks) {
       const half = (b.size ?? BLOCK) / 2 + 1.2; // props stand at the plate edge, not the centre
-      if (Math.abs(x - b.x) < half && Math.abs(z - b.z) < half) return 0.26;
+      if (Math.abs(x - b.x) < half && Math.abs(z - b.z) < half) return h + 0.26;
     }
-    return 0;
+    return h;
   }
 
   randomRoadPoint(minDistFrom = null, min = 40) {
