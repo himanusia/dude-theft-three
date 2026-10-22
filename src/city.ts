@@ -229,7 +229,7 @@ export class City {
   buildClouds() {
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, fog: false, depthWrite: false });
     this.clouds = new THREE.Group();
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 18; i++) {
       const cluster = new THREE.Group();
       const puffs = 3 + Math.floor(rand(0, 3));
       for (let k = 0; k < puffs; k++) {
@@ -240,8 +240,8 @@ export class City {
         cluster.add(puff);
       }
       const ang = rand(0, Math.PI * 2);
-      const rad = rand(110, 320);
-      cluster.position.set(Math.cos(ang) * rad, rand(55, 95), Math.sin(ang) * rad);
+      const rad = rand(95, 210);
+      cluster.position.set(Math.cos(ang) * rad, rand(48, 78), Math.sin(ang) * rad);
       cluster.rotation.y = rand(0, Math.PI);
       this.clouds.add(cluster);
     }
@@ -1019,7 +1019,7 @@ export class City {
   }
 
   randomSidewalkPointNear(maxR = 120) {
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 18; i++) {
       const p = this.randomSidewalkPoint();
       if (p.length() <= maxR) return p;
     }
