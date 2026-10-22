@@ -54,8 +54,9 @@ sim pauses and collisions switch to the room's own colliders.
 |---|---|
 | `W A S D` | Move / drive |
 | Mouse | Look (click canvas to lock the pointer) |
-| Left click | Shoot (hold for auto cadence) |
+| Left click | Fire / swing (hold for full-auto weapons) |
 | Right mouse (hold) | Aim — shoulder cam, character hidden |
+| `1`–`6` / mouse wheel | Switch weapon (fist, knife, 9mm, uzi, shotgun, AK) |
 | `Shift` | Sprint / brake |
 | `Space` | Jump / handbrake |
 | `E` | Enter / exit a shop interior |
@@ -143,19 +144,24 @@ Bugs found and fixed across these passes:
 - **Vehicles**: arcade bicycle-model physics, collisions, damage, wreck explosions, air time off
   ramps, headlights at night, engine/tyre audio, 4 body types (sedan, muscle convertible, van, taxi)
   plus police cruisers with lightbar and door livery.
-- **Combat**: hitscan pistol, 12-round mag, reload, tracers, muzzle flash, sparks, hitmarker,
-  ray-vs-AABB against buildings and sphere tests against peds/cars.
+- **Combat**: six SA-style weapons (fist, knife, 9mm, uzi, shotgun, AK-47) with per-weapon
+  damage, rpm, spread, pellets, recoil and procedural low-poly models that swap in the right
+  hand. Magazine + reserve ammo, per-weapon reload, melee swings for fist/knife, per-weapon
+  muzzle flash, tracers, sparks and hitmarker. Pedestrians have 100 hp, so a 9mm takes three
+  hits, an AK two, an uzi nine; knife hits bleed.
+- **Weapon pickups**: four fixed sidewalk spots plus a gun dropped by every wrecked cruiser.
 - **Ragdolls**: 11-point Verlet ragdoll, ground friction, building push-out, fade + cleanup.
 - **Police**: 0–5 wanted stars, cruisers spawn on the nearest road and chase, shoot at 2+ stars,
   arrest when they pin you on foot, wanted level decays over ~30 s.
 - **Economy/objectives**: cash pickups, cash for ragdolling peds, hospital bill, arrest fine,
   4-step objective chain (steal a car → cause chaos → reach 3 stars → lose the cops).
-- **HUD**: objective card, cash chip, wanted stars, health, ammo, speedometer, contextual prompt,
-  toast stack, rounded minimap with FOV wedge and compass, FPS counter.
+- **HUD**: objective card, cash chip, wanted stars, health, weapon name + `mag / reserve`,
+  1–6 weapon wheel, speedometer, contextual prompt, toast stack, rounded minimap with FOV
+  wedge and compass, FPS counter.
 
 ## What is not implemented (honest scope)
 
-No interiors, no story missions, no multiplayer, no planes/helis/bikes, no weapon variety,
+No interiors, no story missions, no multiplayer, no planes/helis/bikes,
 no character customisation, no save system, no touch controls, and police AI is a straight-line
 chase (no pathfinding, so cruisers scrape walls). Audio is a small CC0 kit, not a full sound pass.
 
