@@ -338,10 +338,18 @@ export class TransjakartaBus {
       }
     }
     // bellows between the two halves: dark, ribbed, and narrower than the body
-    kit.box('matte', 0x2a2c30, [W - 0.12, ROOF - 0.62, JOINT_F - JOINT_R], [0, (ROOF + 0.62) / 2, (JOINT_F + JOINT_R) / 2]);
-    for (let i = 0; i < 4; i++) {
-      const z = JOINT_R + 0.12 + i * 0.19;
-      kit.box('matte', 0x1b1d20, [W - 0.08, ROOF - 0.68, 0.055], [0, (ROOF + 0.62) / 2, z]);
+    // The bellows has to stand proud of the bodywork, not sink inside it: a joint narrower than
+    // the body reads as a hole between three separate buses from any three-quarter view.
+    const jointLen = JOINT_F - JOINT_R;
+    const jointMid = (JOINT_F + JOINT_R) / 2;
+    kit.box('matte', 0x2a2c30, [W + 0.03, ROOF - 0.16, jointLen], [0, (ROOF + 0.16) / 2, jointMid]);
+    for (let i = 0; i < 6; i++) {
+      const z = JOINT_R + 0.06 + i * (jointLen - 0.12) / 5;
+      kit.box('matte', 0x1b1d20, [W + 0.05, ROOF - 0.24, 0.06], [0, (ROOF + 0.2) / 2, z]);
+    }
+    // skirt so the gap under the joint does not show daylight
+    for (const s of [1, -1] as const) {
+      kit.box('matte', 0x1b1d20, [W + 0.04, 0.42, jointLen], [0, 0.24, jointMid]);
     }
     // wheel wells: a dark panel on the flank behind each tyre, so the wheel sits in an arch
     for (const z of [6.15, -0.55, -6.45]) {

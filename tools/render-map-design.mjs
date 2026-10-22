@@ -29,7 +29,8 @@ try {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.error('page error:', e.message));
   await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
-  await page.goto(URL_, { waitUntil: 'networkidle2' });
+  // the game streams audio, so 'networkidle2' never settles
+  await page.goto(URL_, { waitUntil: 'domcontentloaded', timeout: 90000 });
   await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
   const start = await page.$('#start-btn');
   if (start) {

@@ -852,8 +852,8 @@ export class City {
     // a site is rejected (and the player could stand 180 m from the nearest building); tiling
     // inside the district polygon keeps the street wall continuous.
     const sites: { x: number; z: number; size: number }[] = [];
-    const PITCH_BLOCK = 112;
-    const SIZE = 92;
+    const PITCH_BLOCK = 90;
+    const SIZE = 74;
     // Block centres sit on multiples of the pitch, which is where src/world/streets.ts draws the
     // local streets: halfway between two centres. Offsetting the lattice by the district's own
     // bounding box (the old code) put streets straight through blocks - 12% of the road samples
