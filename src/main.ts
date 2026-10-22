@@ -206,6 +206,14 @@ canvasEl.addEventListener('click', () => {
   }
 });
 
+// firing gate: started, not paused, on foot. Pointer lock is NOT part of it —
+// the lock only captures the mouse for free look, and it is refused outright in
+// headless runs, iframe embeds and some browsers, which used to make the gun dead.
+let suppressFireUntil = 0; // swallows the click that resumes the game
+function canShootNow() {
+  return started && !paused && !player.inCar && performance.now() >= suppressFireUntil;
+}
+
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvasEl;
   // losing the pointer (alt-tab) pauses, but the transient unlock created by our own
@@ -227,6 +235,9 @@ document.addEventListener('mousedown', (e) => {
   if (e.button === 0) {
     mouse.left = true;
     if (!pointerLocked) lockPointer();
+    // edge-triggered shot: a real click can land and lift between two frames,
+    // so the trigger fires here as well as in the held-fire pump
+    if (canShootNow()) shoot();
   }
   if (e.button === 2) mouse.right = true;
 });
@@ -271,7 +282,10 @@ function togglePause(force?: boolean) {
   paused = next;
   hud.showPause(next);
   if (next && document.pointerLockElement) document.exitPointerLock?.();
-  if (!next) lockPointer();
+  if (!next) {
+    suppressFireUntil = performance.now() + 250;
+    lockPointer();
+  }
 }
 
 // ---------------------------------------------------------------- day cycle
@@ -895,6 +909,7 @@ hud.el.startBtn!.addEventListener('click', async () => {
   hud.setLoading('');
   started = true;
   paused = false;
+  suppressFireUntil = performance.now() + 200;
   hud.showStart(false);
   hud.showPause(false);
   lockPointer();
@@ -906,6 +921,7 @@ function resumeGame() {
   paused = false;
   hud.showPause(false);
   suppressLockPauseUntil = performance.now() + 600;
+  suppressFireUntil = performance.now() + 250;
   lockPointer();
 }
 
@@ -931,7 +947,7 @@ function updateCombat(dt: number) {
       audio.play('click', { vol: 0.45, rate: 1.2 });
     }
   }
-  if (mouse.left && !player.inCar && pointerLocked) shoot();
+  if (mouse.left && canShootNow()) shoot();
 }
 
 // ---------------------------------------------------------------- pickups
