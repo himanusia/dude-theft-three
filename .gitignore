@@ -7,3 +7,11 @@ dist/
 reference/
 # throwaway comparison renders
 screenshots/cmp-*.png
+.worktrees/
+screenshots/qa-*.png
+screenshots/feel-*.png
+screenshots/tex-*.png
+screenshots/resp-*.png
+screenshots/weapon-*.png
+screenshots/npc-*.png
+screenshots/chase-path.png
