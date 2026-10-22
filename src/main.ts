@@ -92,6 +92,7 @@ interface PlayerState {
   magSize: number;
   reloading: number;
   shootCd: number;
+  aimHold: number;
   weapon: WeaponId;
   ammo: Record<string, { mag: number; reserve: number }>;
   grounded: boolean;
@@ -115,6 +116,7 @@ const player: PlayerState = {
   magSize: 12,
   reloading: 0,
   shootCd: 0,
+  aimHold: 0,
   weapon: 'pistol',
   ammo: {},
   grounded: true,
@@ -262,6 +264,12 @@ function pedContext() {
 
 
 function lockPointer() {
+  // while any menu owns the screen the cursor must stay free, otherwise the close/resume
+  // button receives no click and only the pointer disappears
+  if (paused || hud.mapOpen || hud.isHelpOpen?.()) {
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    return;
+  }
   suppressLockPauseUntil = performance.now() + 600;
   try {
     const p = canvasEl.requestPointerLock?.();
@@ -421,9 +429,12 @@ function togglePause(force?: boolean) {
   hud.showPause(next);
   if (next) saveGame();
   if (next && document.pointerLockElement) document.exitPointerLock?.();
+  if (next) hud.toggleHelp(false);
   if (!next) {
     suppressFireUntil = performance.now() + 250;
-    lockPointer();
+    // losing lock no longer pauses, so Resume only has to re-acquire the pointer; ask after
+    // the browser's post-Esc cooldown so the first click is the only click needed
+    setTimeout(() => { if (!paused) lockPointer(); }, 340);
   }
 }
 
@@ -496,7 +507,11 @@ function updateCamera(dt: number) {
   // position, shorten the boom quickly, then ease back out — never snap
   const camColliders = player.inInterior ? player.inInterior.colliders : city.colliders;
   const boomHit = rayVsColliders(camTarget, dir, camDist + 0.6, camColliders);
-  const allowed = boomHit ? Math.max(1.1, boomHit.dist - 0.45) : camDist;
+  // The boom may never be shorter than the body it orbits: after a crash into a wall the
+  // shortest legal distance put the camera inside the car, which filled the screen with the
+  // car's paint. Better to clip the wall than to sit inside the vehicle.
+  const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 1.1;
+  const allowed = boomHit ? Math.max(minBoom, boomHit.dist - 0.45) : camDist;
   camDistActual = lerp(camDistActual, allowed, clamp(dt * (allowed < camDistActual ? 20 : 4.5), 0, 1));
 
   camGoal.copy(camTarget).addScaledVector(dir, camDistActual).add(camShoulder);
@@ -650,7 +665,8 @@ function updateOnFoot(dt: number) {
   character.group.visible = !mouse.right;
   character.group.position.set(player.pos.x, player.y, player.pos.z);
   character.group.rotation.y = player.yaw;
-  character.animate(dt, clamp(speed / RUN, 0, 1), { aiming, airborne: !player.grounded, tilt: -player.vel.dot(new THREE.Vector3(right.x, 0, right.z)) * 0.01 });
+  const weaponUp = aiming || player.aimHold > 0;
+  character.animate(dt, clamp(speed / RUN, 0, 1), { aiming: weaponUp, airborne: !player.grounded, tilt: -player.vel.dot(new THREE.Vector3(right.x, 0, right.z)) * 0.01 });
   plantFeet(character, player.y);
 
   // footsteps
@@ -1043,6 +1059,7 @@ function shoot() {
   }
   player.mag--;
   ammoFor(player.weapon).mag = player.mag;
+  player.aimHold = 1.4; // keep the weapon up between shots
   player.shootCd = 60 / spec.rpm;
   audio.play(spec.sound, { vol: spec.soundVol, rate: spec.soundRate * rand(0.96, 1.04), pan: rand(-0.2, 0.2) });
   camPitch = clamp(camPitch - spec.recoil, -0.55, 1.05);
@@ -1607,6 +1624,7 @@ window.addEventListener('resize', () => {
 // shooting trigger (held fire, semi-auto cadence)
 function updateCombat(dt: number) {
   player.shootCd = Math.max(0, player.shootCd - dt);
+  player.aimHold = Math.max(0, player.aimHold - dt);
   if (player.reloading > 0) {
     player.reloading -= dt;
     if (player.reloading <= 0) {
@@ -1701,6 +1719,7 @@ function update(dt: number) {
     onFoot: !player.inCar,
     onArrest: busted,
     onCopShoot: copShoot,
+    camYaw,
   });
   updateObjectives();
 
