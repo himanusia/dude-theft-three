@@ -154,6 +154,9 @@ for (let i = 0; i < 12; i++) {
   const spot = city.randomParkingSpot();
   const type = pick(['sedan', 'sedan', 'muscle', 'van', 'taxi', 'angkot']);
   const c = new Car(scene, { type, position: spot.pos, yaw: spot.yaw, simple: true });
+  // the spot may sit on a kerb plate, so take the height from the city, not from zero
+  c.y = city.groundHeightAt(spot.pos.x, spot.pos.z);
+  c.pos.y = c.y;
   c.addDriver(...driverLook());
   cityCars.push(c);
 }

@@ -1813,31 +1813,39 @@ export class City {
   }
 
   randomParkingSpot() {
-    // A spot has to be clear of kerbs, stalls and landmarks: a car spawned wedged against a
-    // collider cannot move, which showed up as "vehicle accelerates :: 0 km/h".
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const axis = Math.random() < 0.5 ? 'x' : 'z';
-      const line = pick(this.roadLines.filter((l) => l.axis === axis));
-      const along = rand(-GRID * PITCH + 12, GRID * PITCH - 12);
+    // Park along the roads that exist (the arterials and the ring), not the retired grid.
+    // A spot has to sit on asphalt and stay clear of kerbs, stalls and landmarks: a car
+    // spawned wedged against a collider cannot move, which showed up as
+    // "vehicle accelerates :: 0 km/h" and as cars hanging 26 cm over a kerb plate.
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const road = pick([...ARTERIALS, { path: RING_ROAD, width: 20 } as any]);
+      const pts: [number, number][] = road.path;
+      const seg = randInt(0, pts.length - 2);
+      const [x1, z1] = pts[seg];
+      const [x2, z2] = pts[seg + 1];
+      const t = rand(0.12, 0.88);
+      const bx = x1 + (x2 - x1) * t;
+      const bz = z1 + (z2 - z1) * t;
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const len = Math.hypot(dx, dz) || 1;
+      const nx = -dz / len;
+      const nz = dx / len;
       const side = Math.random() < 0.5 ? -1 : 1;
-      const off = 4.2;
-      const pos =
-        axis === 'x'
-          ? new THREE.Vector3(line.coord + side * off, 0, along)
-          : new THREE.Vector3(along, 0, line.coord + side * off);
-      const yaw = axis === 'x' ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : side > 0 ? Math.PI : 0;
+      const off = road.width / 2 - 2.6;
+      const pos = new THREE.Vector3(bx + nx * off * side, 0, bz + nz * off * side);
+      if (this.distToPath(pos.x, pos.z, pts) > road.width / 2 - 1.6) continue;
+      if (this.groundHeightAt(pos.x, pos.z) > 0) continue;      // must be on the road
+      const yaw = Math.atan2(dx, dz) + (side > 0 ? 0 : Math.PI);
       const clear = this.colliders.every((b) => {
         const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
         const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
-        return Math.hypot(pos.x - cx, pos.z - cz) > 3.2;
+        return Math.hypot(pos.x - cx, pos.z - cz) > 3.0;
       });
       if (clear) return { pos, yaw };
     }
-    // no clear spot found: fall back to the middle of a lane, which is always drivable
-    const line = pick(this.roadLines);
-    const along = rand(-GRID * PITCH + 12, GRID * PITCH - 12);
-    const pos = line.axis === 'x' ? new THREE.Vector3(line.coord, 0, along) : new THREE.Vector3(along, 0, line.coord);
-    return { pos, yaw: line.axis === 'x' ? -Math.PI / 2 : 0 };
+    // last resort: middle of the spine, which is always drivable
+    return { pos: new THREE.Vector3(0, 0, rand(-70, 90)), yaw: Math.PI };
   }
 
   randomSidewalkPointAround(centre: any, minR = 14, maxR = 48) {

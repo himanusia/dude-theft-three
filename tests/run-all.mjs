@@ -47,11 +47,22 @@ for (const group of groups) {
     const count = last ? last.total : 1;
     total += count;
     if (code !== 0 || (last && last.pass < last.total)) failed++;
-    rows.push({ group, name, pass, count, ok: code === 0 && (!last || last.pass === last.total) });
+    const ok = code === 0 && (!last || last.pass === last.total);
+    // when a suite fails, show which assertion failed instead of just the count
+    const failedChecks = out
+      .split('\n')
+      .filter((l) => l.startsWith('FAIL ') && !l.startsWith('FAILED '))
+      .map((l) => l.replace(/^FAIL /, '').slice(0, 120));
+    rows.push({ group, name, pass, count, ok, failedChecks });
     console.log(`${pass}/${count}${code === 0 ? '' : ' (exit ' + code + ')'}`);
   }
 }
 
 console.log('\n' + rows.map((r) => `${r.ok ? 'PASS' : 'FAIL'} ${r.group}/${r.name} ${r.pass}/${r.count}`).join('\n'));
+for (const r of rows) {
+  if (r.ok || !r.failedChecks.length) continue;
+  console.log(`\n  ${r.group}/${r.name}:`);
+  for (const c of r.failedChecks) console.log(`    - ${c}`);
+}
 console.log(`\n${rows.filter((r) => r.ok).length}/${rows.length} suites green, ${total} checks`);
 process.exit(failed ? 1 : 0);
