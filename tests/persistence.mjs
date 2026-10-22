@@ -118,6 +118,7 @@ try {
     g._test.addCash(1234);
     g._test.setTime(0.71);
     g.police.addWanted(2);
+    g.equipWeapon('uzi'); // a non-default weapon proves the slot survives too
     g._test.shoot(); // spend ammo so "restored" is a number below the magazine
     g.objectives.drove = true; // objective progress must survive the round trip
   });
@@ -131,6 +132,9 @@ try {
       yaw: +g.player.yaw.toFixed(3),
       cash: g.player.cash,
       mag: g.player.mag,
+      weapon: g.player.weapon,
+      reserve: g.player.ammo[g.player.weapon]?.reserve ?? null,
+      weapons: JSON.parse(JSON.stringify(g.player.ammo)),
       wanted: +g.police.wanted.toFixed(2),
       dayT: +g.state.dayT.toFixed(4),
       objectives: { ...g.objectives },
@@ -152,11 +156,26 @@ try {
       typeof parsed.dayT === 'number' &&
       typeof parsed.wanted === 'number' &&
       typeof parsed.ammo === 'number' &&
+      typeof parsed.weapon === 'string' &&
+      typeof parsed.weapons === 'object' &&
       Array.isArray(parsed.ownedWeapons) &&
       typeof parsed.objectives === 'object',
-    parsed && { version: parsed.version, cash: parsed.cash, dayT: parsed.dayT, wanted: parsed.wanted, ammo: parsed.ammo, weapon: parsed.weapon }
+    parsed && {
+      version: parsed.version,
+      cash: parsed.cash,
+      dayT: parsed.dayT,
+      wanted: parsed.wanted,
+      ammo: parsed.ammo,
+      weapon: parsed.weapon,
+      weapons: parsed.weapons,
+    }
   );
   check('objective progress is saved', !!parsed && parsed.objectives.drove === true, parsed && parsed.objectives);
+  check(
+    'equipped weapon and its ammo are saved',
+    !!parsed && parsed.weapon === before.weapon && parsed.ammo === before.mag && parsed.weapons?.[before.weapon]?.mag === before.mag,
+    parsed && { weapon: parsed.weapon, ammo: parsed.ammo, weapons: parsed.weapons }
+  );
   check('saved payload matches live state', !!parsed && parsed.cash === before.cash && Math.abs(parsed.dayT - before.dayT) < 0.01, {
     saved: parsed && { cash: parsed.cash, dayT: parsed.dayT },
     live: before,
@@ -182,6 +201,8 @@ try {
       yaw: +g.player.yaw.toFixed(3),
       cash: g.player.cash,
       mag: g.player.mag,
+      weapon: g.player.weapon,
+      reserve: g.player.ammo[g.player.weapon]?.reserve ?? null,
       wanted: +g.police.wanted.toFixed(2),
       dayT: +g.state.dayT.toFixed(4),
       paused: g.state.paused,
@@ -196,6 +217,11 @@ try {
   // the wanted meter keeps cooling down while the restore is in flight, so allow one decay tick
   check('wanted level restored', Math.abs(after.wanted - before.wanted) < 0.2, { before: before.wanted, after: after.wanted });
   check('ammo restored', after.mag === before.mag, { before: before.mag, after: after.mag });
+  check(
+    'equipped weapon and its reserve restored',
+    after.weapon === before.weapon && before.weapon === 'uzi' && after.reserve === before.reserve && after.mag === before.mag,
+    { before: { weapon: before.weapon, reserve: before.reserve, mag: before.mag }, after: { weapon: after.weapon, reserve: after.reserve, mag: after.mag } }
+  );
   check('objective progress restored', after.objectives.drove === true && after.objectives.chaos === before.objectives.chaos, {
     before: before.objectives,
     after: after.objectives,
@@ -389,6 +415,7 @@ try {
         cops: window.__game.police.cars.length,
         cash: window.__game.player.cash,
         hp: Math.round(window.__game.player.hp),
+        weapon: window.__game.player.weapon,
         wanted: +window.__game.police.wanted.toFixed(2),
         dayT: +window.__game.state.dayT.toFixed(3),
         ragdolls: window.__game.state.ragdolls,
@@ -402,7 +429,16 @@ try {
   check('scene does not grow after 3 restarts', noGrowth, { before: sceneBefore, restarts });
   check(
     'restart resets player, economy, wanted, time and crowd',
-    restarts.every((r) => r.cash === 250 && r.hp === 100 && r.wanted === 0 && Math.abs(r.dayT - 0.34) < 0.03 && r.ragdolls === 0 && r.peds === sceneBefore.peds),
+    restarts.every(
+      (r) =>
+        r.cash === 250 &&
+        r.hp === 100 &&
+        r.wanted === 0 &&
+        r.weapon === 'pistol' &&
+        Math.abs(r.dayT - 0.34) < 0.03 &&
+        r.ragdolls === 0 &&
+        r.peds === sceneBefore.peds
+    ),
     restarts
   );
   check('restart leaves the run playable and saved', restarts.every((r) => r.paused === false && r.key === true), restarts);

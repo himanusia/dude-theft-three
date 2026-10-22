@@ -1209,6 +1209,13 @@ function formatAgo(ts: number) {
   return `${Math.round(secs / 3600)} h ago`;
 }
 
+/** Plain copy of the per-weapon ammo map (the live record is mutated by fire/reload). */
+function weaponAmmoSnapshot(): Record<string, { mag: number; reserve: number }> {
+  const out: Record<string, { mag: number; reserve: number }> = {};
+  for (const [id, st] of Object.entries(player.ammo)) out[id] = { mag: st.mag, reserve: st.reserve };
+  return out;
+}
+
 /** Snapshot everything that survives a refresh. No scene objects, no timers. */
 function captureSave(): Omit<SaveData, 'version' | 'savedAt'> {
   // inside a shop the logical position is the room's, not the street's: save the
@@ -1228,12 +1235,13 @@ function captureSave(): Omit<SaveData, 'version' | 'savedAt'> {
     hp: player.hp,
     wanted: police.wanted,
     dayT,
-    // this build has one gun: the pistol is the whole roster, saved by name so a
-    // later weapon system can extend the field without a schema bump
-    weapon: 'pistol',
+    // the whole roster is switchable, so every magazine travels with the save
+    weapon: player.weapon,
     ammo: player.mag,
+    reserve: ammoFor(player.weapon).reserve,
     magSize: player.magSize,
-    ownedWeapons: ['pistol'],
+    weapons: weaponAmmoSnapshot(),
+    ownedWeapons: Object.keys(player.ammo),
     objectives: {
       drove: flags.drove,
       chaos: flags.chaos,
@@ -1262,8 +1270,16 @@ function applySave(data: SaveData) {
   player.inInterior = null;
   player.hp = clamp(data.hp, 1, 100);
   player.cash = data.cash;
-  player.mag = clamp(data.ammo, 0, data.magSize);
-  player.magSize = data.magSize;
+  // rebuild the ammo table first, then equip so the magazine, reserve and HUD all
+  // come from the same record the save carried
+  player.ammo = {};
+  for (const [id, st] of Object.entries(data.weapons)) {
+    if (WEAPONS[id as WeaponId]) player.ammo[id] = { mag: st.mag, reserve: st.reserve };
+  }
+  for (const id of data.ownedWeapons) if (WEAPONS[id as WeaponId]) ammoFor(id as WeaponId);
+  equipWeapon((WEAPONS[data.weapon as WeaponId] ? data.weapon : 'pistol') as WeaponId);
+  player.mag = clamp(data.ammo, 0, player.magSize);
+  ammoFor(player.weapon).mag = player.mag;
   player.reloading = 0;
   player.lastHit = performance.now() - 60000; // a restored wound should still regen
   camYaw = data.player.camYaw;
@@ -1359,6 +1375,7 @@ function newGame() {
   player.yaw = 0;
   player.hp = 100;
   player.cash = 250;
+  player.ammo = {};
   player.mag = 12;
   player.magSize = 12;
   player.reloading = 0;
@@ -1435,10 +1452,10 @@ function newGame() {
   }
   audio.engineUpdate({ on: false });
 
+  equipWeapon('pistol'); // fresh mag + reserve, and drops any model the last run held
   hud.setCash(player.cash);
   hud.setHealth(player.hp);
   hud.setStars(0);
-  hud.setAmmo(player.mag, player.magSize, false);
   hud.setObjective(objectiveText());
   hud.setPrompt('');
   hud.showPause(false);

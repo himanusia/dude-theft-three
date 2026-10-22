@@ -32,10 +32,15 @@ export interface SaveData {
   hp: number;
   wanted: number;
   dayT: number;
-  /** no weapon roster in this build: the pistol is the only gun, kept for forward compatibility */
+  /** equipped weapon id from the `WEAPONS` table, e.g. `uzi` */
   weapon: string;
+  /** magazine of the equipped weapon */
   ammo: number;
+  /** reserve rounds behind that magazine */
+  reserve: number;
   magSize: number;
+  /** per-weapon ammo so switching guns after a reload keeps every magazine honest */
+  weapons: Record<string, { mag: number; reserve: number }>;
   ownedWeapons: string[];
   objectives: Objectives;
 }
@@ -98,6 +103,20 @@ function dropRaw(key: string) {
 }
 
 const isNum = (v: any): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** Per-weapon ammo is a plain map; unknown ids are ignored, numbers are bounded. */
+function normalizeWeaponAmmo(src: any): Record<string, { mag: number; reserve: number }> {
+  const out: Record<string, { mag: number; reserve: number }> = {};
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return out;
+  for (const [id, st] of Object.entries(src as Record<string, any>)) {
+    if (!st || typeof st !== 'object') continue;
+    out[id] = {
+      mag: Math.round(clampNum(st.mag, 0, 999, 0)),
+      reserve: Math.round(clampNum(st.reserve, 0, 9999, 0)),
+    };
+  }
+  return out;
+}
 const clampNum = (v: any, lo: number, hi: number, fallback: number) =>
   isNum(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
 
@@ -134,8 +153,12 @@ function normalizeSave(v: any): SaveData {
     dayT: clampNum(v.dayT, 0, 1, 0.34) % 1,
     weapon: typeof v.weapon === 'string' ? v.weapon : 'pistol',
     ammo: Math.round(clampNum(v.ammo, 0, 999, 12)),
+    reserve: Math.round(clampNum(v.reserve, 0, 9999, 24)),
     magSize: Math.round(clampNum(v.magSize, 1, 999, 12)),
-    ownedWeapons: Array.isArray(v.ownedWeapons) ? v.ownedWeapons.filter((w: any) => typeof w === 'string') : ['pistol'],
+    weapons: normalizeWeaponAmmo(v.weapons),
+    ownedWeapons: Array.isArray(v.ownedWeapons)
+      ? v.ownedWeapons.filter((w: any) => typeof w === 'string')
+      : Object.keys(normalizeWeaponAmmo(v.weapons)),
     objectives: {
       drove: !!src.drove,
       chaos: !!src.chaos,
