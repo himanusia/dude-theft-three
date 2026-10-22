@@ -11,8 +11,42 @@ export const WORLD_HALF = GRID * PITCH + BLOCK * 0.5;
 const WALLS = ['#e9e7ef', '#dfe6ee', '#f2e7d8', '#d9e4e6', '#efe3ea', '#e6ecdf'];
 const NIGHT = 0x0a0d18;
 
-function windowTexture(wall) {
+function windowTexture(wall, style = 'grid') {
   const map = canvasTexture(128, 128, (ctx, w, h) => {
+    if (style === 'bands') {
+      // horizontal ribbon windows, common on the reference city blocks
+      ctx.fillStyle = wall;
+      ctx.fillRect(0, 0, w, h);
+      for (let y = 0; y < h; y += 32) {
+        const g = ctx.createLinearGradient(0, y + 6, 0, y + 26);
+        g.addColorStop(0, '#8fb6d8');
+        g.addColorStop(0.5, '#5c86a8');
+        g.addColorStop(1, '#3f5f7d');
+        ctx.fillStyle = g;
+        ctx.fillRect(4, y + 6, w - 8, 20);
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        for (let x = 6; x < w - 6; x += 16) ctx.fillRect(x, y + 6, 3, 20);
+        ctx.fillStyle = 'rgba(0,0,0,0.16)';
+        ctx.fillRect(0, y + 27, w, 5);
+      }
+      return;
+    }
+    if (style === 'strips') {
+      // vertical glass strips with concrete piers
+      ctx.fillStyle = wall;
+      ctx.fillRect(0, 0, w, h);
+      for (let x = 8; x < w - 8; x += 24) {
+        const g = ctx.createLinearGradient(x, 0, x + 14, h);
+        g.addColorStop(0, '#9dc4e0');
+        g.addColorStop(0.5, '#5f8aa8');
+        g.addColorStop(1, '#43637f');
+        ctx.fillStyle = g;
+        ctx.fillRect(x, 4, 14, h - 8);
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        for (let y = 6; y < h; y += 18) ctx.fillRect(x, y, 14, 3);
+      }
+      return;
+    }
     ctx.fillStyle = wall;
     ctx.fillRect(0, 0, w, h);
     // subtle vertical grime
@@ -167,14 +201,59 @@ export class City {
 
   buildGround() {
     // asphalt base
-    const asphalt = new THREE.MeshStandardMaterial({ color: 0x8d86a8, roughness: 0.95 });
+    const asphaltTex = canvasTexture(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#8a84a2';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 2600; i++) {
+        const v = rand(0.75, 1.15);
+        ctx.fillStyle = `rgba(${Math.round(120 * v)},${Math.round(114 * v)},${Math.round(140 * v)},0.5)`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 3), rand(1, 3));
+      }
+      for (let i = 0; i < 6; i++) {
+        ctx.fillStyle = 'rgba(90,86,110,0.32)';
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(12, 42), rand(8, 26), rand(0, 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.strokeStyle = 'rgba(70,66,88,0.45)';
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < 8; i++) {
+        ctx.beginPath();
+        let x = rand(0, w);
+        let y = rand(0, h);
+        ctx.moveTo(x, y);
+        for (let k = 0; k < 4; k++) {
+          x += rand(-26, 26);
+          y += rand(-26, 26);
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    });
+    asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
+    asphaltTex.repeat.set(70, 70);
+    const asphalt = new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.96 });
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), asphalt);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.group.add(ground);
 
     // sidewalk plates + block contents
-    const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xc8c8d0, roughness: 0.9 });
+    const pavingTex = canvasTexture(128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#cbcbd4';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(150,150,164,0.7)';
+      ctx.lineWidth = 2;
+      for (let x = 0; x <= w; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+      for (let y = 0; y <= h; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+      for (let i = 0; i < 320; i++) {
+        ctx.fillStyle = `rgba(120,120,134,${rand(0.03, 0.08)})`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 4), rand(1, 4));
+      }
+    });
+    pavingTex.wrapS = pavingTex.wrapT = THREE.RepeatWrapping;
+    pavingTex.repeat.set(BLOCK / 4, BLOCK / 4);
+    const sidewalkMat = new THREE.MeshStandardMaterial({ map: pavingTex, roughness: 0.9 });
     const curbMat = new THREE.MeshStandardMaterial({ color: 0xb4b4be, roughness: 0.9 });
     const parkMat = new THREE.MeshStandardMaterial({ color: 0x37c24a, roughness: 1 });
     const lotMat = new THREE.MeshStandardMaterial({ color: 0x9a94b0, roughness: 0.95 });
@@ -418,7 +497,8 @@ export class City {
 
   makeBuilding(x, z, w, d, h) {
     const wall = pick(WALLS);
-    const tex = windowTexture(wall);
+    const style = pick(['grid', 'bands', 'strips']);
+    const tex = windowTexture(wall, style);
     const emis = emissiveTexture();
     const rx = Math.max(1, Math.round(w / 6.5));
     const ry = Math.max(1, Math.round(h / 6.5));
@@ -444,6 +524,48 @@ export class City {
     b.castShadow = true;
     b.receiveShadow = true;
     this.group.add(b);
+
+    // parapet so the roofline is not a razor edge
+    const parapet = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.34, 0.42, d + 0.34),
+      new THREE.MeshStandardMaterial({ color: 0xd2d0d8, roughness: 0.9 })
+    );
+    parapet.position.set(x, h + 0.12, z);
+    parapet.castShadow = true;
+    this.group.add(parapet);
+
+    // occasional billboard with real text, like the reference storefronts
+    if (Math.random() < 0.6 && h < 34) {
+      const words = ['BURGER', '24/7', 'MOTEL', 'PAWN', 'GYM', 'PIZZA', 'TACOS', 'AUTO'];
+      const word = pick(words);
+      const bg = pick(['#e94f4f', '#2f6fd0', '#f2b134', '#39b54a', '#8a3ad9']);
+      const boardTex = canvasTexture(256, 96, (ctx, cw, ch) => {
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        ctx.fillRect(0, ch - 12, cw, 12);
+        ctx.fillStyle = '#fff8e7';
+        ctx.font = 'bold 52px ui-sans-serif, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(word, cw / 2, ch / 2);
+      });
+      const board = new THREE.Mesh(
+        new THREE.BoxGeometry(Math.min(w * 0.8, 7), 2.3, 0.22),
+        new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.6, emissive: 0xffffff, emissiveMap: boardTex, emissiveIntensity: 0.08 })
+      );
+      const faces = [
+        [0, d / 2 + 0.3, 0],
+        [0, -d / 2 - 0.3, Math.PI],
+        [w / 2 + 0.3, 0, Math.PI / 2],
+        [-w / 2 - 0.3, 0, -Math.PI / 2],
+      ];
+      const face = faces[Math.floor(rand(0, 4))];
+      board.position.set(x + face[0], Math.min(h - 1.5, 8.5), z + face[1]);
+      board.rotation.y = face[2];
+      board.castShadow = true;
+      this.group.add(board);
+    }
 
     // roof furniture
     if (Math.random() < 0.7) {
@@ -478,11 +600,26 @@ export class City {
     band.receiveShadow = true;
     this.group.add(band);
 
+    const shopWords = ['BURGER', '24/7', 'PIZZA', 'MARKET', 'GYM', 'PAWN', 'TATTOO', 'NOODLES', 'AUTO', 'LIQUOR', 'DONUTS', 'BARBER'];
+    const word = pick(shopWords);
+    const signColor = pick(['#ffd257', '#ff6b6b', '#64d2ff', '#a8ff8f', '#ff9f43', '#f2f2f6']);
+    const signTex = canvasTexture(256, 64, (ctx, cw, ch) => {
+      ctx.fillStyle = signColor;
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(0, ch - 7, cw, 7);
+      ctx.fillStyle = '#241f1a';
+      ctx.font = 'bold 34px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(word, cw / 2, ch / 2 - 1);
+    });
     const signMat = new THREE.MeshStandardMaterial({
-      color: pick([0xffd257, 0xff6b6b, 0x64d2ff, 0xa8ff8f]),
+      map: signTex,
       emissive: 0xffffff,
-      emissiveIntensity: 0.3,
-      roughness: 0.5,
+      emissiveMap: signTex,
+      emissiveIntensity: 0.12,
+      roughness: 0.55,
     });
     for (const side of [1, -1]) {
       const signZ = new THREE.Mesh(new THREE.BoxGeometry(w * rand(0.3, 0.5), 0.72, 0.14), signMat);
@@ -629,6 +766,65 @@ export class City {
         h: 1.4,
       });
     }
+    // street furniture (instanced: one draw call per prop type)
+    const binMat = new THREE.MeshStandardMaterial({ color: 0x3f7a4a, roughness: 0.9 });
+    const hydrantMat = new THREE.MeshStandardMaterial({ color: 0xd93b3b, roughness: 0.7 });
+    const benchMat = new THREE.MeshStandardMaterial({ color: 0x9a6b3a, roughness: 0.95 });
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x2c2f36, roughness: 0.8 });
+    const binGeo = new THREE.CylinderGeometry(0.3, 0.26, 0.85, 8);
+    const hydrantGeo = new THREE.CylinderGeometry(0.16, 0.19, 0.62, 8);
+    const benchGeo = new THREE.BoxGeometry(1.9, 0.14, 0.55);
+    const lightGeo = new THREE.BoxGeometry(0.28, 0.34, 0.28);
+
+    const binM = [], hydM = [], benchM = [], lightM = [], lightLampM = [];
+    for (let i = 0; i < 34; i++) {
+      const pt = this.randomSidewalkPoint();
+      const which = Math.random();
+      const m = new THREE.Matrix4();
+      if (which < 0.4) {
+        m.makeTranslation(pt.x, 0.69, pt.z);
+        binM.push(m);
+      } else if (which < 0.75) {
+        m.makeTranslation(pt.x, 0.57, pt.z);
+        hydM.push(m);
+      } else {
+        const rot = new THREE.Matrix4().makeRotationY(Math.random() < 0.5 ? 0 : Math.PI / 2);
+        rot.setPosition(pt.x, 0.72, pt.z);
+        benchM.push(rot);
+      }
+    }
+    // traffic lights on the corner of each block
+    for (let i = -GRID; i <= GRID; i++) {
+      for (let j = -GRID; j <= GRID; j++) {
+        const cx = i * PITCH + BLOCK / 2 + 1.4;
+        const cz = j * PITCH + BLOCK / 2 + 1.4;
+        const p1 = new THREE.Matrix4().makeTranslation(cx, 2.6, cz);
+        lightM.push(p1);
+        lightLampM.push(new THREE.Matrix4().makeTranslation(cx, 3.05, cz));
+      }
+    }
+    const addInstanced = (geo, material, matrices, cast = true) => {
+      if (!matrices.length) return null;
+      const mesh = new THREE.InstancedMesh(geo, material, matrices.length);
+      matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = cast;
+      mesh.frustumCulled = false;
+      this.group.add(mesh);
+      return mesh;
+    };
+    addInstanced(binGeo, binMat, binM);
+    addInstanced(hydrantGeo, hydrantMat, hydM);
+    addInstanced(benchGeo, benchMat, benchM);
+    addInstanced(lightGeo, poleMat, lightM);
+    addInstanced(new THREE.BoxGeometry(0.24, 0.86, 0.24), new THREE.MeshStandardMaterial({ color: 0x25282e, roughness: 0.8 }), lightM.map((m) => {
+      const t = m.clone();
+      const p = new THREE.Vector3().setFromMatrixPosition(m);
+      t.makeTranslation(p.x, 1.6, p.z);
+      return t;
+    }));
+    addInstanced(new THREE.BoxGeometry(0.26, 0.16, 0.26), new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0xffb020, emissiveIntensity: 0.5 }), lightLampM, false);
+
     // stunt ramps on straight road segments
     this.addRamp(-PITCH * 1.5, 6, 0);
     this.addRamp(PITCH * 1.5, -PITCH * 2, Math.PI);

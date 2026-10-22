@@ -100,7 +100,7 @@ export class HUD {
     this.el.damage.classList.add('flash');
   }
 
-  toast(text, kind = 'info', ms = 2600) {
+  toast(text, kind = 'info', ms = 2200) {
     const d = document.createElement('div');
     d.className = 'toast ' + kind;
     d.textContent = text;
@@ -109,7 +109,7 @@ export class HUD {
       d.classList.add('out');
       setTimeout(() => d.remove(), 400);
     }, ms);
-    while (this.el.toasts.children.length > 4) this.el.toasts.firstChild.remove();
+    while (this.el.toasts.children.length > 3) this.el.toasts.firstChild.remove();
   }
 
   setFps(v) {
@@ -135,6 +135,10 @@ export class HUD {
     const toMap = (x, z) => [((x / half) * 0.5 + 0.5) * S, ((z / half) * 0.5 + 0.5) * S];
 
     ctx.clearRect(0, 0, S, S);
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(0, 0, S, S, 12) : ctx.rect(0, 0, S, S);
+    ctx.clip();
     ctx.fillStyle = '#15181d';
     ctx.fillRect(0, 0, S, S);
 
@@ -209,9 +213,30 @@ export class HUD {
     ctx.fill();
     ctx.restore();
 
+    // player field-of-view wedge
+    ctx.save();
+    ctx.translate(px, pz);
+    ctx.rotate(-yaw + Math.PI);
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, 46, -Math.PI * 0.72, -Math.PI * 0.28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // north marker
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('N', S / 2, 14);
+    ctx.restore();
+
     // frame
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
     ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, S - 2, S - 2);
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(1, 1, S - 2, S - 2, 11) : ctx.rect(1, 1, S - 2, S - 2);
+    ctx.stroke();
   }
 }
