@@ -55,12 +55,12 @@ function buildStreets(): Street[] {
     for (let x = firstX; x <= maxX; x += BLOCK_PITCH) {
       const line: Pt[] = [];
       for (let z = minZ; z <= maxZ; z += step) line.push([x, z]);
-      for (const run of clipToPolygon(line, d.poly)) streets.push({ path: run, width: 12 });
+      for (const run of clipToPolygon(line, d.poly)) streets.push({ path: run, width: 8 });
     }
     for (let z = firstZ; z <= maxZ; z += BLOCK_PITCH) {
       const line: Pt[] = [];
       for (let x = minX; x <= maxX; x += step) line.push([x, z]);
-      for (const run of clipToPolygon(line, d.poly)) streets.push({ path: run, width: 12 });
+      for (const run of clipToPolygon(line, d.poly)) streets.push({ path: run, width: 8 });
     }
   }
   return streets;

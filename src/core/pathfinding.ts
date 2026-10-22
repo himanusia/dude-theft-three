@@ -33,7 +33,7 @@ const CLEARANCE = 3;
 /** Tighter clearance for the last few metres: the target may stand next to a wall. */
 const CLOSE_PAD = 1.5;
 /** Half width of a cruiser: a road sample this close to a footprint is not drivable. */
-const CAR_PAD = 2;
+const CAR_PAD = 1;
 
 /** Axis-aligned footprint of a solid object (same shape city.colliders uses). */
 export interface Box {

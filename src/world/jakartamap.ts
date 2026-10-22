@@ -69,13 +69,13 @@ export const RING_ROAD: Pt[] = S([
  * thing, in metres - Thamrin-Sudirman is a 22 m cross-section, a neighbourhood radial is 12.
  */
 export const ARTERIALS: { name: string; width: number; path: Pt[] }[] = [
-  { name: 'Thamrin–Sudirman', width: 22, path: S([[0, -96], [-4, -40], [0, 18], [2, 74], [0, 130]]) },
-  { name: 'Gatot Subroto', width: 18, path: S([[-104, -30], [-48, -18], [8, -12], [66, -4], [126, -14]]) },
-  { name: 'Casablanca', width: 15, path: S([[6, 30], [50, 22], [92, 4], [128, -22]]) },
-  { name: 'Grogol–Pluit', width: 15, path: S([[-146, -18], [-104, -30], [-72, -74], [-60, -120]]) },
-  { name: 'Fatmawati–Blok M', width: 15, path: S([[4, 96], [16, 130], [46, 156], [92, 168]]) },
-  { name: 'Kota Tua–Ancol', width: 14, path: S([[-104, -120], [-56, -128], [4, -126], [62, -134], [116, -126]]) },
-  { name: 'Kemang–Pasar Minggu', width: 12, path: S([[26, 106], [44, 130], [58, 164]]) },
+  { name: 'Thamrin–Sudirman', width: 20, path: S([[0, -96], [-4, -40], [0, 18], [2, 74], [0, 130]]) },
+  { name: 'Gatot Subroto', width: 16, path: S([[-104, -30], [-48, -18], [8, -12], [66, -4], [126, -14]]) },
+  { name: 'Casablanca', width: 13, path: S([[6, 30], [50, 22], [92, 4], [128, -22]]) },
+  { name: 'Grogol–Pluit', width: 13, path: S([[-146, -18], [-104, -30], [-72, -74], [-60, -120]]) },
+  { name: 'Fatmawati–Blok M', width: 13, path: S([[4, 96], [16, 130], [46, 156], [92, 168]]) },
+  { name: 'Kota Tua–Ancol', width: 12, path: S([[-104, -120], [-56, -128], [4, -126], [62, -134], [116, -126]]) },
+  { name: 'Kemang–Pasar Minggu', width: 10, path: S([[26, 106], [44, 130], [58, 164]]) },
 ];
 
 export type DistrictId =
@@ -169,6 +169,34 @@ function lm(x: number, z: number): { x: number; z: number } {
   const [sx, sz] = LM(x, z);
   return { x: sx, z: sz };
 }
+
+
+/** Street life the map has to show, not just monuments. */
+export type PoiKind = 'halte' | 'terminal' | 'pasar' | 'minimarket' | 'pos' | 'masjid' | 'kaki5';
+
+export interface Poi {
+  kind: PoiKind;
+  name: string;
+  x: number;
+  z: number;
+}
+
+export const POIS: Poi[] = [
+  { kind: 'terminal', name: 'Terminal Blok M', ...lm(74, 152) },
+  { kind: 'terminal', name: 'Terminal Tanah Abang', ...lm(-96, 26) },
+  { kind: 'halte', name: 'Halte Bundaran HI', ...lm(4, 12) },
+  { kind: 'halte', name: 'Halte Sarinah', ...lm(-1, -18) },
+  { kind: 'halte', name: 'Halte Harmoni', ...lm(-6, -58) },
+  { kind: 'halte', name: 'Halte Kota', ...lm(-88, -104) },
+  { kind: 'pasar', name: 'Pasar Tanah Abang', ...lm(-88, 8) },
+  { kind: 'pasar', name: 'Pasar Glodok', ...lm(-78, -88) },
+  { kind: 'minimarket', name: 'ALFAMURTI', ...lm(18, 42) },
+  { kind: 'minimarket', name: 'INDOMERET', ...lm(34, -14) },
+  { kind: 'masjid', name: 'Masjid Istiqlal', ...lm(-24, -74) },
+  { kind: 'pos', name: 'Pos Polisi Bundaran HI', ...lm(14, 4) },
+  { kind: 'kaki5', name: 'PKL Thamrin', ...lm(10, 30) },
+  { kind: 'kaki5', name: 'PKL Blok M', ...lm(60, 140) },
+];
 
 export function pointInPoly(x: number, z: number, poly: Pt[]): boolean {
   let inside = false;
