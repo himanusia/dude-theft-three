@@ -819,6 +819,11 @@ export class City {
    * streets between them are 20-60 m of asphalt and pavement - the width a real Jakarta
    * block has, not the 30 m road that made the old 380 m city look like a village.
    */
+  /** Half extent of the built world, so actors clamp to the city and not to a stale constant. */
+  get bound() {
+    return WORLD_HALF;
+  }
+
   planBlockSites() {
     // Fill each district, not the whole map on one lattice. A global grid leaves holes wherever
     // a site is rejected (and the player could stand 180 m from the nearest building); tiling

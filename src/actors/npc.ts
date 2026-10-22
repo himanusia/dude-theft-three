@@ -841,8 +841,11 @@ export class Ped {
       this.stuckT = 0;
     }
 
-    this.pos.x = clamp(this.pos.x, -220, 220);
-    this.pos.z = clamp(this.pos.z, -220, 220);
+    // the city is 2.5 km across now: clamping to the old 220 m box pinned pedestrians and
+    // traffic to an invisible square
+    const edge = this.city?.bound ?? 1260;
+    this.pos.x = clamp(this.pos.x, -edge, edge);
+    this.pos.z = clamp(this.pos.z, -edge, edge);
     this.pos.y = this.city.groundHeightAt(this.pos.x, this.pos.z);
 
     this.char.group.visible = pdist < HIDE_LOD;

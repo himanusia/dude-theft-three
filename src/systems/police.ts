@@ -305,7 +305,7 @@ export class Police {
       }
 
       if (car.wrecked) {
-        car.update(dt, { throttle: 0, steer: 0, brake: true }, this.city.colliders, 220);
+        car.update(dt, { throttle: 0, steer: 0, brake: true }, this.city.colliders, this.city.bound);
         continue;
       }
 
@@ -390,11 +390,11 @@ export class Police {
       }
       if (entry.reverse > 0) {
         entry.reverse -= dt;
-        car.update(dt, { throttle: -1, steer: -steer, brake: false }, this.city.colliders, 220);
+        car.update(dt, { throttle: -1, steer: -steer, brake: false }, this.city.colliders, this.city.bound);
         continue;
       }
 
-      const hit = car.update(dt, { throttle, steer, brake }, this.city.colliders, 220);
+      const hit = car.update(dt, { throttle, steer, brake }, this.city.colliders, this.city.bound);
       if (hit) {
         if (hit.impact > 8) {
           this.audio.play('crash', { vol: clamp(hit.impact / 40, 0.1, 0.7), pan: this.panFor(car.pos, playerPos) });
