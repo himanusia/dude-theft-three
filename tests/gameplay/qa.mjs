@@ -104,7 +104,9 @@ function check(name, ok, detail) {
     // plate exists, so ask the city for a block centre and a road point next to it
     const b = g.city.blocks.find((b) => b.type === 'city') ?? g.city.blocks[0];
     const hWalk = g.city.groundHeightAt(b.x, b.z);
-    const hRoad = g.city.groundHeightAt(b.x + 400, b.z + 400);
+    // sample the road just outside this block. A fixed +400 m offset landed on the southern
+    // hills, so "the road is lower than the pavement" compared two different places.
+    const hRoad = g.city.groundHeightAt(b.x + b.size / 2 + 12, b.z);
     g._test.teleport(b.x + 3, b.z + 3);
     return { hRoad, hWalk, at: [+b.x.toFixed(0), +b.z.toFixed(0)] };
   });
