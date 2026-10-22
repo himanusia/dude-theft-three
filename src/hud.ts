@@ -3,10 +3,33 @@ import { clamp, formatMoney } from './utils';
 export const WORLD_HALF_MAP = 3 * 52 + 19;
 const MAP_BLOCK = 38; // city block plate size in metres (matches BLOCK in city.ts)
 
+const HUD_BASE_MIN = 880;
+const HUD_SCALE_MIN = 0.8;
+const HUD_SCALE_MAX = 1.4;
+/** below this width the corner stacks move: minimap under the cash chip */
+const HUD_NARROW_WIDTH = 620;
+/** below this height (landscape phones) the long hint chip is dropped */
+const HUD_SHORT_HEIGHT = 520;
+
+export type HudLayoutMode = 'regular' | 'narrow' | 'short';
+
+export interface HudLayoutInfo {
+  mode: HudLayoutMode;
+  /** single scale factor for every panel, clamped 0.8 – 1.4 */
+  scale: number;
+  width: number;
+  height: number;
+  /** rendered minimap edge in CSS pixels */
+  minimap: number;
+}
+
 export class HUD {
   declare el: any;
   declare mapCtx: any;
   declare mapSize: any;
+  /** last result of layout(); also read by tests through window.__game.hud */
+  declare layoutInfo: HudLayoutInfo;
+  private layoutQueued = false;
   declare fullMapCtx: any;
   declare lastCash: number;
   declare hitTimer: number;
@@ -17,6 +40,8 @@ export class HUD {
   declare mapProjection: any;
   declare onSettings: ((s: any) => void) | null;
   constructor() {
+    this.layoutInfo = { mode: 'regular', scale: 1, width: 0, height: 0, minimap: 196 };
+    requestAnimationFrame(() => this.layout());
     this.el = {
       cash: document.getElementById('cash'),
       stars: document.getElementById('stars'),
@@ -106,6 +131,65 @@ export class HUD {
     this.el.health.style.background =
       pct > 55 ? 'linear-gradient(90deg,#4ade80,#22c55e)' : pct > 25 ? 'linear-gradient(90deg,#fbbf24,#f59e0b)' : 'linear-gradient(90deg,#f87171,#dc2626)';
     this.el.healthNum.textContent = Math.round(pct);
+  }
+
+  layout(): HudLayoutInfo {
+    const width = Math.max(1, window.innerWidth);
+    const height = Math.max(1, window.innerHeight);
+    const min = Math.min(width, height);
+    const scale = clamp(min / HUD_BASE_MIN, HUD_SCALE_MIN, HUD_SCALE_MAX);
+    const mode: HudLayoutMode = width < HUD_NARROW_WIDTH ? 'narrow' : height < HUD_SHORT_HEIGHT ? 'short' : 'regular';
+    const minimap = Math.round(
+      mode === 'narrow' ? clamp(min * 0.34, 96, 150) : mode === 'short' ? clamp(min * 0.26, 90, 140) : clamp(196 * scale, 150, 250),
+    );
+
+    // every token is published on <body> because the derived tokens live there
+    const root = document.body;
+    root.style.setProperty('--hud-scale', scale.toFixed(3));
+    root.style.setProperty('--hud-map', `${minimap}px`);
+    document.body.classList.toggle('hud-narrow', mode === 'narrow');
+    document.body.classList.toggle('hud-short', mode === 'short');
+    document.body.dataset.hudMode = mode;
+
+    const box = (sel: string) => {
+      const node = document.querySelector(sel) as HTMLElement | null;
+      if (!node) return null;
+      const cs = getComputedStyle(node);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+      const r = node.getBoundingClientRect();
+      return r.width > 1 && r.height > 1 ? r : null;
+    };
+
+    // a taller cash/wanted stack moves everything the narrow layout anchors under it
+    const topRight = box('#topright');
+    root.style.setProperty('--hud-tr-h', `${Math.ceil(topRight ? topRight.height : 0)}px`);
+    // short layouts put the hint chip directly under the objective column
+    const topLeft = box('#tl');
+    root.style.setProperty('--hud-tl-bottom', `${Math.ceil(topLeft ? topLeft.bottom : 0)}px`);
+    const hintChip = box('#hints');
+    root.style.setProperty('--hud-hints-h', `${Math.ceil(hintChip ? hintChip.height : 0)}px`);
+
+    // the toast stack starts under every top-anchored box (the reads above force
+    // a reflow, so these rects already reflect the variables just published)
+    const mapStackIsUp = mode === 'narrow' || document.body.classList.contains('touch-mode');
+    let lane = 0;
+    for (const sel of ['#tl', '#topright', '#help-btn', ...(mapStackIsUp ? ['#br'] : [])]) {
+      const r = box(sel);
+      if (r && r.top < height * 0.6) lane = Math.max(lane, r.bottom);
+    }
+    root.style.setProperty('--hud-toast-top', `${Math.ceil(lane + 10 * scale)}px`);
+
+    this.layoutInfo = { mode, scale: +scale.toFixed(3), width, height, minimap };
+    return this.layoutInfo;
+  }
+
+  scheduleLayout() {
+    if (this.layoutQueued) return;
+    this.layoutQueued = true;
+    requestAnimationFrame(() => {
+      this.layoutQueued = false;
+      this.layout();
+    });
   }
 
   setWeapon(name: string, slot: number, reserve: number) {

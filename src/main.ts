@@ -1596,9 +1596,11 @@ document.addEventListener('pointerdown', (e: Event) => {
 document.getElementById('resume-btn')?.addEventListener('click', resumeGame);
 
 window.addEventListener('resize', () => {
+  hud.scheduleLayout();
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  hud.layout();
 });
 
 // shooting trigger (held fire, semi-auto cadence)
