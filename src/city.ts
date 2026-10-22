@@ -3,6 +3,23 @@ import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from 
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
 import { Car } from './car';
 
+// ---------------------------------------------------------------- lighting palette
+// The reference stills are bright, close-to-neutral daylight with warm sun and a pale
+// sky. These values are the single source of truth for the light rig; they are tuned
+// against tests/palette.mjs (mean RGB inside ±12, brightness 126-136).
+export const LIGHT = {
+  hemiSky: 0xf3f7ff,
+  hemiGround: 0x6fae62,
+  hemiNight: 0x4a5f8a,
+  hemiGroundNight: 0x2a2b33,
+  fill: 0xfff3e4,
+  sun: 0xfff2dc,
+  skyDay: 0x2aa8f5,
+  skyDusk: 0xff8a4a,
+  skyNight: 0x0b1220,
+};
+
+
 export const PITCH = 52;
 export const BLOCK = 38;
 export const ROAD = PITCH - BLOCK;
@@ -258,17 +275,19 @@ export class City {
   }
 
   buildLights() {
-    const hemi = new THREE.HemisphereLight(0xbfe6ff, 0x59a05e, 1.15);
+    // Near-white sky bounce: the reference city reads neutral-bright, not blue. The old
+    // 0xbfe6ff sky tinted every shadow blue and pulled the whole frame ~+35 toward blue.
+    const hemi = new THREE.HemisphereLight(LIGHT.hemiSky, LIGHT.hemiGround, 1.74);
     this.scene.add(hemi);
     this.hemi = hemi;
 
     // shadowless fill from the opposite side so shaded facades never go black
-    const fill = new THREE.DirectionalLight(0xffe9cf, 0.42);
+    const fill = new THREE.DirectionalLight(LIGHT.fill, 1.22);
     fill.position.set(-80, 55, -60);
     this.scene.add(fill);
     this.fill = fill;
 
-    const sun = new THREE.DirectionalLight(0xfff0d0, 2.1);
+    const sun = new THREE.DirectionalLight(LIGHT.sun, 2.2);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 1;
@@ -341,8 +360,8 @@ export class City {
   buildSky() {
     this.skyTop = new THREE.Color();
     this.skyBottom = new THREE.Color();
-    this.scene.background = new THREE.Color(0x35a8f0);
-    this.scene.fog = new THREE.Fog(0x35a8f0, 130, 360);
+    this.scene.background = new THREE.Color(LIGHT.skyDay);
+    this.scene.fog = new THREE.Fog(LIGHT.skyDay, 130, 360);
   }
 
   buildGround() {
@@ -1530,9 +1549,9 @@ export class City {
     const elevation = clamp(sunY, -1, 1);
     const daylight = clamp(elevation * 1.6 + 0.25, 0, 1);
 
-    const dayCol = new THREE.Color(0x35a8f0);
-    const duskCol = new THREE.Color(0xff8a4a);
-    const nightCol = new THREE.Color(0x0b1220);
+    const dayCol = new THREE.Color(LIGHT.skyDay);
+    const duskCol = new THREE.Color(LIGHT.skyDusk);
+    const nightCol = new THREE.Color(LIGHT.skyNight);
     const sky = new THREE.Color();
     if (daylight > 0.55) {
       sky.copy(duskCol).lerp(dayCol, (daylight - 0.55) / 0.45);
@@ -1544,16 +1563,16 @@ export class City {
     this.scene.background.copy(sky);
     this.scene.fog.color.copy(sky);
 
-    this.sun.intensity = 0.32 + daylight * 2.9;
-    this.fill.intensity = 0.3 + daylight * 0.35;
+    this.sun.intensity = 0.3 + daylight * 2.2;
+    this.fill.intensity = 0.3 + daylight * 0.85;
     this.sun.color.setRGB(
       lerp(0.55, 1, daylight),
-      lerp(0.65, 0.95, daylight),
-      lerp(1.0, 0.85, daylight)
+      lerp(0.65, 0.965, daylight),
+      lerp(1.0, 0.88, daylight)
     );
-    this.hemi.intensity = lerp(0.78, 0.95, daylight);
-    this.hemi.color.setHex(daylight > 0.3 ? 0xbfd8ff : 0x4a5f8a);
-    this.hemi.groundColor.setHex(daylight > 0.3 ? 0x59a05e : 0x2a2b33);
+    this.hemi.intensity = lerp(1.0, 1.45, daylight);
+    this.hemi.color.setHex(daylight > 0.3 ? LIGHT.hemiSky : LIGHT.hemiNight);
+    this.hemi.groundColor.setHex(daylight > 0.3 ? LIGHT.hemiGround : LIGHT.hemiGroundNight);
 
     this.daylight = daylight;
     const night = 1 - clamp((daylight - 0.05) / 0.4, 0, 1);
