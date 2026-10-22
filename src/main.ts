@@ -9,6 +9,7 @@ import { Traffic } from './traffic';
 import { PlacedInterior, InteriorKind } from './interior';
 import { HUD } from './hud';
 import { AudioSys } from './audio';
+import { loadSave, writeSave, clearSave, loadSettings, writeSettings, SaveData, Settings } from './save';
 import { TouchControls } from './touch';
 import {
   clamp,
@@ -35,11 +36,33 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.NoToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+/** Pixel-ratio ceiling for the current render scale; dynamic resolution never exceeds it. */
+function maxPixelRatio() {
+  return clamp(BASE_PIXEL_RATIO * settings.renderScale, 0.5, 2.5);
+}
+
+function applySettings() {
+  pixelRatio = maxPixelRatio();
+  renderer.setPixelRatio(pixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  hud.setFpsVisible(settings.showFps);
+  hud.syncSettings(settings);
+  audio.setVolumes({ master: settings.master, sfx: settings.sfx, bgm: settings.bgm });
+}
+
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 900);
 
 const hud = new HUD();
 const audio = new AudioSys();
+
+// ---------------------------------------------------------------- persistence
+// One read of each key at boot. A corrupt blob warns exactly once and is dropped,
+// so the start screen can honestly offer "New game" instead of resuming into a
+// half-read run. `pendingSave` is consumed by the first Continue.
+const settings: Settings = loadSettings();
+let pendingSave: SaveData | null = loadSave();
+const AUTOSAVE_SECONDS = 20;
 
 const city = new City(scene);
 city.addProps();
@@ -245,12 +268,15 @@ function canShootNow() {
 }
 
 document.addEventListener('pointerlockchange', () => {
+  const hadLock = pointerLocked;
   pointerLocked = document.pointerLockElement === canvasEl;
-  // losing the pointer (alt-tab) pauses, but the transient unlock created by our own
-  // requestPointerLock() must not re-pause the game right after the player hits Resume
-  if (!pointerLocked && started && !paused && performance.now() > suppressLockPauseUntil) {
+  // losing the pointer (alt-tab) pauses. Only a lock we actually held counts: a
+  // refused request (headless, iframe, a navigation that still owned the lock)
+  // arrives as an unlock event with no lock to lose and must not freeze the game.
+  if (hadLock && !pointerLocked && started && !paused && performance.now() > suppressLockPauseUntil) {
     paused = true;
     hud.showPause(true);
+    saveGame();
   }
 });
 
@@ -291,11 +317,16 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyQ') punch();
   if (e.code === 'KeyR') startReload();
-  if (e.code === 'KeyM') {
+  if (e.code === 'KeyM') toggleMap();
+  if (e.code === 'KeyN') {
     const muted = audio.toggleMute();
     hud.toast(muted ? 'Audio muted' : 'Audio on');
   }
+  if (e.code === 'KeyO') toggleSettings();
   if (e.code === 'Escape') {
+    // overlays close first: Esc must never drop you straight back into the sim
+    if (hud.settingsOpen) return toggleSettings(false);
+    if (hud.mapOpen) return toggleMap(false);
     togglePause();
     return;
   }
@@ -346,6 +377,7 @@ function togglePause(force?: boolean) {
   const next = force === undefined ? !paused : !!force;
   paused = next;
   hud.showPause(next);
+  if (next) saveGame();
   if (next && document.pointerLockElement) document.exitPointerLock?.();
   if (!next) {
     suppressFireUntil = performance.now() + 250;
@@ -384,10 +416,10 @@ function updateCamera(dt: number) {
   const wantDist = player.inInterior ? 3.2 : player.inCar ? 8.4 : aiming ? 1.35 : 5.8;
   camDist = lerp(camDist, wantDist, clamp(dt * 6, 0, 1));
 
-  // mouse look
-  const sens = aiming ? 0.0009 : 0.0022;
+  // mouse look: the settings multiplier scales both axes, invert flips the pitch only
+  const sens = (aiming ? 0.0009 : 0.0022) * settings.sensitivity;
   camYaw -= mouse.dx * sens;
-  camPitch = clamp(camPitch + mouse.dy * sens * 0.85, -0.55, 1.05);
+  camPitch = clamp(camPitch + mouse.dy * sens * 0.85 * (settings.invertY ? -1 : 1), -0.55, 1.05);
   mouse.dx = 0;
   mouse.dy = 0;
 
@@ -1047,8 +1079,315 @@ function updateObjectives() {
   }
 }
 
+// ---------------------------------------------------------------- save / load
+function formatAgo(ts: number) {
+  const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.round(secs / 60)} min ago`;
+  return `${Math.round(secs / 3600)} h ago`;
+}
+
+/** Snapshot everything that survives a refresh. No scene objects, no timers. */
+function captureSave(): Omit<SaveData, 'version' | 'savedAt'> {
+  // inside a shop the logical position is the room's, not the street's: save the
+  // door-side anchor so a reload puts the player back on the pavement
+  const inShop = !!player.inInterior && !!player.savedPos;
+  const anchor = inShop ? player.savedPos! : player.pos;
+  return {
+    player: {
+      x: anchor.x,
+      y: inShop ? 0 : player.y,
+      z: anchor.z,
+      yaw: player.yaw,
+      camYaw: inShop && player.savedCamYaw !== undefined ? player.savedCamYaw : camYaw,
+      camPitch,
+    },
+    cash: player.cash,
+    hp: player.hp,
+    wanted: police.wanted,
+    dayT,
+    // this build has one gun: the pistol is the whole roster, saved by name so a
+    // later weapon system can extend the field without a schema bump
+    weapon: 'pistol',
+    ammo: player.mag,
+    magSize: player.magSize,
+    ownedWeapons: ['pistol'],
+    objectives: {
+      drove: flags.drove,
+      chaos: flags.chaos,
+      stars: flags.stars,
+      escape: flags.escape,
+      chaosRewarded: !!flags.chaosRewarded,
+    },
+  };
+}
+
+/** Autosave on the 20 s beat and on every pause; silently does nothing before the start. */
+function saveGame() {
+  if (!started) return;
+  writeSave(captureSave());
+}
+
+function applySave(data: SaveData) {
+  const { x, z } = data.player;
+  player.pos.set(x, 0, z);
+  player.y = city.groundHeightAt(x, z);
+  player.vy = 0;
+  player.vel.set(0, 0, 0);
+  player.grounded = true;
+  player.yaw = data.player.yaw;
+  player.inCar = null;
+  player.inInterior = null;
+  player.hp = clamp(data.hp, 1, 100);
+  player.cash = data.cash;
+  player.mag = clamp(data.ammo, 0, data.magSize);
+  player.magSize = data.magSize;
+  player.reloading = 0;
+  player.lastHit = performance.now() - 60000; // a restored wound should still regen
+  camYaw = data.player.camYaw;
+  camPitch = data.player.camPitch;
+  dayT = data.dayT;
+  police.wanted = clamp(data.wanted, 0, 5);
+  // a restored chase must not cool down on the first frame: give it the same
+  // grace window a fresh crime gets
+  police.crimeCooldown = data.wanted > 0 ? 26 : 0;
+  flags.drove = data.objectives.drove;
+  flags.chaos = data.objectives.chaos;
+  flags.stars = data.objectives.stars;
+  flags.escape = data.objectives.escape;
+  flags.chaosRewarded = data.objectives.chaosRewarded;
+  character.group.visible = true;
+  character.group.position.copy(player.pos);
+  character.group.rotation.y = player.yaw;
+  hud.setCash(player.cash);
+  hud.setHealth(player.hp);
+  hud.setStars(police.starCount);
+  hud.setAmmo(player.mag, player.magSize, false);
+  hud.setObjective(objectiveText());
+  hud.setPrompt('');
+}
+
+// ---------------------------------------------------------------- clean restart
+function resetCar(car: any, spot?: { pos: THREE.Vector3; yaw: number }) {
+  if (spot) {
+    car.pos.copy(spot.pos);
+    car.yaw = spot.yaw;
+  }
+  car.speed = 0;
+  car.steer = 0;
+  car.y = 0;
+  car.vy = 0;
+  car.roll = 0;
+  car.pitch = 0;
+  car.health = 100;
+  car.wrecked = false;
+  car.honk = 0;
+  car.aiPaused = false;
+  car.brakeLight = false;
+  car.mesh.position.set(car.pos.x, 0, car.pos.z);
+  car.mesh.rotation.y = car.yaw;
+}
+
+/**
+ * Revive and re-place the existing crowd instead of building a new one: a restart
+ * must not grow the scene graph. A ped killed earlier had its group removed, so it
+ * is re-added once and only once.
+ */
+function resetPeds() {
+  for (const ped of peds.peds) {
+    if (ped.char.group.parent !== scene) scene.add(ped.char.group);
+    ped.dead = false;
+    ped.state = 'walk';
+    ped.speed = rand(1.2, 1.9);
+    ped.phase = 0;
+    ped.pos.copy(city.randomSidewalkPointNear(110));
+    ped.target = city.randomSidewalkPoint();
+    ped.yaw = rand(0, Math.PI * 2);
+    ped.char.group.visible = true;
+    ped.char.group.position.copy(ped.pos);
+    ped.char.group.rotation.y = ped.yaw;
+  }
+}
+
+/** Drop every transient effect (tracers, sparks, muzzle flashes, ragdolls). */
+function resetFx() {
+  for (const f of fx) {
+    scene.remove(f.obj);
+    f.obj.geometry?.dispose?.();
+    f.obj.material?.dispose?.();
+  }
+  fx.length = 0;
+  for (const r of ragdolls) r.dispose();
+  ragdolls.length = 0;
+}
+
+/**
+ * New game in place: player, economy, wanted level, peds, pickups, traffic, time
+ * and effects all go back to their boot values without a page reload. Existing
+ * objects are reused, so `scene.children` is stable across restarts.
+ */
+function newGame() {
+  pendingSave = null;
+  clearSave();
+
+  player.pos.copy(city.getSpawn());
+  player.y = 0;
+  player.vy = 0;
+  player.vel.set(0, 0, 0);
+  player.yaw = 0;
+  player.hp = 100;
+  player.cash = 250;
+  player.mag = 12;
+  player.magSize = 12;
+  player.reloading = 0;
+  player.shootCd = 0;
+  player.rhythm = 0;
+  player.grounded = true;
+  player.lastHit = 0;
+  player.inCar = null;
+  player.inInterior = null;
+  player.savedPos = undefined;
+  player.savedCamYaw = undefined;
+
+  camYaw = Math.PI * 0.25;
+  camPitch = 0.1;
+  camDist = 5.8;
+  camDistActual = 5.8;
+  autoAlignTimer = 0;
+  dayT = 0.34;
+  simTime = 0;
+  lastAutosaveAt = performance.now();
+
+  flags.drove = false;
+  flags.chaos = false;
+  flags.stars = false;
+  flags.escape = false;
+  flags.chaosRewarded = false;
+
+  character.group.visible = true;
+  character.group.position.copy(player.pos);
+  character.group.rotation.y = 0;
+  // a restart from inside a shop must not leave the room shell standing in the world
+  for (const room of city.interiors) room.group.visible = false;
+
+  police.clearWanted();
+  police.clearAll();
+  resetFx();
+  resetPeds();
+
+  for (const p of pickups) {
+    p.pos.copy(city.randomSidewalkPoint());
+    p.mesh.position.set(p.pos.x, 1.05, p.pos.z);
+    p.mesh.visible = true;
+    p.active = true;
+    p.timer = 0;
+  }
+
+  for (const car of cityCars) resetCar(car, city.randomParkingSpot());
+  for (const entry of traffic.cars) {
+    const i = Math.floor(rand(-2, 3));
+    const j = Math.floor(rand(-2, 3));
+    const heading = pick([
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]);
+    entry.cell = { i, j };
+    entry.heading = heading;
+    entry.wait = 0;
+    entry.honked = 0;
+    resetCar(entry.car, {
+      pos: new THREE.Vector3((i + 0.5) * PITCH, 0, (j + 0.5) * PITCH),
+      yaw: Math.atan2(heading[0], heading[1]),
+    });
+  }
+
+  // the headlight rig rides on whichever car was driven: park it back on the scene
+  if (headlightAttached) {
+    headlightAttached.mesh.remove(headlight);
+    headlightAttached.mesh.remove(headlight.target);
+    scene.add(headlight);
+    scene.add(headlight.target);
+    headlightAttached = null;
+  }
+  audio.engineUpdate({ on: false });
+
+  hud.setCash(player.cash);
+  hud.setHealth(player.hp);
+  hud.setStars(0);
+  hud.setAmmo(player.mag, player.magSize, false);
+  hud.setObjective(objectiveText());
+  hud.setPrompt('');
+  hud.showPause(false);
+  hud.showStart(false);
+  // a restarted run starts its own save immediately, so a reload right after
+  // "New game" continues the new run instead of the one that was wiped
+  saveGame();
+}
+
+// ---------------------------------------------------------------- map + settings overlays
+let mapWasPaused = true;
+let settingsWasPaused = true;
+
+function mapState() {
+  return {
+    blocks: city.blocks,
+    roadLines: city.roadLines,
+    shops: city.shopDoors,
+    police: police.cars,
+    cars: [...cityCars, ...traffic.cars.map((e) => e.car)],
+    playerCar: player.inCar,
+    playerPos: player.pos,
+    playerYaw: player.inCar ? player.inCar.yaw : player.yaw,
+  };
+}
+
+/** Full-screen map. Opening it freezes the sim without showing the pause card. */
+function toggleMap(force?: boolean) {
+  const open = force === undefined ? !hud.mapOpen : !!force;
+  if (open && !started) return;
+  if (open === hud.mapOpen) return;
+  hud.showMap(open);
+  if (open) {
+    mapWasPaused = paused;
+    paused = true;
+    // the map owns the screen: the pause card would sit on top of it
+    hud.showPause(false);
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    hud.drawFullMap(mapState());
+    saveGame();
+  } else {
+    paused = mapWasPaused;
+    if (!paused) {
+      suppressFireUntil = performance.now() + 250;
+      lockPointer();
+    } else if (started) {
+      hud.showPause(true);
+    }
+  }
+}
+
+function toggleSettings(force?: boolean) {
+  const open = force === undefined ? !hud.settingsOpen : !!force;
+  if (open === hud.settingsOpen) return;
+  hud.showSettings(open);
+  if (open) {
+    settingsWasPaused = paused;
+    paused = true;
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    hud.syncSettings(settings);
+  } else {
+    paused = settingsWasPaused;
+    if (started && !paused) {
+      suppressFireUntil = performance.now() + 250;
+      lockPointer();
+    }
+  }
+}
+
 // ---------------------------------------------------------------- startup
-hud.el.startBtn!.addEventListener('click', async () => {
+async function startGame(continueRun: boolean) {
   hud.el.startBtn!.disabled = true;
   hud.setLoading('loading audio…');
   try {
@@ -1056,17 +1395,63 @@ hud.el.startBtn!.addEventListener('click', async () => {
   } catch (e) {
     console.warn('audio init failed', e);
   }
+  // the settings were read before the AudioContext existed, so re-apply them now
+  audio.setVolumes({ master: settings.master, sfx: settings.sfx, bgm: settings.bgm });
   audio.resume();
   audio.startBgm('funk');
   hud.setLoading('');
+  if (continueRun && pendingSave) {
+    applySave(pendingSave);
+    pendingSave = null;
+    hud.setSaveStatus('');
+  }
   started = true;
   paused = false;
   suppressFireUntil = performance.now() + 200;
+  lastAutosaveAt = performance.now(); // first beat lands 20 s into the run, not 20 s after boot
   hud.showStart(false);
   hud.showPause(false);
+  hud.showSettings(false);
+  hud.showMap(false);
   lockPointer();
-  hud.toast('Welcome to the city', 'good');
+  hud.toast(continueRun ? 'Welcome back to the city' : 'Welcome to the city', 'good');
+  saveGame();
+}
+
+hud.el.startBtn!.textContent = pendingSave ? 'Continue' : 'Start chaos';
+hud.setSaveStatus(pendingSave ? `save found · ${formatAgo(pendingSave.savedAt)}` : 'no save yet');
+
+hud.el.startBtn!.addEventListener('click', () => startGame(!!pendingSave));
+
+// New game on the start screen and in the pause card: one reset, no page reload.
+hud.el.newGame?.addEventListener('click', (e: Event) => {
+  e.stopPropagation();
+  newGame();
+  startGame(false);
 });
+hud.el.pauseNewGame?.addEventListener('click', (e: Event) => {
+  e.stopPropagation();
+  newGame();
+  if (!started) return;
+  paused = false;
+  suppressFireUntil = performance.now() + 250;
+  lockPointer();
+});
+
+for (const btn of [hud.el.settingsBtn, hud.el.pauseSettings]) {
+  btn?.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    toggleSettings(true);
+  });
+}
+hud.el.settingsClose?.addEventListener('click', () => toggleSettings(false));
+
+// every slider edit is applied live and persisted, so the next boot matches
+hud.bindSettings(settings, () => {
+  applySettings();
+  writeSettings(settings);
+});
+applySettings();
 
 function resumeGame() {
   if (!paused) return;
@@ -1078,8 +1463,13 @@ function resumeGame() {
 }
 
 document.getElementById('pause-screen')!.addEventListener('click', resumeGame);
-document.addEventListener('pointerdown', () => {
-  if (paused) resumeGame();
+document.addEventListener('pointerdown', (e: Event) => {
+  // an overlay owns the pointer while it is up: never resume the sim behind the map
+  // or the settings sheet, and never swallow a click aimed at an overlay button
+  if (!paused || !started || hud.settingsOpen || hud.mapOpen) return;
+  const target = e.target as HTMLElement | null;
+  if (target?.closest?.('button, input, label, #settings-sheet')) return;
+  resumeGame();
 });
 document.getElementById('resume-btn')?.addEventListener('click', resumeGame);
 
@@ -1143,6 +1533,7 @@ function copShoot(pos: any, dmg: any) {
 // ---------------------------------------------------------------- main loop
 const clock = new THREE.Clock();
 let simTime = 0; // accumulated game time, immune to frame-rate dips
+let lastAutosaveAt = performance.now(); // wall clock: a 12 fps host must still autosave every 20 s
 let fpsAcc = 0;
 let fpsFrames = 0;
 let slowWindows = 0;
@@ -1150,6 +1541,12 @@ let fastWindows = 0;
 
 function update(dt: number) {
   simTime += dt;
+  // wall-clock beat, not accumulated dt: dt is clamped to 50 ms, so a slow host
+  // would otherwise stretch "every 20 s" to half a minute of real time
+  if (performance.now() - lastAutosaveAt >= AUTOSAVE_SECONDS * 1000) {
+    lastAutosaveAt = performance.now();
+    saveGame();
+  }
   dayT = (dayT + dt / 300) % 1;
   city.update(dt, dayT);
 
@@ -1305,6 +1702,8 @@ function animate() {
   }
 
   renderer.render(scene, camera);
+  // the map is a 2D overlay: redraw it while it is up so cruiser positions are live
+  if (hud.mapOpen) hud.drawFullMap(mapState());
 
   fpsAcc += Math.min(0.5, rawDt);
   fpsFrames++;
@@ -1322,8 +1721,8 @@ function animate() {
         pixelRatio = Math.max(0.75, pixelRatio - 0.15);
         renderer.setPixelRatio(pixelRatio);
         slowWindows = 0;
-      } else if (fastWindows >= 8 && pixelRatio < BASE_PIXEL_RATIO) {
-        pixelRatio = Math.min(BASE_PIXEL_RATIO, pixelRatio + 0.1);
+      } else if (fastWindows >= 8 && pixelRatio < maxPixelRatio()) {
+        pixelRatio = Math.min(maxPixelRatio(), pixelRatio + 0.1);
         renderer.setPixelRatio(pixelRatio);
         fastWindows = 0;
       }
@@ -1344,6 +1743,9 @@ window.__game = {
   scene,
   camera,
   renderer,
+  settings,
+  saveGame,
+  objectives: flags,
   player,
   city,
   police,
@@ -1372,6 +1774,7 @@ window.__game = {
       peds: peds.peds.length,
       fps: hud.el.fps.textContent,
       pixelRatio: +pixelRatio.toFixed(2),
+      pixelCap: +maxPixelRatio().toFixed(2),
       pedsNear: peds.peds.filter((p) => !p.dead && p.pos.distanceTo(player.pos) < 70).length,
       carsNear: allCars().filter((c) => c.pos.distanceTo(player.pos) < 70).length,
       calls: renderer.info.render.calls,
@@ -1384,11 +1787,18 @@ window.__game = {
       speedKmh: player.inCar ? Math.round(player.inCar.kmh) : 0,
       shake: +shake.toFixed(3),
       fxCount: fx.length,
+      sceneChildren: scene.children.length,
+      mapOpen: hud.mapOpen,
+      settingsOpen: hud.settingsOpen,
       vel: +Math.hypot(player.vel.x, player.vel.z).toFixed(2),
       touch: { ...touch.state },
     };
   },
   _test: {
+    newGame,
+    save: saveGame,
+    toggleMap,
+    toggleSettings,
     toggleVehicle,
     shoot,
     punch,
