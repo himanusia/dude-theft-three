@@ -83,7 +83,9 @@ export function canvasTexture(w: number, h: number, draw: DrawFn): THREE.CanvasT
   draw(ctx, w, h);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  // 8x: the facade louvres are 2-3 px lines, and at 4x they shimmered into moire at
+  // street distance where the constant world tile compresses most.
+  tex.anisotropy = 8;
   return tex;
 }
 
@@ -107,22 +109,34 @@ export function textureCacheCount(): number {
 
 // Scale a box geometry's UVs so a shared tiling texture keeps a constant world size on
 // every face, which lets one cached texture serve buildings of any footprint.
-export function tileBoxUV(geo: THREE.BufferGeometry, w: number, h: number, d: number, tile: number): void {
+export function tileBoxUV(
+  geo: THREE.BufferGeometry,
+  w: number,
+  h: number,
+  d: number,
+  tile: number,
+  offU = 0,
+  offV = 0,
+  tileV = tile
+): void {
   const uv = geo.attributes.uv as THREE.BufferAttribute;
-  const rep = (span: number) => Math.max(1, Math.round(span / tile));
+  const rep = (span: number, t: number) => Math.max(1, Math.round(span / t));
+  const ru = (span: number) => rep(span, tile);
+  const rv = (span: number) => rep(span, tileV);
   const faces: [number, number][] = [
-    [rep(d), rep(h)], // +x
-    [rep(d), rep(h)], // -x
+    [ru(d), rv(h)], // +x
+    [ru(d), rv(h)], // -x
     [1, 1], // +y (roof, untextured)
     [1, 1], // -y
-    [rep(w), rep(h)], // +z
-    [rep(w), rep(h)], // -z
+    [ru(w), rv(h)], // +z
+    [ru(w), rv(h)], // -z
   ];
   for (let f = 0; f < 6; f++) {
-    const [ru, rv] = faces[f];
+    const [fx, fy] = faces[f];
     for (let i = 0; i < 4; i++) {
       const k = f * 4 + i;
-      uv.setXY(k, uv.getX(k) * ru, uv.getY(k) * rv);
+      // the phase offset keeps neighbouring buildings off the same texel grid
+      uv.setXY(k, uv.getX(k) * fx + offU, uv.getY(k) * fy + offV);
     }
   }
   uv.needsUpdate = true;

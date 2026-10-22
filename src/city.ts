@@ -18,14 +18,14 @@ export const PALETTE = {
   blocks: [
     // warm-leaning pastels carry the frame's red channel, which is what cancels the
     // cyan sky; mint and sky stay as the two cool accents
-    { wall: '#ed9c10', accent: '#c43c24' }, // ochre + warung red
-    { wall: '#f7653c', accent: '#cf2b23' }, // salmon
-    { wall: '#fbc90d', accent: '#dc9a12' }, // mango
-    { wall: '#ff8529', accent: '#dd5620' }, // peach
-    { wall: '#ded4a2', accent: '#bb6f1f' }, // cream + ochre (the one low-sat block)
-    { wall: '#dc5517', accent: '#b03824' }, // terracotta
-    { wall: '#1fe295', accent: '#268750' }, // mint
-    { wall: '#1b8ff0', accent: '#2865cf' }, // sky
+    { wall: '#e89000', accent: '#c43c24' }, // ochre + warung red
+    { wall: '#f24d16', accent: '#cf2b23' }, // salmon
+    { wall: '#f5be00', accent: '#dc9a12' }, // mango
+    { wall: '#fb6f05', accent: '#dd5620' }, // peach
+    { wall: '#dcb64f', accent: '#bb6f1f' }, // sand + ochre (the one low-sat block)
+    { wall: '#cf4405', accent: '#b03824' }, // terracotta
+    { wall: '#0ecf80', accent: '#268750' }, // mint
+    { wall: '#0479dd', accent: '#2865cf' }, // sky
   ],
   // plesetan, bukan merek asli
   shopWords: ['ALFAMURTI', 'INDOMERET', 'WARTEG BAHARI', 'BAKSO PAK TJE', 'MIE GACUAN', 'SATE SENAYUN',
@@ -165,108 +165,128 @@ function drawFacade(ctx: CanvasRenderingContext2D, w: number, h: number, style: 
   const g = PALETTE.glass[hue % PALETTE.glass.length];
   const frame = PALETTE.frame;
 
-  // one pattern pass, then a shared depth pass so every style gets sills and recesses
+  // Per-floor bay layouts. Every style lays its windows out floor by floor instead of
+  // stamping one bay four times, so no vertical mullion lines up from storey to storey -
+  // that alignment was what made the tiling read as a grid at distance.
+  type Bay = [number, number]; // [x, width]
+  const layouts = (): Bay[][] => {
+    switch (style) {
+      case 'bands':
+        // full ribbon, then a ribbon broken by a masonry pier, alternating: the same
+        // spandrel line repeats but the glazing rhythm does not
+        return [
+          [[3, w - 6]],
+          [[4, 34], [42, 34], [80, 44]],
+          [[3, w - 6]],
+          [[4, 58], [66, 58]],
+        ];
+      case 'louvre':
+        return [
+          [[8, 32], [50, 32], [92, 32]],
+          [[10, 46], [66, 46]],
+          [[4, 26], [36, 26], [68, 26], [100, 26]],
+          [[14, 38], [60, 38]],
+        ];
+      case 'balcony':
+        return [
+          [[8, 48], [72, 48]],
+          [[14, 44], [66, 56]],
+          [[6, 40], [50, 40], [94, 30]],
+          [[18, 56], [82, 36]],
+        ];
+      case 'shopfront':
+        return [
+          [[6, 56], [70, 52]],
+          [[4, 34], [42, 34], [80, 44]],
+          [[10, 50], [66, 56]],
+          [[4, 58], [68, 56]],
+        ];
+      default: // grid
+        return [
+          [[6, 20], [38, 20], [70, 20], [102, 20]],
+          [[10, 26], [48, 26], [86, 26]],
+          [[5, 22], [37, 22], [69, 22], [101, 22]],
+          [[8, 30], [52, 30], [96, 24]],
+        ];
+    }
+  };
+  const bays = layouts();
+
   const pattern = () => {
-    if (style === 'bands') {
-      // horizontal ribbon windows
-      for (let f = 0; f < 2; f++) {
-        const y = f * FLOOR + 12;
-        glassPane(ctx, 3, y, w - 6, 32, g.hi, g.mid, g.lo);
+    for (let f = 0; f < FLOORS_PER_TILE; f++) {
+      const fy = f * FLOOR;
+      theFloor: for (const [x, bw] of bays[f]) {
+        if (bw < 12) continue theFloor;
+        if (style === 'bands') {
+          glassPane(ctx, x, fy + 12, bw, 32, g.hi, g.mid, g.lo);
+          ctx.fillStyle = frame;
+          for (let mx = x + 14; mx < x + bw - 2; mx += 16) ctx.fillRect(mx, fy + 12, 2, 32);
+          ctx.fillStyle = accent;
+          ctx.fillRect(x, fy + 49, bw, 4);
+          continue theFloor;
+        }
+        if (style === 'louvre') {
+          // jalusi: four chunky slats, not six hairline ones - the fine slats aliased into
+          // a shimmer at street distance
+          ctx.fillStyle = accent;
+          ctx.fillRect(x - 3, fy + 10, bw + 6, 44);
+          ctx.fillStyle = '#33403f';
+          ctx.fillRect(x, fy + 13, bw, 38);
+          for (let s2 = 0; s2 < 4; s2++) {
+            ctx.fillStyle = g.hi;
+            ctx.fillRect(x, fy + 15 + s2 * 9, bw, 3);
+            ctx.fillStyle = g.lo;
+            ctx.fillRect(x, fy + 18 + s2 * 9, bw, 2);
+          }
+          continue theFloor;
+        }
+        if (style === 'balcony') {
+          const winW = Math.min(bw - 16, 48);
+          glassPane(ctx, x, fy + 8, winW, 26, g.hi, g.mid, g.lo);
+          frameRect(ctx, x, fy + 8, winW, 26, frame, 2);
+          ctx.fillStyle = accent;
+          for (let bx = x - 4; bx < x + bw - 8; bx += 6) ctx.fillRect(bx, fy + 34, 2, 12);
+          ctx.fillRect(x - 6, fy + 44, bw + 4, 3);
+          ctx.fillStyle = '#f2eee2';
+          ctx.fillRect(x - 8, fy + 47, bw + 8, 5);
+          ctx.fillStyle = 'rgba(30,24,18,0.28)';
+          ctx.fillRect(x - 8, fy + 52, bw + 8, 3);
+          continue theFloor;
+        }
+        if (style === 'shopfront') {
+          ctx.fillStyle = accent;
+          ctx.fillRect(x, fy + 5, bw, 10);
+          ctx.fillStyle = 'rgba(0,0,0,0.18)';
+          for (let sx = x; sx < x + bw; sx += 12) ctx.fillRect(sx, fy + 5, 6, 10);
+          glassPane(ctx, x, fy + 19, bw, 40, g.hi, g.mid, g.lo);
+          frameRect(ctx, x, fy + 19, bw, 40, '#3b3a38', 3);
+          ctx.fillStyle = frame;
+          ctx.fillRect(x + Math.round(bw / 2), fy + 19, 2, 40);
+          continue theFloor;
+        }
+        // grid: punched windows with a white sill and an accent lintel
+        glassPane(ctx, x, fy + 12, bw, 32, g.hi, g.mid, g.lo);
+        frameRect(ctx, x, fy + 12, bw, 32, frame, 2);
         ctx.fillStyle = frame;
-        for (let x = 3; x < w - 4; x += 16) ctx.fillRect(x, y, 2, 32);
+        ctx.fillRect(x - 1, fy + 44, bw + 2, 3);
         ctx.fillStyle = accent;
-        ctx.fillRect(0, f * FLOOR + 49, w, 4);
+        ctx.fillRect(x - 1, fy + 9, bw + 2, 2);
       }
-      return;
     }
 
     if (style === 'strips') {
-      // vertical glass strips with concrete piers
+      // vertical glass strips with concrete piers, one accent spandrel per storey
       for (let i = 0; i < 4; i++) {
         const x = 5 + i * 31;
         glassPane(ctx, x, 4, 24, h - 8, g.hi, g.mid, g.lo);
         ctx.fillStyle = frame;
         for (let y = 4; y < h - 5; y += 21) ctx.fillRect(x, y, 24, 2);
       }
-      ctx.fillStyle = accent;
-      for (let f = 0; f < 2; f++) ctx.fillRect(0, f * FLOOR + 58, w, 5);
-      return;
-    }
-
-    if (style === 'louvre') {
-      // jalusi: slatted louvred windows in a painted timber frame
-      for (let f = 0; f < 2; f++) {
-        for (let c = 0; c < 3; c++) {
-          const x = 8 + c * 42;
-          const y = f * FLOOR + 10;
-          ctx.fillStyle = accent;
-          ctx.fillRect(x - 3, y - 3, 38, 44);
-          ctx.fillStyle = '#33403f';
-          ctx.fillRect(x, y, 32, 38);
-          for (let s2 = 0; s2 < 6; s2++) {
-            ctx.fillStyle = g.hi;
-            ctx.fillRect(x, y + 2 + s2 * 6, 32, 2);
-            ctx.fillStyle = g.lo;
-            ctx.fillRect(x, y + 4 + s2 * 6, 32, 2);
-          }
-        }
+      for (let f = 0; f < FLOORS_PER_TILE; f++) {
+        ctx.fillStyle = f % 2 ? accent : frame;
+        ctx.fillRect(0, f * FLOOR + 58, w, f % 2 ? 5 : 3);
       }
       return;
-    }
-
-    if (style === 'balcony') {
-      // punched windows behind a painted balcony rail
-      for (let f = 0; f < 2; f++) {
-        const fy = f * FLOOR;
-        for (let c = 0; c < 2; c++) {
-          const x = c * 64 + 8;
-          const y = fy + 8;
-          glassPane(ctx, x, y, 48, 26, g.hi, g.mid, g.lo);
-          frameRect(ctx, x, y, 48, 26, frame, 2);
-          ctx.fillStyle = accent;
-          for (let bx = x - 4; bx < x + 52; bx += 6) ctx.fillRect(bx, y + 26, 2, 16);
-          ctx.fillRect(x - 6, y + 40, 62, 3);
-          // balcony slab + its shadow on the wall below
-          ctx.fillStyle = '#f2eee2';
-          ctx.fillRect(x - 8, y + 43, 66, 5);
-          ctx.fillStyle = 'rgba(30,24,18,0.28)';
-          ctx.fillRect(x - 8, y + 48, 66, 3);
-        }
-      }
-      return;
-    }
-
-    if (style === 'shopfront') {
-      // glazed shop front with a striped awning above each pane
-      for (let f = 0; f < 2; f++) {
-        const fy = f * FLOOR;
-        ctx.fillStyle = accent;
-        ctx.fillRect(0, fy + 5, w, 10);
-        ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        for (let x = 0; x < w; x += 12) ctx.fillRect(x, fy + 5, 6, 10);
-        for (let c = 0; c < 2; c++) {
-          const x = 6 + c * 62;
-          glassPane(ctx, x, fy + 19, 56, 40, g.hi, g.mid, g.lo);
-          frameRect(ctx, x, fy + 19, 56, 40, '#3b3a38', 3);
-          ctx.fillStyle = frame;
-          ctx.fillRect(x + 27, fy + 19, 2, 40);
-        }
-      }
-      return;
-    }
-
-    // grid: punched windows with a white sill and an accent lintel
-    for (let f = 0; f < 2; f++) {
-      for (let c = 0; c < 4; c++) {
-        const x = c * 32 + 6;
-        const y = f * FLOOR + 12;
-        glassPane(ctx, x, y, 20, 32, g.hi, g.mid, g.lo);
-        frameRect(ctx, x, y, 20, 32, frame, 2);
-        ctx.fillStyle = frame;
-        ctx.fillRect(x - 1, y + 32, 22, 3);
-        ctx.fillStyle = accent;
-        ctx.fillRect(x - 1, y - 3, 22, 2);
-      }
     }
   };
 
@@ -279,26 +299,60 @@ function drawFacade(ctx: CanvasRenderingContext2D, w: number, h: number, style: 
   }
   pattern();
 
-  // shared depth pass: slab shadow lines + a painted plinth, so walls are not flat cards
-  ctx.fillStyle = 'rgba(34,26,18,0.20)';
-  ctx.fillRect(0, FLOOR - 3, w, 3);
-  ctx.fillRect(0, h - 3, w, 3);
-  ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  ctx.fillRect(0, FLOOR - 4, w, 1);
+  // shared depth pass: a slab shadow under every storey, a plinth, then the details that
+  // stop a face reading as a recoloured box - a downpipe, an AC box, a repaired plaster
+  // patch. All baked into the same cached texture, so they cost no draw call.
+  for (let f = 1; f <= FLOORS_PER_TILE; f++) {
+    const y = f * FLOOR;
+    ctx.fillStyle = 'rgba(34,26,18,0.20)';
+    ctx.fillRect(0, Math.min(y, h) - 3, w, 3);
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(0, Math.min(y, h) - 4, w, 1);
+  }
   ctx.fillStyle = accent;
   ctx.fillRect(0, h - 9, w, 6);
+
+  // downpipe: 4 px vertical run hugging one edge, with a highlight so it reads as a
+  // cylinder. Kept inside the canvas - a pipeline drawn off the tile edge is invisible.
+  const pipeX = rand() > 0.5 ? Math.round(rand(3, 13)) : Math.round(rand(w - 16, w - 5));
+  ctx.fillStyle = 'rgba(28,26,24,0.42)';
+  ctx.fillRect(pipeX, 0, 4, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.fillRect(pipeX + 4, 0, 1, h);
+
+  // AC box, sitting on a slab line
+  const acF = Math.floor(rand(0, FLOORS_PER_TILE));
+  const acX = rand(0, 1) > 0.5 ? Math.round(rand(2, 18)) : Math.round(rand(w - 32, w - 14));
+  const acY = acF * FLOOR + 44;
+  ctx.fillStyle = 'rgba(20,18,16,0.22)';
+  ctx.fillRect(acX + 1, acY + 9, 16, 3);
+  ctx.fillStyle = '#d8d3c6';
+  ctx.fillRect(acX, acY, 16, 9);
+  ctx.fillStyle = 'rgba(60,58,54,0.55)';
+  for (let ay = 1; ay < 8; ay += 2) ctx.fillRect(acX + 1, acY + ay, 14, 1);
+
+  // patched plaster: a slightly lighter rectangle of repair work
+  ctx.fillStyle = `rgba(255,250,238,${rand(0.05, 0.11).toFixed(3)})`;
+  ctx.fillRect(rand(0, w - 40), rand(0, h - 40), rand(22, 44), rand(16, 34));
+
 }
 
 function litTexture(variant: number) {
-  return cachedTexture(`lit|${variant}`, TILE, TILE, (ctx, w, h) => {
+  return cachedTexture(`lit|${variant}`, TILE, TILE_H, (ctx, w, h) => {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
-    for (let f = 0; f < 2; f++) {
-      for (let c = 0; c < 4; c++) {
-        if ((c * 5 + f * 3 + variant * 2) % 4 !== 0) continue;
+    const bays: [number, number][][] = [
+      [[6, 20], [38, 20], [70, 20], [102, 20]],
+      [[10, 26], [48, 26], [86, 26]],
+      [[5, 22], [37, 22], [69, 22], [101, 22]],
+      [[8, 30], [52, 30], [96, 24]],
+    ];
+    for (let f = 0; f < FLOORS_PER_TILE; f++) {
+      bays[f].forEach(([x, bw], c) => {
+        if ((c * 5 + f * 3 + variant * 2) % 4 !== 0) return;
         ctx.fillStyle = `rgba(255,${200 + ((c + variant) % 3) * 14},${118 + ((f + variant) % 4) * 14},1)`;
-        ctx.fillRect(c * 32 + 6, f * FLOOR + 12, 20, 32);
-      }
+        ctx.fillRect(x, f * FLOOR + 12, bw, 32);
+      });
     }
   });
 }
@@ -323,7 +377,7 @@ function facadeMaterial(style: FacadeStyle, hue: number): THREE.MeshStandardMate
   const hit = _facadeMats.get(key);
   if (hit) return hit;
   const { wall, accent } = PALETTE.blocks[hue];
-  const map = cachedTexture(`facade|${style}|${hue}`, TILE, TILE, (ctx, w, h) => drawFacade(ctx, w, h, style, wall, accent, hue));
+  const map = cachedTexture(`facade|${style}|${hue}`, TILE, TILE_H, (ctx, w, h) => drawFacade(ctx, w, h, style, wall, accent, hue));
   const mat = new THREE.MeshStandardMaterial({
     map,
     emissive: 0xffffff,
@@ -991,8 +1045,14 @@ export class City {
     const roofMat = roofMaterial(wallHue);
     const mats = [sideMat, sideMat, roofMat, roofMat, sideMat, sideMat];
 
+    // Per-building tile scale and UV phase break the facade repeat. At one fixed scale
+    // the pattern lined up across neighbouring blocks and the window grid read as moire;
+    // the phase comes from the building's own position so it stays deterministic. The v
+    // span is twice the u span because the facade tile is 128x256 (four storeys).
+    const hj = mulberry32(hashString(`f|${Math.round(x * 7)}|${Math.round(z * 7)}|${Math.round(h)}`));
     const geo = new THREE.BoxGeometry(w, h, d);
-    tileBoxUV(geo, w, h, d, TILE_WORLD);
+    const tileW = TILE_WORLD * (0.72 + hj() * 0.66);
+    tileBoxUV(geo, w, h, d, tileW, hj(), hj(), tileW * 2);
     const b = new THREE.Mesh(geo, mats);
     b.position.set(x, h / 2 + 0.2, z);
     b.castShadow = true;
@@ -1010,14 +1070,19 @@ export class City {
       const words = ['DISKON', 'MURAH', 'PROMO', 'GRATIS ONGKIR', 'BUKA 24 JAM', 'KOPI ENAK', 'SERVIS AC', 'KOSONG'];
       const word = pick(words);
       const bg = pick(['#e94f4f', '#2f6fd0', '#f2b134', '#39b54a', '#8a3ad9']);
-      const board = new THREE.Mesh(new THREE.BoxGeometry(Math.min(w * 0.8, 7), 2.3, 0.22), billboardMaterial(word, bg));
-      const faces = [
-        [0, d / 2 + 0.12, 0],
-        [0, -d / 2 - 0.12, Math.PI],
-        [w / 2 + 0.12, 0, Math.PI / 2],
-        [-w / 2 - 0.12, 0, -Math.PI / 2],
+      const faces: [number, number, number, number][] = [
+        [0, d / 2 + 0.12, 0, w],
+        [0, -d / 2 - 0.12, Math.PI, w],
+        [w / 2 + 0.12, 0, Math.PI / 2, d],
+        [-w / 2 - 0.12, 0, -Math.PI / 2, d],
       ];
       const face = faces[Math.floor(rand(0, 4))];
+      // the board is sized from the span of the face it hangs on, so it can never
+      // overhang a narrow side and get clipped by the neighbouring block
+      const board = new THREE.Mesh(
+        new THREE.BoxGeometry(Math.min(face[3] * 0.8, 7), 2.3, 0.22),
+        billboardMaterial(word, bg)
+      );
       board.position.set(x + face[0], Math.min(h - 1.5, 8.5), z + face[1]);
       board.rotation.y = face[2];
       board.castShadow = true;
@@ -1075,8 +1140,9 @@ export class City {
         this.shopDoors.push({ x: doorX + nx * 1.1, z: doorZ + nz * 1.1, nx, nz, kind, name: room.name });
         // physical shop sign above the door so the street reads Indonesian
         const withBoard = chance(0.5);
+        const facadeSpan = faceX ? d : w;
         const board = new THREE.Mesh(
-          new THREE.BoxGeometry(4.4, 0.9, 0.16),
+          new THREE.BoxGeometry(Math.max(1.8, Math.min(4.4, facadeSpan - 1.2)), 0.9, 0.16),
           doorBoardMaterial(room.name, KIND_SIGN[kind])
         );
         if (withBoard) {
