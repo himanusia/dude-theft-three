@@ -115,9 +115,10 @@ exit, all four kinds reachable, audit clean indoors
 audit: 0 floating actors, 0 floating props
 ```
 
-Current numbers: 100–140 fps (headless SwiftShader), ~550–900 draw calls, 60–90k triangles,
-44 pedestrians (recycled around the player, detail LOD beyond 42 m), 9 parked cars, 12 traffic cars,
-~140 colliders, dynamic resolution scaling to protect frame time.
+Current numbers: 85–140 fps (headless SwiftShader), ~900–1300 draw calls, ~100k triangles,
+34 pedestrians (recycled around the player, detail LOD beyond 30 m), 9 parked cars, 10 traffic cars
+(built "simple": no mirrors/plate/exhaust), instanced building doors, handles and steps
+(4 draw calls instead of ~480), ~140 colliders, dynamic resolution scaling to protect frame time.
 
 Bugs found and fixed across these passes:
 
