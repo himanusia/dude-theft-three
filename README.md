@@ -117,9 +117,21 @@ audit: 0 floating actors, 0 floating props
 
 ## CI
 
-`.github/workflows/ci.yml` gates every PR to `main` (plus manual `workflow_dispatch`): Node 20,
-cached npm, the Chrome build that `puppeteer-core` pins, `npm run typecheck`, `npm run build`,
-then `tests/qa.mjs`, `tests/interior.mjs` and `tests/audit.mjs` against `dist/` served on :8765.
+`.github/workflows/ci.yml` gates every PR to `main` (plus manual `workflow_dispatch`) with two
+required jobs:
+
+- **typecheck + build** on `ubuntu-latest` — Node 20, cached npm, `npm ci`, `npm run typecheck`,
+  `npm run build`.
+- **headless qa + interior + audit** on `macos-latest` — the Chrome build `puppeteer-core` pins
+  (`CHROME_PATH`), `dist/` served on `:8765`, then `tests/qa.mjs`, `tests/interior.mjs` and
+  `tests/audit.mjs`.
+
+The browser suites need a GPU. A CPU-only Linux runner falls back to software WebGL: measured on
+`ubuntu-latest` the same build runs at **4 fps** (SwiftShader) and **14 fps** (Mesa llvmpipe at
+320x200), while `animate()` clamps `dt` to 50 ms, so the time-based assertions (walk 2.5 m, jump +
+land, accelerate to 15 km/h) cannot pass there. The macOS runner exposes a paravirtual Metal GPU
+and holds **60 fps** at the harness viewport, so the suites run there.
+
 Each suite exits non-zero when any check prints `FAIL`, so one red assertion fails the job; logs
 and screenshots from a failed run are uploaded as the `ci-failure-evidence` artifact.
 
