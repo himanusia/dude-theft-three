@@ -113,7 +113,7 @@ export class PedManager {
     this.peds = [];
     this.count = count;
     for (let i = 0; i < count; i++) {
-      this.peds.push(new Ped(scene, city, city.randomSidewalkPointNear(140)));
+      this.peds.push(new Ped(scene, city, city.randomSidewalkPointNear(110)));
     }
     this.respawnTimer = 0;
   }

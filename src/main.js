@@ -61,7 +61,7 @@ const character = new Character({ shirt: 0xd94f4f, pants: 0x2f3a52, skin: 0xd9a2
 character.group.position.copy(player.pos);
 scene.add(character.group);
 
-const peds = new PedManager(scene, city, 46);
+const peds = new PedManager(scene, city, 60);
 const police = new Police(scene, city, audio);
 const traffic = new Traffic(scene, city, 16);
 
@@ -208,6 +208,10 @@ window.addEventListener('keydown', (e) => {
     const muted = audio.toggleMute();
     hud.toast(muted ? 'Audio muted' : 'Audio on');
   }
+  if (e.code === 'Escape') {
+    togglePause();
+    return;
+  }
   if (e.code === 'KeyT') {
     dayT = (dayT + 0.12) % 1;
     hud.toast(dayT > 0.2 && dayT < 0.55 ? 'Morning' : dayT < 0.78 ? 'Afternoon' : 'Night');
@@ -215,6 +219,14 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
+
+function togglePause(force) {
+  const next = force === undefined ? !paused : !!force;
+  paused = next;
+  hud.showPause(next);
+  if (next && document.pointerLockElement) document.exitPointerLock?.();
+  if (!next) lockPointer();
+}
 
 // ---------------------------------------------------------------- day cycle
 let dayT = 0.34;
@@ -352,13 +364,17 @@ function updateOnFoot(dt) {
     player.yaw += angleDelta(player.yaw, wantYaw) * clamp(dt * 14, 0, 1);
   }
 
-  // park cars are solid
-  for (const c of cityCars) {
-    const d = Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z);
-    if (d < c.radius * 0.75) {
-      const push = new THREE.Vector3(player.pos.x - c.pos.x, 0, player.pos.z - c.pos.z).normalize();
-      player.pos.x = c.pos.x + push.x * c.radius * 0.8;
-      player.pos.z = c.pos.z + push.z * c.radius * 0.8;
+  // every vehicle body is solid: never let a cruiser park on top of the player
+  for (const c of allCars()) {
+    const dx = player.pos.x - c.pos.x;
+    const dz = player.pos.z - c.pos.z;
+    const d = Math.hypot(dx, dz);
+    const solid = c.radius * 0.62;
+    if (d < solid && d > 0.0001) {
+      const pushX = dx / d;
+      const pushZ = dz / d;
+      player.pos.x = c.pos.x + pushX * solid;
+      player.pos.z = c.pos.z + pushZ * solid;
     }
   }
 
@@ -791,9 +807,7 @@ hud.el.startBtn.addEventListener('click', async () => {
 });
 
 document.getElementById('pause-screen').addEventListener('click', () => {
-  paused = false;
-  hud.showPause(false);
-  lockPointer();
+  togglePause(false);
 });
 
 window.addEventListener('resize', () => {
@@ -904,6 +918,26 @@ function update(dt) {
     }
   }
 
+  // cheap one-pass separation: keeps cars from occupying the same space
+  const carsNow = allCars();
+  for (let i = 0; i < carsNow.length; i++) {
+    const a = carsNow[i];
+    for (let j = i + 1; j < carsNow.length; j++) {
+      const b = carsNow[j];
+      const dx = b.pos.x - a.pos.x;
+      const dz = b.pos.z - a.pos.z;
+      const min = (a.radius + b.radius) * 0.62;
+      const d = Math.hypot(dx, dz);
+      if (d < min && d > 0.01) {
+        const push = (min - d) * 0.5;
+        const nx = dx / d;
+        const nz = dz / d;
+        a.pos.x -= nx * push; a.pos.z -= nz * push;
+        b.pos.x += nx * push; b.pos.z += nz * push;
+      }
+    }
+  }
+
   for (let i = ragdolls.length - 1; i >= 0; i--) {
     if (!ragdolls[i].update(dt, city.colliders)) {
       ragdolls[i].dispose();
@@ -1004,6 +1038,7 @@ window.__game = {
   peds,
   cityCars,
   traffic,
+  pickups,
   ragdolls,
   audio,
   hud,
@@ -1056,6 +1091,9 @@ window.__game = {
     setCam(yaw, pitch) {
       if (yaw !== undefined) camYaw = yaw;
       if (pitch !== undefined) camPitch = pitch;
+    },
+    keys() {
+      return [...keys];
     },
     cinematic(on) {
       cinematic = !!on;
