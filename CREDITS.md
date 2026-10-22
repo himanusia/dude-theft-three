@@ -71,6 +71,33 @@ It is not affiliated with, endorsed by, or distributed by Poxel Studios.
   CC BY-SA 4.0) for the sand strip, calm water, timber pier on pilings, tall mast and the
   yellow/blue feather flags.
 
+## Reference photography — TransJakarta bus and halte
+
+Studied for the procedural models in `src/vehicles/transjakarta.ts` and `src/world/halte.ts`.
+Local copies sit in `reference/assets/` at reduced resolution — `reference/` is gitignored, so the
+photographs are not redistributed with the repository or the build.
+
+- **TransJakarta articulated bus** — *Harmoni Central Busway Transjakarta 1.JPG* by
+  Gunawan Kartapranata, Wikimedia Commons, **CC BY-SA 4.0**
+  (https://commons.wikimedia.org/wiki/File:Harmoni_Central_Busway_Transjakarta_1.JPG),
+  file `reference/assets/transjakarta-articulated-harmoni.jpg`. Used for the red body, the
+  unbroken dark window band, the bellows, the three-axle layout, the roof AC pod and the white
+  "transjakarta" script.
+- **Bus nose / halte** — *Transjakarta Articulated Bus Halte Rawasari 1.JPG* by Gunawan
+  Kartapranata, Wikimedia Commons, **CC BY-SA 4.0**
+  (https://commons.wikimedia.org/wiki/File:Transjakarta_Articulated_Bus_Halte_Rawasari_1.JPG),
+  file `reference/assets/transjakarta-halte-rawasari.jpg`. Used for the windscreen rake, the
+  twin wipers, the front valance and plate, and the shelter's platform edge and roof overhang.
+- **Halte interior** — *Platform of the Bundaran HI Transjakarta BRT Station.jpg* by
+  RasyaAbhirama13, Wikimedia Commons, **CC BY-SA 3.0**
+  (https://commons.wikimedia.org/wiki/File:Platform_of_the_Bundaran_HI_Transjakarta_BRT_Station.jpg),
+  file `reference/assets/transjakarta-halte-platform.jpg`. Used for the bench against the glass,
+  the queue rail, the route board and the ceiling.
+
+All three are licensed CC BY-SA; the derived 3D geometry is original code and the photographs
+are not redistributed with the build. The red steel shelter frame follows the older TransJakarta
+palette (and the brief) — the stations in the photographs are grey/blue.
+
 ## 3D models
 
 - **Cars** — Kenney Car Kit (CC0 1.0, kenney.nl): `sedan`, `sedan-sports`, `taxi`, `police`, `van`,

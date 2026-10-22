@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>TransJakarta assets — Dude Theft Auto</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #d8dde3; overflow: hidden; }
+  canvas { display: block; }
+  #stats {
+    position: fixed; left: 14px; top: 12px; padding: 10px 12px;
+    font: 600 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #1d2630; background: rgba(255,255,255,0.72); border: 1px solid rgba(0,0,0,0.12);
+    white-space: pre;
+  }
+</style>
+</head>
+<body>
+<div id="stats">loading…</div>
+<script type="module">
+import * as THREE from 'three';
+import { TransjakartaBus } from '../src/vehicles/transjakarta.ts';
+import { buildHalte } from '../src/world/halte.ts';
+
+// Studio page for the two TransJakarta assets: plain backdrop, one subject at a time, fixed
+// 3/4 camera. renderer.info is printed after the first frame so the triangle and draw-call
+// budgets are measured from the running renderer, not from the source.
+const params = new URLSearchParams(location.search);
+const subjectName = params.get('subject') ?? 'bus';
+const simple = params.get('simple') === '1';
+const yaw = Number(params.get('yaw') ?? 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(1);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xd8dde3);
+
+const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 300);
+
+const hemi = new THREE.HemisphereLight(0xdfeaf5, 0x8d8a80, 1.15);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff3e0, 2.5);
+sun.position.set(9, 14, 11);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -16;
+sun.shadow.camera.right = 16;
+sun.shadow.camera.top = 16;
+sun.shadow.camera.bottom = -16;
+sun.shadow.bias = -0.0006;
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xbcd2e8, 0.55);
+fill.position.set(-8, 6, -7);
+scene.add(fill);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(200, 200),
+  new THREE.MeshStandardMaterial({ color: 0xb9bec5, roughness: 0.96, metalness: 0 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// a lane strip under the subject, so scale reads without adding scenery
+const lane = new THREE.Mesh(
+  new THREE.PlaneGeometry(subjectName === 'bus' ? 26 : 12, 4.6),
+  new THREE.MeshStandardMaterial({ color: 0x8f959c, roughness: 0.92 })
+);
+lane.rotation.x = -Math.PI / 2;
+lane.position.y = 0.004;
+scene.add(lane);
+
+let subject;
+if (subjectName === 'bus') {
+  const bus = new TransjakartaBus({ simple });
+  // three-quarter from the door side: front +Z, right flank +X
+  bus.group.rotation.y = 0;
+  scene.add(bus.group);
+  subject = bus.group;
+  camera.position.set(13.5, 6.2, 15.5);
+  camera.lookAt(0, 1.55, 0.4);
+  window.__tjSubject = bus;
+} else {
+  const ctx = { group: scene, colliders: [], audit: [] };
+  const g = buildHalte(ctx, 0, 0, yaw, { simple });
+  subject = g;
+  camera.position.set(7.4, 4.6, 8.4);
+  camera.lookAt(0, 1.35, 0);
+  window.__tjColliders = ctx.colliders;
+  window.__tjAudit = ctx.audit;
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+let frames = 0;
+let report = null;
+function frame() {
+  requestAnimationFrame(frame);
+  renderer.render(scene, camera);
+  if (++frames === 3 && !report) {
+    const info = renderer.info.render;
+    const meshes = [];
+    subject.traverse((o) => { if (o.isMesh) meshes.push(o); });
+    let triangles = 0;
+    let calls = 0;
+    // measure the subject alone: hide the backdrop, render just it, read the counters back
+    ground.visible = false;
+    lane.visible = false;
+    renderer.render(scene, camera);
+    triangles = renderer.info.render.triangles;
+    calls = renderer.info.render.calls;
+    ground.visible = true;
+    lane.visible = true;
+    report = { subject: subjectName, triangles, calls, meshes: meshes.length, allCalls: info.calls };
+    document.getElementById('stats').textContent =
+      `${subjectName}\n` +
+      `triangles ${triangles}\n` +
+      `draw calls ${calls}\n` +
+      `meshes ${meshes.length}`;
+    window.__tj = { ready: true, stats: report };
+  }
+}
+frame();
+</script>
+</body>
+</html>

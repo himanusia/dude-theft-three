@@ -154,7 +154,10 @@ const cityCars: Car[] = [];
 // plate or exhaust pipes) so the extra bodies cost ~12 draws instead of ~40 each.
 for (let i = 0; i < 12; i++) {
   const spot = city.randomParkingSpot();
-  const type = pick(['sedan', 'sedan', 'muscle', 'van', 'taxi', 'angkot']);
+  // cycle the roster instead of picking at random: every body type has to appear on the
+  // street at least once, and a random pick used to leave the map without a muscle car
+  const roster = ['sedan', 'sedan', 'muscle', 'van', 'taxi', 'angkot'] as const;
+  const type = roster[i % roster.length];
   const c = new Car(scene, { type, position: spot.pos, yaw: spot.yaw, simple: true });
   // the spot may sit on a kerb plate, so take the height from the city, not from zero
   c.y = city.groundHeightAt(spot.pos.x, spot.pos.z);
