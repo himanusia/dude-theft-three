@@ -136,13 +136,22 @@ function check(name, ok, detail) {
       g._test.lookFrom(26 + off, 2.4, -40, ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
     }, dx);
     await sleep(650);
-    shot = await page.evaluate(() => {
+    shot = await page.evaluate((off) => {
       const g = window.__game;
+      // re-place the target in the same tick as the shot: an idle ped still gets stepped by
+      // the crowd system, and a player that walked off its spot fired at empty road
+      const ped = g.peds.peds.find(p => !p.dead);
+      if (ped) {
+        ped.pos.set(26 + off, g.city.groundHeightAt(26 + off, -32), -32);
+        ped.target = ped.pos.clone();
+        ped.speed = 0.0001;
+        g._test.lookFrom(26 + off, 2.4, -40, ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
+      }
       const magBefore = g.player.mag;
       const ragBefore = g.ragdolls.length;
       g._test.shoot();
       return { magBefore, magAfter: g.player.mag, hit: window.__lastShot, ragBefore, rag: g.ragdolls.length };
-    });
+    }, dx);
     await sleep(600);
     afterShot = await page.evaluate(() => ({ rag: window.__game.ragdolls.length, wanted: +window.__game.police.wanted.toFixed(2) }));
     if (shot.magAfter < shot.magBefore && afterShot.rag > shot.ragBefore) break;
