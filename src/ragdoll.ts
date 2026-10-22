@@ -72,20 +72,22 @@ export class Ragdoll {
 
     // proportions follow the 4.4-head character build (1.84 m tall)
     const defs: Record<string, { pos: THREE.Vector3; r: number }> = {
+      // radii are the half-thickness of the mesh that hangs off each mass, not round numbers:
+      // a limb lying on the road has to rest ON its geometry, otherwise half the body sinks
       head: { pos: at(0, 1.66, 0), r: 0.21 },
       neck: { pos: at(0, 1.44, 0), r: 0.1 },
-      chest: { pos: at(0, 1.26, 0), r: 0.19 },
-      hips: { pos: at(0, 0.94, 0), r: 0.18 },
-      shoulderL: { pos: at(-0.3, 1.34, 0), r: 0.11 },
-      shoulderR: { pos: at(0.3, 1.34, 0), r: 0.11 },
-      elbowL: { pos: at(-0.36, 1.08, 0), r: 0.1 },
-      elbowR: { pos: at(0.36, 1.08, 0), r: 0.1 },
-      handL: { pos: at(-0.38, 0.82, 0), r: 0.1 },
-      handR: { pos: at(0.38, 0.82, 0), r: 0.1 },
-      kneeL: { pos: at(-0.15, 0.48, 0), r: 0.12 },
-      kneeR: { pos: at(0.15, 0.48, 0), r: 0.12 },
-      footL: { pos: at(-0.15, 0.1, 0), r: 0.1 },
-      footR: { pos: at(0.15, 0.1, 0), r: 0.1 },
+      chest: { pos: at(0, 1.26, 0), r: 0.18 },
+      hips: { pos: at(0, 0.94, 0), r: 0.17 },
+      shoulderL: { pos: at(-0.3, 1.34, 0), r: 0.13 },
+      shoulderR: { pos: at(0.3, 1.34, 0), r: 0.13 },
+      elbowL: { pos: at(-0.36, 1.08, 0), r: 0.125 },
+      elbowR: { pos: at(0.36, 1.08, 0), r: 0.125 },
+      handL: { pos: at(-0.38, 0.82, 0), r: 0.09 },
+      handR: { pos: at(0.38, 0.82, 0), r: 0.09 },
+      kneeL: { pos: at(-0.15, 0.48, 0), r: 0.19 },
+      kneeR: { pos: at(0.15, 0.48, 0), r: 0.19 },
+      footL: { pos: at(-0.15, 0.1, 0), r: 0.13 },
+      footR: { pos: at(0.15, 0.1, 0), r: 0.13 },
     };
 
     this.points = {};
@@ -258,6 +260,7 @@ export class Ragdoll {
     const h = dt / sub;
     for (let i = 0; i < sub; i++) this.step(h);
     this.syncMeshes();
+    this.liftOutOfGround();
     if (this.life > this.maxLife - 2) {
       const f = clamp((this.maxLife - this.life) / 2, 0, 1);
       this.group.traverse((o) => {
@@ -271,6 +274,32 @@ export class Ragdoll {
     }
     return this.life < this.maxLife;
   }
+
+  /**
+   * A mass rests at its radius, but a limb is a cylinder: lying at an angle its flank digs
+   * below that radius, which is the "sunk into the road" look. Measure the real meshes and
+   * lift the whole body by the deepest penetration instead of guessing per-point offsets.
+   */
+  liftOutOfGround() {
+    let lowest = 0;
+    const box = Ragdoll.box || (Ragdoll.box = new THREE.Box3());
+    for (const child of this.group.children) {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh) continue;
+      mesh.updateMatrixWorld();
+      box.setFromObject(mesh);
+      if (box.min.y < lowest) lowest = box.min.y;
+    }
+    if (lowest < -0.001) {
+      for (const pt of Object.values(this.points)) {
+        pt.p.y -= lowest;
+        pt.prev.y -= lowest;
+      }
+      this.syncMeshes();
+    }
+  }
+
+  static box: any;
 
   syncMeshes() {
     const P = this.points;

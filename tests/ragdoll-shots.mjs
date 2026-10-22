@@ -52,6 +52,17 @@ async function shot(name, wait, eye, back) {
       hands: d('handL', 'handR'),
       pts: Object.fromEntries(['head', 'chest', 'hips', 'kneeL', 'footL'].map(k => [k, [P[k].p.x, P[k].p.y, P[k].p.z].map(v => +v.toFixed(2))])),
       seg: { torso: d('hips', 'chest'), thigh: d('hips', 'kneeL'), shin: d('kneeL', 'footL') },
+      sunk: (() => {
+        // lowest point of every limb mesh versus the road: negative means it dug in
+        const b = new g.THREE.Box3();
+        let worst = 0;
+        r.group.traverse((o) => {
+          if (!o.isMesh) return;
+          b.setFromObject(o);
+          worst = Math.min(worst, b.min.y);
+        });
+        return +worst.toFixed(3);
+      })(),
     };
   });
 }
