@@ -1550,6 +1550,12 @@ function newGame() {
 let mapWasPaused = true;
 let settingsWasPaused = true;
 
+/** Roads as the minimap needs them: computed once, not per frame. */
+const MINIMAP_ROADS = [
+  ...JakartaMap.ARTERIALS.map((a) => ({ path: a.path, width: a.width })),
+  { path: JakartaMap.RING_ROAD, width: 20 },
+];
+
 function mapState() {
   return {
     blocks: city.blocks,
@@ -1942,6 +1948,7 @@ function update(dt: number) {
   hud.drawMinimap({
     blocks: city.blocks,
     roadLines: city.roadLines,
+    mapRoads: MINIMAP_ROADS,
     peds: peds.peds,
     police: police.cars,
     cars: [...cityCars, ...traffic.cars.map((e) => e.car)],

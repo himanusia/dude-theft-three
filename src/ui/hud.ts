@@ -592,8 +592,10 @@ export class HUD {
     // A local window, not the whole 2.5 km sheet: at world scale every block was two pixels and
     // the minimap read as scattered dots. 280 m across is about four streets in each direction.
     const half = 140;
-    const px0 = state.player?.x ?? 0;
-    const pz0 = state.player?.z ?? 0;
+    // the state passes the player as `playerPos`; reading `player` centred the minimap on the
+    // world origin, which is why only the blocks near (0,0) ever showed
+    const px0 = state.playerPos?.x ?? 0;
+    const pz0 = state.playerPos?.z ?? 0;
     const toMap = (x: number, z: number) => [(((x - px0) / half) * 0.5 + 0.5) * S, (((z - pz0) / half) * 0.5 + 0.5) * S];
 
     ctx.clearRect(0, 0, S, S);
