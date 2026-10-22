@@ -42,7 +42,7 @@ jobs:
     # game clamps dt to 50 ms, so time-based assertions (walk, jump, accelerate)
     # cannot pass. The macOS runner exposes a paravirtual Metal GPU and holds 60 fps
     # at the harness viewport, so the browser suites run there.
-    name: headless gameplay, interior, audit, playtest, touch, police
+    name: headless gameplay, interior, audit, playtest, touch, police, persistence
     needs: static
     runs-on: macos-latest
     timeout-minutes: 25
@@ -93,7 +93,7 @@ jobs:
           cat server.log
           exit 1
 
-      - name: Headless suites (all six)
+      - name: Headless suites (all seven)
         run: |
           set -euo pipefail
           # each harness must exit non-zero on a failed check; that is what makes this gate real
@@ -103,6 +103,8 @@ jobs:
           node tests/playtest.mjs 2>&1 | tee playtest.log
           node tests/touch.mjs 2>&1 | tee touch.log
           node tests/police-path.mjs 2>&1 | tee police.log
+          # persistence runs against the same built dist: DTA_URL is set by the job
+          node tests/persistence.mjs 2>&1 | tee persistence.log
 
       - name: Upload failure evidence
         if: failure()
@@ -116,6 +118,7 @@ jobs:
             playtest.log
             touch.log
             police.log
+            persistence.log
             server.log
             screenshots/
           if-no-files-found: ignore

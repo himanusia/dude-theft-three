@@ -63,8 +63,28 @@ sim pauses and collisions switch to the room's own colliders.
 | `Q` | Punch |
 | `R` | Reload |
 | `T` | Skip time of day |
-| `M` | Mute |
-| `Esc` | Pause / resume |
+| `M` | City map (pauses the sim) |
+| `N` | Mute |
+| `O` | Settings |
+| `Esc` | Pause / resume, close the map or settings |
+
+## Persistence and restart
+
+No backend, no account: the run lives in `localStorage` under two versioned keys.
+
+| Key | Contents |
+|---|---|
+| `dta.save.v1` | player position/yaw/camera, cash, health, wanted level, time of day, weapon + ammo, owned weapons, objective progress |
+| `dta.settings.v1` | mouse sensitivity, invert Y, master/SFX/BGM volume, render scale, show-FPS |
+
+The run autosaves every 20 s of wall clock and on every pause; the start screen then offers
+**Continue** (restore) or **New game** (reset in place, no page reload). A payload with bad
+JSON or an unknown schema version is dropped with one `[dta]` warning and the game boots
+fresh — it never throws. Settings apply live and are restored before the first sound, and the
+mixer levels are wired through `AudioSys.setVolumes`.
+
+`M` opens a full-screen map (roads, blocks, shops, cruisers, player arrow); the sim is paused
+while it is open and `Esc` closes it.
 
 ## Art direction vs the reference
 

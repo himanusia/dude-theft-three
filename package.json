@@ -10,7 +10,8 @@
     "preview": "vite preview --port 8765 --strictPort",
     "test:qa": "node tests/qa.mjs",
     "test:interior": "node tests/interior.mjs",
-    "test:audit": "node tests/audit.mjs"
+    "test:audit": "node tests/audit.mjs",
+    "test:persistence": "node tests/persistence.mjs"
   },
   "repository": {
     "type": "git",
