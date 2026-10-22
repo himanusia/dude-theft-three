@@ -98,25 +98,26 @@ function check(name, ok, detail) {
   const outCar = await page.evaluate(() => !window.__game.player.inCar && window.__game.player.y >= 0);
   check('exit vehicle with F', outCar);
 
-  // shooting a pedestrian
-  const shootRes = await page.evaluate(async () => {
+  // shooting a pedestrian with REAL mouse events: the 9mm needs three hits now
+  await page.mouse.move(750, 450); // settle the cursor before aiming (pointer lock warps the first move)
+  await sleep(250);
+  const shootRes = await page.evaluate(() => {
     const g = window.__game;
-    const ped = g.peds.peds.find(p => !p.dead);
-    ped.pos.set(26, g.city.groundHeightAt(26, -32), -32);
-    ped.target = ped.pos.clone(); ped.speed = 0.0001;
-    g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.08);
-    return { before: g.ragdolls.length, ped: ped.pos.toArray() };
+    g._test.teleport(26, -40);
+    g._test.setCam(Math.PI, 0.08);
+    g._test.target(6);
+    return { before: g.player.mag, rag: g.ragdolls.length };
   });
-  await sleep(800);
-  const shot = await page.evaluate(() => {
-    const g = window.__game;
-    const magBefore = g.player.mag;
-    g._test.shoot();
-    return { magBefore, magAfter: g.player.mag, hit: window.__lastShot, rag: g.ragdolls.length };
-  });
-  await sleep(700);
-  const afterShot = await page.evaluate(() => ({ rag: window.__game.ragdolls.length, wanted: +window.__game.police.wanted.toFixed(2) }));
-  check('shoot consumes ammo and ragdolls a ped', shot.magAfter < shot.magBefore && afterShot.rag > 0, { shot, afterShot });
+  await sleep(600);
+  for (let i = 0; i < 3; i++) {
+    await page.evaluate(() => { window.__game._test.pinTarget(6); window.__game._test.setCam(Math.PI, 0.08); });
+    await page.mouse.down();
+    await sleep(40);
+    await page.mouse.up();
+    await sleep(320);
+  }
+  const shot = await page.evaluate(() => ({ mag: window.__game.player.mag, rag: window.__game.ragdolls.length, last: window.__lastShot }));
+  check('shoot consumes ammo and ragdolls a ped', shot.mag < shootRes.before && shot.rag > shootRes.rag, { shot, before: shootRes });
 
   // melee
   const punch = await page.evaluate(async () => {
