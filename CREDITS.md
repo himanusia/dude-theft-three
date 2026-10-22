@@ -36,13 +36,13 @@ Files: `audio/ambience/*.ogg`
 
 ### Music — Kevin MacLeod
 - "Funkorama" — free-roam theme (`audio/bgm/funk.mp3`)
-- "Sneaky Snitch" — wanted-level theme (`audio/bgm/chase.mp3`)
+- "Killers" — wanted-level theme (`audio/bgm/chase.mp3`), tense pursuit cue
 - "Wallpaper" — unused variant ready for menus (`audio/bgm/calm.mp3`)
 
 Source: incompetech.com. Licensed under Creative Commons Attribution 4.0 International.
 Attribution text (keep this if you redistribute):
 
-> "Funkorama", "Sneaky Snitch", "Wallpaper" — Kevin MacLeod (incompetech.com)
+> "Funkorama", "Killers", "Wallpaper" — Kevin MacLeod (incompetech.com), CC BY 4.0
 > Licensed under Creative Commons: By Attribution 4.0 License
 > http://creativecommons.org/licenses/by/4.0/
 

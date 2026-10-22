@@ -120,6 +120,14 @@ export class AudioSys {
     this.play('step' + Math.floor(Math.random() * 4), { vol: 0.22, rate: 0.9 + Math.random() * 0.2 });
   }
 
+  /** Nudge the chase track's tempo up with the wanted level: same cue, more urgency. */
+  setBgmIntensity(intensity: number) {
+    const el = this.bgmEls?.chase;
+    if (!el) return;
+    const rate = 1 + Math.max(0, Math.min(1, intensity)) * 0.07;
+    if (Math.abs((el.playbackRate || 1) - rate) > 0.005) el.playbackRate = rate;
+  }
+
   startBgm(mode: string) {
     if (!this.ready || mode === this.bgmMode) return;
     const prev = this.bgmMode;

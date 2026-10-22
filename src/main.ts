@@ -1861,6 +1861,7 @@ function update(dt: number) {
 
   // music state: chase track while wanted
   audio.startBgm(police.starCount > 0 ? 'chase' : 'funk');
+  audio.setBgmIntensity(police.wanted / 5);
 
   hud.drawMinimap({
     blocks: city.blocks,
