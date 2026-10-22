@@ -254,8 +254,11 @@ export class Car {
         step.position.set(sx * W * 0.52, 0.44, L * 0.04);
         g.add(step);
         // mirror on a short stalk
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.04), trim);
+        arm.position.set(sx * W * 0.52, 1.4, L * 0.4);
+        g.add(arm);
         const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.12), trim);
-        mirror.position.set(sx * W * 0.58, 1.4, L * 0.4);
+        mirror.position.set(sx * W * 0.55, 1.4, L * 0.4);
         g.add(mirror);
       }
 
@@ -329,7 +332,7 @@ export class Car {
           g.add(apillar);
         }
         const header = new THREE.Mesh(rb(W * 0.87, 0.05, 0.07, 0.015, 1), frameMat);
-        header.position.set(0, 1.49, L * 0.08);
+        header.position.set(0, 1.43, L * 0.1);
         g.add(header);
         const sill = new THREE.Mesh(rb(W * 0.87, 0.05, 0.07, 0.015, 1), frameMat);
         sill.position.set(0, 0.99, L * 0.19);
@@ -463,8 +466,12 @@ export class Car {
 
     // mirrors, plate, exhaust tips (skipped on ambient traffic to save draw calls)
     if (!this.simple) for (const sx of [-1, 1]) {
+      // mirror on a stalk that actually reaches the door, instead of hovering beside it
+      const stalk = new THREE.Mesh(rb(0.13, 0.035, 0.035, 0.01, 1), trim);
+      stalk.position.set(sx * (W * 0.51), 1.02, L * 0.1);
+      g.add(stalk);
       const mirror = new THREE.Mesh(rb(0.1, 0.09, 0.16, 0.02, 1), chrome);
-      mirror.position.set(sx * (W * 0.56), 1.02, L * 0.1);
+      mirror.position.set(sx * (W * 0.535), 1.02, L * 0.1);
       g.add(mirror);
     }
     if (!this.simple) {

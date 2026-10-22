@@ -94,13 +94,28 @@ function check(name, ok, detail) {
   const entry = await page.evaluate(() => {
     const g = window.__game;
     const c = g.cityCars.find(c => !c.wrecked);
-    c.pos.set(26, 0, 0); c.yaw = 0; c.mesh.position.copy(c.pos); c.mesh.rotation.y = 0;
-    g._test.teleport(26 + 2.2, 0.4);
-    return { car: c.pos.toArray(), dist: +c.pos.distanceTo(g.player.pos).toFixed(2) };
+    // park it on a stretch of road with no collider within reach: a car dropped against a
+    // kerb or a market stall cannot pull away, which used to read as "0 km/h"
+    const clear = (x, z) => g.city.colliders.every((b) => {
+      const cx = Math.max(b.minX, Math.min(x, b.maxX));
+      const cz = Math.max(b.minZ, Math.min(z, b.maxZ));
+      return Math.hypot(x - cx, z - cz) > 3.6;
+    });
+    let spot = { x: 26, z: 0 };
+    for (const z of [0, 52, -52, 104, -104, 156, -156]) {
+      if (clear(26, z)) { spot = { x: 26, z }; break; }
+    }
+    c.pos.set(spot.x, 0, spot.z); c.yaw = 0; c.mesh.position.copy(c.pos); c.mesh.rotation.y = 0;
+    g._test.teleport(spot.x + 2.2, spot.z + 0.4);
+    return { car: c.pos.toArray(), spot, dist: +c.pos.distanceTo(g.player.pos).toFixed(2) };
   });
   await sleep(400);
-  await page.keyboard.press('f'); await sleep(500);
-  const inCar = await page.evaluate(() => !!window.__game.player.inCar);
+  let inCar = false;
+  for (let attempt = 0; attempt < 3 && !inCar; attempt++) {
+    await page.keyboard.press('f');
+    await sleep(450);
+    inCar = await page.evaluate(() => !!window.__game.player.inCar);
+  }
   check('enter vehicle with F', inCar, entry);
   await page.keyboard.down('w'); await sleep(2200); await page.keyboard.up('w');
   const drive = await page.evaluate(() => ({ kmh: Math.round(Math.abs(window.__game.player.inCar.speed) * 3.6), hp: window.__game.player.hp }));

@@ -1572,17 +1572,31 @@ export class City {
   }
 
   randomParkingSpot() {
-    const axis = Math.random() < 0.5 ? 'x' : 'z';
-    const line = pick(this.roadLines.filter((l) => l.axis === axis));
+    // A spot has to be clear of kerbs, stalls and landmarks: a car spawned wedged against a
+    // collider cannot move, which showed up as "vehicle accelerates :: 0 km/h".
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const axis = Math.random() < 0.5 ? 'x' : 'z';
+      const line = pick(this.roadLines.filter((l) => l.axis === axis));
+      const along = rand(-GRID * PITCH + 12, GRID * PITCH - 12);
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const off = 4.2;
+      const pos =
+        axis === 'x'
+          ? new THREE.Vector3(line.coord + side * off, 0, along)
+          : new THREE.Vector3(along, 0, line.coord + side * off);
+      const yaw = axis === 'x' ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : side > 0 ? Math.PI : 0;
+      const clear = this.colliders.every((b) => {
+        const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
+        const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
+        return Math.hypot(pos.x - cx, pos.z - cz) > 3.2;
+      });
+      if (clear) return { pos, yaw };
+    }
+    // no clear spot found: fall back to the middle of a lane, which is always drivable
+    const line = pick(this.roadLines);
     const along = rand(-GRID * PITCH + 12, GRID * PITCH - 12);
-    const side = Math.random() < 0.5 ? -1 : 1;
-    const off = 4.2;
-    const pos =
-      axis === 'x'
-        ? new THREE.Vector3(line.coord + side * off, 0, along)
-        : new THREE.Vector3(along, 0, line.coord + side * off);
-    const yaw = axis === 'x' ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : side > 0 ? Math.PI : 0;
-    return { pos, yaw };
+    const pos = line.axis === 'x' ? new THREE.Vector3(line.coord, 0, along) : new THREE.Vector3(along, 0, line.coord);
+    return { pos, yaw: line.axis === 'x' ? -Math.PI / 2 : 0 };
   }
 
   randomSidewalkPointAround(centre: any, minR = 14, maxR = 48) {
