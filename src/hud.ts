@@ -16,6 +16,7 @@ export class HUD {
       health: document.getElementById('health-fill'),
       healthNum: document.getElementById('health-num'),
       ammo: document.getElementById('ammo'),
+      weaponLabel: document.querySelector('#ammo-wrap small'),
       prompt: document.getElementById('prompt'),
       toasts: document.getElementById('toasts'),
       objective: document.getElementById('objective'),
@@ -73,6 +74,10 @@ export class HUD {
     this.el.health.style.background =
       pct > 55 ? 'linear-gradient(90deg,#4ade80,#22c55e)' : pct > 25 ? 'linear-gradient(90deg,#fbbf24,#f59e0b)' : 'linear-gradient(90deg,#f87171,#dc2626)';
     this.el.healthNum.textContent = Math.round(pct);
+  }
+
+  setWeapon(name: string, slot: number, reserve: number) {
+    if (this.el.weaponLabel) this.el.weaponLabel.textContent = `${slot} · ${name.toUpperCase()}${reserve >= 0 ? '  +' + reserve : ''}`;
   }
 
   setAmmo(cur: any, max: any, reloading: any) {
