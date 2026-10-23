@@ -757,7 +757,7 @@ export class City {
       const lmGroup = new THREE.Group();
       lmGroup.position.y = terrainHeight(lm.x, lm.z);
       this.group.add(lmGroup);
-      const ctx = { group: lmGroup, colliders: this.colliders, audit: this.propAudit };
+      const ctx = { group: lmGroup, colliders: this.colliders, audit: this.propAudit, groundHeightAt: (x: number, z: number) => this.groundHeightAt(x, z) };
       if (lm.id === 'monas') buildMonas(ctx, lm.x, lm.z);
       else if (lm.id === 'bundaran-hi') buildBundaran(ctx, lm.x, lm.z);
       else if (lm.id === 'stadhuis') buildKotaTua(ctx, lm.x, lm.z);
@@ -1030,6 +1030,50 @@ export class City {
     return Math.hypot(x - this.spawnCache.x, z - this.spawnCache.z) < pad;
   }
 
+  /**
+   * Push a point out of every carriageway.
+   *
+   * Hero assets were placed relative to getSpawn(), and the spawn sits on the arterial
+   * centreline, so six of them ended up standing in the road. This projects the point onto the
+   * nearest road and moves it to the far side of the kerb, which is where a building belongs.
+   */
+  pushOffRoad(x: number, z: number, extra: number): { x: number; z: number } {
+    let px = x, pz = z;
+    for (let pass = 0; pass < 6; pass++) {
+      const moved = this.pushOffRoadOnce(px, pz, extra);
+      if (moved.x === px && moved.z === pz) return { x: px, z: pz };
+      px = moved.x; pz = moved.z;
+    }
+    return { x: px, z: pz };
+  }
+
+  private pushOffRoadOnce(x: number, z: number, extra: number): { x: number; z: number } {
+    const roads: { path: [number, number][]; half: number }[] = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], half: a.width / 2 })),
+      { path: RING_ROAD as [number, number][], half: 10 },
+      ...LOCAL_STREETS.map((l) => ({ path: l.path as [number, number][], half: l.width / 2 })),
+    ];
+    for (const { path, half } of roads) {
+      for (let i = 1; i < path.length; i++) {
+        const [x1, z1] = path[i - 1];
+        const [x2, z2] = path[i];
+        const dx = x2 - x1, dz = z2 - z1;
+        const len = Math.hypot(dx, dz) || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / (len * len);
+        t = Math.max(0, Math.min(1, t));
+        const px = x1 + dx * t, pz = z1 + dz * t;
+        const dist = Math.hypot(x - px, z - pz);
+        const need = half + extra;
+        if (dist < need) {
+          const nx = (x - px) / (dist || 1);
+          const nz = (z - pz) / (dist || 1);
+          return { x: px + nx * need, z: pz + nz * need };
+        }
+      }
+    }
+    return { x, z };
+  }
+
   snapToVerge(x: number, z: number): { x: number; z: number; yaw: number } | null {
     let best: { d: number; cx: number; cz: number; nx: number; nz: number; yaw: number; half: number } | null = null;
     for (const a of [...ARTERIALS, { path: RING_ROAD, width: 20 } as any]) {
@@ -1128,11 +1172,14 @@ export class City {
     // player. Automatic placement put this asset in the wrong place five times, so the first one
     // is placed by hand and photographed before anything else uses snapToVerge.
     const sp = this.getSpawn();
-    const mg = buildMinimarket(ctx, sp.x, sp.z + 22, Math.PI, 'INDOMERET');
-    this.placeOnGround(mg, sp.x, sp.z + 22);
+    const mmSpot = this.pushOffRoad(sp.x, sp.z + 22, 3.6 + 5.5);
+    const mg = buildMinimarket(ctx, mmSpot.x, mmSpot.z, Math.PI, 'INDOMERET');
+    this.placeOnGround(mg, mmSpot.x, mmSpot.z);
     // police post beside the minimarket, on the first slot that clears every collider
     for (const [dx, dz] of [[13, 0], [17, 0], [21, 0], [-13, 0], [-17, 0], [13, 12], [13, -12], [0, 16]]) {
-      const cx = sp.x + dx, cz = sp.z + 22 + dz;
+      const raw = { x: sp.x + dx, z: sp.z + 22 + dz };
+      const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 4);
+      const cx = spot.x, cz = spot.z;
       if (this.nearLayang(cx, cz, 14)) continue;
       if (this.colliders.some((c) => cx > c.minX - 8 && cx < c.maxX + 8 && cz > c.minZ - 8 && cz < c.maxZ + 8)) continue;
       const pg = buildPosPolisi(ctx, cx, cz, 0);
@@ -1145,7 +1192,9 @@ export class City {
       for (const r of [18, 26, 34, 44, 56, 70, 86, 104]) {
         for (let a = 0; a < 12 && placed < 3; a++) {
           const t = (a / 12) * Math.PI * 2 + placed;
-          const cx = sp.x + Math.cos(t) * r, cz = sp.z + 22 + Math.sin(t) * r;
+          const raw = { x: sp.x + Math.cos(t) * r, z: sp.z + 22 + Math.sin(t) * r };
+          const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 5);
+          const cx = spot.x, cz = spot.z;
           if (this.nearLayang(cx, cz, 8)) continue;
           if (this.colliders.some((c) => cx > c.minX - 5 && cx < c.maxX + 5 && cz > c.minZ - 5 && cz < c.maxZ + 5)) continue;
           const rg = buildRonda(ctx, cx, cz, Math.atan2(sp.x - cx, sp.z - cz));
@@ -1161,7 +1210,9 @@ export class City {
       let placed = false;
       for (let a = 0; a < 18; a++) {
         const t = (a / 18) * Math.PI * 2;
-        const cx = sp.x + Math.cos(t) * r, cz = sp.z + 22 + Math.sin(t) * r;
+        const raw = { x: sp.x + Math.cos(t) * r, z: sp.z + 22 + Math.sin(t) * r };
+      const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 10);
+      const cx = spot.x, cz = spot.z;
         if (this.nearLayang(cx, cz, 26)) continue;
         if (this.mrtSpine.some((pt) => Math.hypot(pt[0] - cx, pt[1] - cz) < 30)) continue;
         // it is 28 x 20 m: it needs more room than the shops
@@ -1224,7 +1275,9 @@ export class City {
       let placed = false;
       for (let a = 0; a < 16; a++) {
         const t = (a / 16) * Math.PI * 2;
-        const cx = sp.x + Math.cos(t) * r, cz = sp.z + 22 + Math.sin(t) * r;
+        const raw = { x: sp.x + Math.cos(t) * r, z: sp.z + 22 + Math.sin(t) * r };
+        const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 8);
+        const cx = spot.x, cz = spot.z;
         if (this.nearLayang(cx, cz, 24)) continue;
         if (this.mrtSpine.some((pt) => Math.hypot(pt[0] - cx, pt[1] - cz) < 26)) continue;
         if (this.colliders.some((c) => cx > c.minX - 11 && cx < c.maxX + 11 && cz > c.minZ - 11 && cz < c.maxZ + 11)) continue;
@@ -1245,7 +1298,11 @@ export class City {
       }
     }
     for (const [dx, dz] of ring) {
-      const cx = sp.x + dx, cz = sp.z + 22 + dz;
+      const raw = { x: sp.x + dx, z: sp.z + 22 + dz };
+
+      const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 11);
+
+      const cx = spot.x, cz = spot.z;
       if (this.nearLayang(cx, cz, 16)) continue;
       if (this.colliders.some((c) => cx > c.minX - 9 && cx < c.maxX + 9 && cz > c.minZ - 9 && cz < c.maxZ + 9)) continue;
       const rg = buildRumahPadang(ctx, cx, cz, 0);

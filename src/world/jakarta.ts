@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from './city';
+import { terrainHeight } from './terrain';
 import { canvasTexture, rand, pick } from '../core/utils';
 
 /** shrink a label until it fits the drawn width */
@@ -466,8 +467,14 @@ export function buildAncolShore(ctx: Ctx, cx: number, cz: number, half = 38) {
       ctx.group.add(pile);
     }
   }
+  // The flag mast is 12 m tall, so a fixed y of 6.4 put its foot 2.4 m above the sand at Ancol.
+  // Ground the base against the terrain under it, the same contract every other prop follows.
+  // Landmarks live in a group already lifted to their terrain height, so the mast has to be
+  // grounded against the same measure the rest of the city uses, not against local zero.
+  const mastGround = (ctx as { groundHeightAt?: (x: number, z: number) => number }).groundHeightAt?.(cx + 8, cz - 30) ?? terrainHeight(cx + 8, cz - 30);
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 12, 6), new THREE.MeshStandardMaterial({ color: 0xb9b6ae, roughness: 0.6, metalness: 0.4 }));
-  mast.position.set(cx + 8, 6.4, cz - 30);
+  const lmBase = (ctx as { group: THREE.Group }).group.position.y;
+  mast.position.set(cx + 8, mastGround - lmBase + 6, cz - 30);
   ctx.group.add(mast);
 
   // feather flags: yellow and blue, the strongest colour anchor on the real beach
