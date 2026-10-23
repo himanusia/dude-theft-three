@@ -1,0 +1,101 @@
+[
+ {
+  "kind": "bakso",
+  "file": "screenshots/proof/gerobak-bakso.png",
+  "ok": true,
+  "candidate": 0,
+  "side": 1,
+  "blocked": [],
+  "onScreen": true,
+  "cam": [
+   52.13,
+   1.31,
+   176.02
+  ],
+  "hub": [
+   981,
+   583
+  ],
+  "vertical": 186,
+  "foreAft": 91,
+  "ratio": 0.49,
+  "sideAspect": 1,
+  "gaps": {
+   "tyres": [
+    0.001,
+    0.258
+   ],
+   "feet": [
+    0.001,
+    0
+   ]
+  },
+  "level": false
+ },
+ {
+  "kind": "nasgor",
+  "file": "screenshots/proof/gerobak-nasgor.png",
+  "ok": true,
+  "candidate": 0,
+  "side": 1,
+  "blocked": [],
+  "onScreen": true,
+  "cam": [
+   60.14,
+   1.29,
+   174.57
+  ],
+  "hub": [
+   981,
+   583
+  ],
+  "vertical": 186,
+  "foreAft": 91,
+  "ratio": 0.49,
+  "sideAspect": 1,
+  "gaps": {
+   "tyres": [
+    0,
+    0.259
+   ],
+   "feet": [
+    0.002,
+    0.001
+   ]
+  },
+  "level": false
+ },
+ {
+  "kind": "sate",
+  "file": "screenshots/proof/gerobak-sate.png",
+  "ok": true,
+  "candidate": 0,
+  "side": -1,
+  "blocked": [],
+  "onScreen": true,
+  "cam": [
+   65.23,
+   1.24,
+   157.07
+  ],
+  "hub": [
+   619,
+   583
+  ],
+  "vertical": 186,
+  "foreAft": 91,
+  "ratio": 0.49,
+  "sideAspect": 1,
+  "gaps": {
+   "tyres": [
+    0.261,
+    -0.002
+   ],
+   "feet": [
+    0.002,
+    0
+   ]
+  },
+  "level": false
+ }
+]
