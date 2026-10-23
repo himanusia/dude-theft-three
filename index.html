@@ -391,7 +391,7 @@
     --s: var(--hud-scale);
     --hud-pad: calc(14px * var(--s));
     --hud-gap: calc(8px * var(--s));
-    --hud-radius: calc(10px * var(--s));
+    --hud-radius: calc(2px * var(--s));
     --hud-top: calc(var(--hud-safe-t) + var(--hud-pad));
     --hud-right: calc(var(--hud-safe-r) + var(--hud-pad));
     --hud-left: calc(var(--hud-safe-l) + var(--hud-pad));
@@ -420,7 +420,7 @@
     font-size: max(12px, calc(13.5px * var(--s))); letter-spacing: .01em; line-height: 1.35;
     padding: calc(9px * var(--s)) calc(14px * var(--s)) calc(10px * var(--s));
     border-left: 3px solid var(--accent);
-    background: var(--panel); backdrop-filter: blur(12px); border-radius: var(--hud-radius);
+    background: rgba(6, 8, 10, .74); backdrop-filter: none; border: none; border-radius: var(--hud-radius);
     border-top: 1px solid var(--stroke); border-right: 1px solid var(--stroke); border-bottom: 1px solid var(--stroke);
     text-transform: uppercase; font-weight: 700; color: var(--ink);
     box-shadow: 0 10px 30px rgba(0,0,0,.35);
@@ -429,10 +429,12 @@
     content: "OBJECTIVE"; display: block; font-size: max(12px, calc(9.5px * var(--s)));
     letter-spacing: .22em; color: var(--accent); margin-bottom: calc(4px * var(--s)); font-weight: 800;
   }
+  /* no pill: GTA V has no rounded chip in the corner. A bare number is a debug readout, which
+     is what an FPS counter is. */
   #fps {
-    font-size: 12px; color: var(--ink-dim); letter-spacing: .12em; line-height: 1;
-    padding: calc(4px * var(--s)) calc(8px * var(--s)); border-radius: 999px;
-    background: var(--panel); border: 1px solid var(--stroke); font-variant-numeric: tabular-nums;
+    font-size: 12px; color: rgba(255,255,255,.78); letter-spacing: .12em; line-height: 1;
+    padding: 3px 6px; border: none; border-radius: 1px;
+    background: rgba(6,8,10,.62); font-variant-numeric: tabular-nums;
   }
   #fps::after { content: " FPS"; }
 
@@ -453,7 +455,7 @@
   }
   #wanted {
     padding: calc(3px * var(--s)) calc(9px * var(--s)) calc(4px * var(--s));
-    border-radius: var(--hud-radius); background: var(--panel); border: 1px solid var(--stroke);
+    border-radius: var(--hud-radius); background: rgba(6,8,10,.74); border: none;
     backdrop-filter: blur(10px);
   }
   #wanted-label { font-size: 12px; letter-spacing: .22em; color: #ff8f83; font-weight: 800; }
@@ -521,7 +523,7 @@
     display: flex; align-items: center; flex-wrap: wrap; gap: calc(4px * var(--s)) calc(8px * var(--s));
     max-width: min(62vw, calc(560px * var(--s)));
     font-size: 12px; line-height: 1.5; letter-spacing: .02em; color: var(--ink-dim);
-    padding: calc(4px * var(--s)) calc(11px * var(--s)); border-radius: 999px;
+    padding: calc(4px * var(--s)) calc(9px * var(--s)); border-radius: 2px;
     background: var(--panel); border: 1px solid var(--stroke); backdrop-filter: blur(10px);
   }
   #hints b { color: var(--ink); font-weight: 700; }
@@ -539,7 +541,7 @@
   #health-label { font-size: 12px; letter-spacing: .16em; font-weight: 700; color: var(--ink-dim); }
   #health-bar {
     width: calc(160px * var(--s)); height: max(10px, calc(12px * var(--s)));
-    background: rgba(0,0,0,.6); border: 1px solid var(--stroke); border-radius: 999px; overflow: hidden;
+    background: rgba(0,0,0,.62); border: none; border-radius: 1px; overflow: hidden;
     box-shadow: inset 0 1px 3px rgba(0,0,0,.6);
   }
   #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#4ade80,#22c55e); transition: width .18s ease; }
@@ -556,7 +558,7 @@
     display: flex; flex-direction: column; align-items: center; gap: calc(6px * var(--s));
   }
   #prompt {
-    max-width: 100%; padding: calc(8px * var(--s)) calc(16px * var(--s)); border-radius: calc(16px * var(--s));
+    max-width: 100%; padding: calc(8px * var(--s)) calc(14px * var(--s)); border-radius: 2px;
     background: var(--panel); backdrop-filter: blur(8px);
     font-size: max(12px, calc(13px * var(--s))); font-weight: 600; letter-spacing: .03em; opacity: 0;
     transition: opacity .18s ease, transform .18s ease; border: 1px solid var(--stroke);
@@ -568,7 +570,7 @@
   #speedo {
     text-align: center; opacity: 0; transition: opacity .2s ease;
     padding: calc(1px * var(--s)) calc(14px * var(--s)) calc(3px * var(--s));
-    border-radius: var(--hud-radius); background: var(--panel); border: 1px solid var(--stroke);
+    border-radius: var(--hud-radius); background: rgba(6,8,10,.74); border: none;
   }
   #speedo.show { opacity: 1; }
   #speed-val { font-size: max(22px, calc(40px * var(--s))); font-weight: 800; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
