@@ -1,0 +1,52 @@
+{
+ "file": "screenshots/proof/gerobak-kerb.png",
+ "cart": {
+  "name": "kaki5-bakso",
+  "at": [
+   "49.84",
+   "0.286",
+   "178.07"
+  ],
+  "yaw": 3.321,
+  "kerbDrop": 0.262,
+  "kerbNear": 0.6
+ },
+ "camera": {
+  "cam": [
+   47.21,
+   0.98,
+   180.67
+  ],
+  "camGround": 0.033,
+  "camIsRoad": true,
+  "kerbDistance": 1,
+  "distance": 3.7,
+  "reach": 2.7,
+  "camHeight": 0.95,
+  "azimuth": 2.362,
+  "farTyre": "tyre+Z",
+  "farTyrePx": [
+   647,
+   611
+  ],
+  "inFrame": true,
+  "inside": true,
+  "blocked": [],
+  "rect": {
+   "x": 543,
+   "y": 113,
+   "w": 460,
+   "h": 560
+  },
+  "farVisible": true,
+  "ok": true
+ },
+ "png": {
+  "width": 1600,
+  "height": 1000,
+  "luma": 103.8,
+  "cartPxRatio": 0.33
+ },
+ "ok": true,
+ "errors": []
+}

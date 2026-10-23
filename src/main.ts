@@ -2179,7 +2179,10 @@ window.__game = {
       }
 
       for (const item of city.propAudit || []) {
-        const ground = city.groundHeightAt(item.x, item.z);
+        // a prop seated on its contacts publishes where its lowest contact is (`bx`/`bz`), and the
+        // gap belongs to that contact: a cart tyre 60 cm from the slot on a 12% grade reads as an
+        // 8 cm "float" against the slot sample, while a tyre parked over the kerb reads as 26 cm
+        const ground = city.groundHeightAt(item.bx ?? item.x, item.bz ?? item.z);
         const gap = item.bottom - ground;
         // sprites and wall-mounted props legitimately float; only ground furniture is checked
         // seats, signal heads and lens boxes hang in the air on purpose

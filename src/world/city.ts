@@ -568,6 +568,66 @@ type InstancedAdder = (
   audit?: boolean
 ) => THREE.InstancedMesh | null;
 
+/**
+ * A point where a prop meets the ground, in the prop's own frame.
+ *
+ * `x`/`z` are where the contact is; `y` is left out on purpose — it is measured back out of the
+ * built mesh (see `contactBottom`), so a tread sunk 5 mm into the paving or a rubber foot on the
+ * group origin both seat on the surface they actually touch instead of on a constant repeated from
+ * the builder.
+ */
+interface GroundContact {
+  x: number;
+  z: number;
+  /** contact patch radius: how far to look for the lowest vertex of this foot or tread */
+  r: number;
+}
+
+/**
+ * Where a gerobak touches the ground: both tyres and both braced feet (src/world/kakilima.ts).
+ * The tyres sit at local x=0.38, outboard at z=±0.50, so the cart is 1.0 m across the track; the
+ * feet are 1.16 m behind the axle at z=±0.29. Those four points are the reason one ground sample at
+ * the slot cannot seat this prop: the kerbside slots sit on the pavement edge, and a 1.0 m track
+ * across that edge puts one tyre 26 cm over the carriageway (t_3bbf1bce).
+ */
+const CART_CONTACTS: GroundContact[] = [
+  { x: 0.38, z: 0.5, r: 0.2 },
+  { x: 0.38, z: -0.5, r: 0.2 },
+  { x: -0.6, z: 0.29, r: 0.2 },
+  { x: -0.6, z: -0.29, r: 0.2 },
+];
+
+/**
+ * Least-squares plane `e = d + a*x + b*z` through a prop's contact errors.
+ *
+ * Four contacts, three unknowns: a rigid body can lift and tilt but not bend, so the fit splits the
+ * error the way a prop actually settles - half the residual at one corner goes into a tilt rather
+ * than into one foot floating. Solved with Cramer's rule on the 3x3 normal equations, which is
+ * stable here because the contacts span both axes (a prop with all four contacts on one line has no
+ * tilt to fit and falls back to the mean).
+ */
+function fitContactPlane(xs: number[], zs: number[], es: number[]): { d: number; a: number; b: number } {
+  const n = xs.length;
+  let Sx = 0, Sz = 0, Sxx = 0, Sxz = 0, Szz = 0, Se = 0, Sxe = 0, Sze = 0;
+  for (let i = 0; i < n; i++) {
+    Sx += xs[i]; Sz += zs[i];
+    Sxx += xs[i] * xs[i]; Sxz += xs[i] * zs[i]; Szz += zs[i] * zs[i];
+    Se += es[i]; Sxe += xs[i] * es[i]; Sze += zs[i] * es[i];
+  }
+  const A = [[n, Sx, Sz], [Sx, Sxx, Sxz], [Sz, Sxz, Szz]];
+  const rhs = [Se, Sxe, Sze];
+  const det = (m: number[][]) =>
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const d0 = det(A);
+  if (Math.abs(d0) < 1e-6) return { d: Se / n, a: 0, b: 0 };
+  const swapped = (col: number) => A.map((row, i) => row.map((v, j) => (j === col ? rhs[i] : v)));
+  return { d: det(swapped(0)) / d0, a: det(swapped(1)) / d0, b: det(swapped(2)) / d0 };
+}
+
+
+
 export class City {
   declare scene: any;
   declare colliders: any[];
@@ -587,7 +647,15 @@ export class City {
   declare rootGroup: THREE.Group;
   /** shopfront rings, merged into one mesh at the end of the block pass */
   declare shopfrontGeos: THREE.BufferGeometry[];
-  declare propAudit: { name: string; x: number; z: number; bottom: number }[];
+  /**
+   * Placement audit rows. `x`/`z` are the slot the prop stands on; `bottom` is where its ground face
+   * is. For a prop seated from one sample (`placeOnGround`) that is the slot's ground height. For a
+   * prop seated on its contacts (`standOnContacts`, the kaki lima carts) it is the LOWEST contact,
+   * and `bx`/`bz` are where that contact is, so the floating-prop check measures the gap under the
+   * contact instead of under the slot: comparing a tyre 60 cm from the slot on a 12% grade against
+   * the slot sample reports the slope as a gap and hides the straddle it is looking for.
+   */
+  declare propAudit: { name: string; x: number; z: number; bottom: number; bx?: number; bz?: number }[];
   /**
    * Live ojeks, so a capture or a game system can find one without reverse-engineering a
    * propAudit slot: the group is where the mesh actually stands, and box is the delivery box's
@@ -617,6 +685,8 @@ export class City {
   declare dashMatrices: any[];
   /** [roadIndex, distanceAlongRoad] for every pedestrian crossing the network implies. */
   crossings: { road: number; u: number }[] = [];
+  /** built surfaces a prop can be seated on; collected on first use (see surfaces()) */
+  private surfaceCache: THREE.Object3D[] | null = null;
 
   declare doorMatrices: THREE.Matrix4[];
   declare handleMatrices: THREE.Matrix4[];
@@ -910,6 +980,10 @@ export class City {
     // geometry was rotated and displaced already; rotating the mesh again stood the city on
     // its edge and left the sky showing where the ground should be
     ground.receiveShadow = true;
+    // named, so a prop that has to be seated on the built surface can ray this instead of the
+    // analytic height: the plane is 190 segments over 3 km, so on a hill its triangles are up to
+    // 0.3 m away from what terrainHeight() says, and a prop seated on the analytic number floats
+    ground.name = 'terrain';
     this.group.add(ground);
 
     // sidewalk plates + block contents
@@ -971,6 +1045,7 @@ export class City {
       const plate = new THREE.Mesh(new THREE.BoxGeometry(size, 0.26, size), sidewalkMat);
       plate.position.set(cx, 0.13, cz);
       plate.receiveShadow = true;
+      plate.name = 'plate';        // a built walking surface, for contact seating (see contactGround)
       this.group.add(plate);
 
       const curb = new THREE.Mesh(new THREE.BoxGeometry(size + 0.9, 0.16, size + 0.9), curbMat);
@@ -1420,6 +1495,209 @@ export class City {
     if (last) last.bottom = y;
   }
 
+  /**
+   * The built walking surfaces a prop can be seated on, collected once.
+   *
+   * A contact seat costs one ray per contact per pass, so the ray has to be cheap and it has to
+   * see ground and nothing else. Raying the whole city group instead picked up other props'
+   * geometry (a cart's own tyres, a halte roof) and tested every instanced tree; the named surfaces
+   * are the terrain, the block plates and the street kit's trotoar/kerb/gutter/road ribbons.
+   */
+  private surfaces(): THREE.Object3D[] {
+    if (!this.surfaceCache) {
+      const wanted = new Set(['terrain', 'plate', 'trotoar', 'kerb', 'gutter', 'kerb-ramp', 'road-arterial', 'road-local', 'road-shoulder']);
+      this.surfaceCache = [];
+      this.group.traverse((o) => {
+        if (wanted.has(o.name)) this.surfaceCache!.push(o);
+      });
+    }
+    return this.surfaceCache;
+  }
+
+  /**
+   * The height of the built surface under (x, z), or null when nothing is under it.
+   *
+   * This is the contact target, and it has to be the built mesh rather than `groundHeightAt`: the
+   * pavement ribbon is swept as a flat cross-section from the terrain at each path station, so on a
+   * cross-slope the paving can sit 24 cm under the analytic `terrain + 0.26`, and a prop seated on
+   * the analytic number floats over the paving the player can see (measured on the southern rise,
+   * t_3bbf1bce). The window is wide because of that same slope, and narrow enough that a roof or a
+   * wall two metres up cannot be mistaken for the street.
+   */
+  private contactGround(x: number, z: number): number | null {
+    const near = this.groundHeightAt(x, z);
+    const ray = new THREE.Raycaster(new THREE.Vector3(x, near + 1.2, z), new THREE.Vector3(0, -1, 0), 0, 2.4);
+    const hits = ray.intersectObjects(this.surfaces(), true) as { point: THREE.Vector3; face: { normal: THREE.Vector3 } | null; object: THREE.Object3D }[];
+    const n = new THREE.Vector3();
+    const nm = new THREE.Matrix3();
+    let best: number | null = null;
+    for (const h of hits) {
+      if (h.point.y > near + 0.32 || h.point.y < near - 0.6) continue;
+      // only an upward face can be stood on. A ray that lands on the vertical back of a paving slab
+      // returns a height anywhere between the slab and the ground under it, and that number seated
+      // one cart 24 cm into the street; a prop rests on a face with a normal, not on an edge.
+      if (h.face) {
+        n.copy(h.face.normal).applyMatrix3(nm.getNormalMatrix(h.object.matrixWorld)).normalize();
+        if (n.y < 0.5) continue;
+      }
+      if (best === null || h.point.y > best) best = h.point.y;
+    }
+    return best;
+  }
+
+  /** where a prop yawed by `yaw` and centred at (x, z) puts one contact (three.js Y-rotation) */
+  private contactWorld(x: number, z: number, yaw: number, c: GroundContact) {
+    const c1 = Math.cos(yaw);
+    const s1 = Math.sin(yaw);
+    return { x: x + c.x * c1 + c.z * s1, z: z - c.x * s1 + c.z * c1 };
+  }
+
+  /**
+   * The height of a prop's contact face, read back out of the built mesh: the lowest vertex within
+   * `r` of the contact, in the prop's own frame.
+   *
+   * Measuring beats repeating the builder's constants: the cart's tread is built 5 mm sunk into the
+   * paving (a tangent tyre otherwise contacts on one anti-aliased pixel and reads as floating) and
+   * its rubber feet sit on the group origin, so the two contact kinds do not share a y.
+   */
+  private contactBottom(g: THREE.Object3D, lx: number, lz: number, r: number): number {
+    g.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+    const v = new THREE.Vector3();
+    const local = new THREE.Vector3();
+    let best = Infinity;
+    g.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.geometry || !m.geometry.attributes.position) return;
+      if (Array.isArray(m.material) ? m.material.some((mm) => mm.transparent) : m.material?.transparent) return;
+      const pos = m.geometry.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+        local.copy(v).applyMatrix4(inv);
+        if (Math.hypot(local.x - lx, local.z - lz) > r) continue;
+        if (local.y < best) best = local.y;
+      }
+    });
+    return best === Infinity ? 0 : best;
+  }
+
+  /**
+   * A stance where a wide prop's four contacts all stand on the same surface.
+   *
+   * `placeOnGround` samples the slot once, which seats a narrow prop and mis-seats a wide one: the
+   * kerbside slot sits on the pavement edge, a gerobak's track is 1.0 m across that edge, and one
+   * tyre ended up 26 cm over the carriageway (measured, t_3bbf1bce). This walks the slot outward in
+   * 30 cm rings and scores every candidate on two things: are the built heights under the four
+   * contacts within 3 cm of each other (the largest spread a rigid prop can take and still have
+   * every tyre and foot on the ground), and is each of them the surface `groundHeightAt` describes.
+   * The first candidate that passes both, nearest the slot, is returned; failing that the flattest
+   * stance on a slab, then any level ground, then the flattest place found - a cart parked in the
+   * gutter under a kerb is still a cart on the ground, and the audit reports the gap either way.
+   *
+   * Returns a stance, not a correction: the caller builds the prop there, so the audit entry, the
+   * collider and the mesh all describe the same place.
+   */
+  private wideStance(x: number, z: number, yaw: number, contacts: GroundContact[]) {
+    const spreadOf = (g: number[]) => Math.max(...g) - Math.min(...g);
+    const onPavement = (px: number, pz: number) => this.groundHeightAt(px, pz) - terrainHeight(px, pz) > 0.2;
+    // a stance is only a stance when the built surface under each contact is the surface
+    // `groundHeightAt` describes. On the verge that is not free: the plate is 26 cm high and
+    // `groundHeightAt` carries a 1.2 m margin past its edge, so a cart can stand on the ground
+    // beside a slab and read "on the pavement" analytically. Level, but in the gutter.
+    const onTheSurface = (p: { x: number; z: number }, built: number) => Math.abs(built - this.groundHeightAt(p.x, p.z)) <= 0.08;
+    let onSlab: { x: number; z: number; spread: number } | null = null;
+    let levelAny: { x: number; z: number } | null = null;
+    let flattest: { x: number; z: number; spread: number } | null = null;
+    let rays = 0;
+    for (const r of [0, 0.3, 0.6, 0.9, 1.2, 1.5]) {
+      const steps = r === 0 ? 1 : 8;
+      for (let i = 0; i < steps; i++) {
+        const a = (i / steps) * Math.PI * 2;
+        const cx = x + Math.cos(a) * r;
+        const cz = z + Math.sin(a) * r;
+        const pts = contacts.map((c) => this.contactWorld(cx, cz, yaw, c));
+        const grounds: number[] = [];
+        for (const p of pts) {
+          const g = this.contactGround(p.x, p.z);
+          if (g === null) break;
+          grounds.push(g);
+        }
+        if (grounds.length < pts.length) continue;
+        rays++;
+        const spread = spreadOf(grounds);
+        const slab = pts.every((p, k) => onTheSurface(p, grounds[k]));
+        if (!flattest || spread < flattest.spread) flattest = { x: cx, z: cz, spread };
+        if (slab && pts.every((p) => onPavement(p.x, p.z)) && spread <= 0.03) return { x: cx, z: cz };
+        if (slab && (!onSlab || spread < onSlab.spread) && spread <= 0.16) onSlab = { x: cx, z: cz, spread };
+        if (spread <= 0.03 && !levelAny) levelAny = { x: cx, z: cz };
+        if (rays >= 80) break;
+      }
+      if (rays >= 80) break;
+    }
+    // a stance on the paving beats a level one in the gutter: the cart is a kerbside prop, and the
+    // tilt in standOnContacts is there for exactly the grade a slab can have
+    const pick = onSlab ?? levelAny ?? flattest;
+    return pick ? { x: pick.x, z: pick.z } : { x, z };
+  }
+
+  /**
+   * Put a wide prop down on its own contact plane.
+   *
+   * Two degrees of freedom are solved, the way `standOjek` solves two for a bike: the mean error
+   * lifts or drops the group, and the slope of the errors across the footprint tilts it, so a cart
+   * on a crossfall or on the southern rise has both tyres and both feet on the ground instead of
+   * one end in the paving. The tilt is the ground's own fall, not a styling choice, and it is
+   * capped: a stance is only accepted when its four contacts already agree within 3 cm, so anything
+   * past the cap is a bad stance rather than a hill.
+   *
+   * `bottom` on the audit entry becomes the LOWEST contact, not the slot sample. That is what lets
+   * `_test.audit()` see a straddling prop: a cart whose far tyre is down on the carriageway reports
+   * 26 cm under the pavement its slot stands on, and the suite fails instead of passing.
+   */
+  private standOnContacts(g: THREE.Object3D, yaw: number, stance: { x: number; z: number }, contacts: GroundContact[]) {
+    g.rotation.order = 'YXZ';
+    g.rotation.set(0, yaw, 0);
+    g.position.set(stance.x, 0, stance.z);
+    g.updateMatrixWorld(true);
+    const local = contacts.map((c) => ({ x: c.x, z: c.z, y: this.contactBottom(g, c.x, c.z, c.r) }));
+    const p = new THREE.Vector3();
+    const MAX_TILT = 0.2;       // 11.5 deg: the steepest grade the southern rise reaches
+    for (let pass = 0; pass < 3; pass++) {
+      g.updateMatrixWorld(true);
+      const err = local.map((c) => {
+        p.set(c.x, c.y, c.z);
+        g.localToWorld(p);
+        // analytic only when nothing is built there at all: no cart is dropped through a hole
+        const ground = this.contactGround(p.x, p.z);
+        return (ground === null ? this.groundHeightAt(p.x, p.z) : ground) - p.y;
+      });
+      const { d, a, b } = fitContactPlane(local.map((c) => c.x), local.map((c) => c.z), err);
+      g.position.y += d;
+      g.rotation.z = clamp(g.rotation.z + a, -MAX_TILT, MAX_TILT);   // about the prop's own x
+      g.rotation.x = clamp(g.rotation.x - b, -MAX_TILT, MAX_TILT);   // about the prop's own z
+    }
+    g.updateMatrixWorld(true);
+    let lowest = Infinity;
+    let lowX = stance.x;
+    let lowZ = stance.z;
+    for (const c of local) {
+      p.set(c.x, c.y, c.z);
+      g.localToWorld(p);
+      if (p.y < lowest) {
+        lowest = p.y;
+        lowX = p.x;
+        lowZ = p.z;
+      }
+    }
+    const last = this.propAudit[this.propAudit.length - 1];
+    if (last) {
+      last.bottom = lowest;
+      last.bx = lowX;
+      last.bz = lowZ;
+    }
+  }
+
+
   buildStreetLife() {
     const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
     let buses = 0;
@@ -1451,8 +1729,12 @@ export class City {
       for (let i = 0; i < 3 && placedCarts < 6; i++) {
         const spot = this.snapToVerge(poi.x + (i - 1) * 9, poi.z + (i - 1) * 4);
         if (!spot) continue;
-        const g = buildKakiLima(ctx, carts[placedCarts % carts.length], spot.x, spot.z, spot.yaw + Math.PI / 2);
-        this.placeOnGround(g, spot.x, spot.z);
+        const yaw = spot.yaw + Math.PI / 2;
+        // a cart is 1.0 m across its tyres and the kerbside slot is on the pavement edge, so it is
+        // built on a stance where all four contacts are on one surface, not on the slot itself
+        const stance = this.wideStance(spot.x, spot.z, yaw, CART_CONTACTS);
+        const g = buildKakiLima(ctx, carts[placedCarts % carts.length], stance.x, stance.z, yaw);
+        this.standOnContacts(g, yaw, stance, CART_CONTACTS);
         placedCarts++;
       }
     }
