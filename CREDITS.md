@@ -131,6 +131,16 @@ palette (and the brief) — the stations in the photographs are grey/blue.
   roof, green directional board with red arrows, yellow banner, trestle stall tables, plastic stools.
   Comparison: `screenshots/proof/pasar-compare.png`.
 
+- `reference/assets/terminal-ref-0.jpg` — *Jalur keberangkatan Terminal Senen, 2023.jpg* by Naufal P,
+  Wikimedia Commons, **CC BY-SA 4.0**
+  (https://commons.wikimedia.org/wiki/File:Jalur_keberangkatan_Terminal_Senen,_2023.jpg).
+  Working copy of `terminal-senen-lanes.jpg` from Asset Pack 2. Used to model `src/world/terminal.ts`:
+  the wide bare concrete apron and its expansion joints, the grey steel lattice gantry spanning every
+  departure bay, the low kerbed boarding platform, the plastic water barriers between bays, and a blue
+  city bus with a white/blue angkot berthed nose-in beside it. No photograph is redistributed with the
+  build; the geometry and every sign texture are generated in code, and the operator name is a plesetan.
+  Comparison: `screenshots/proof/terminal-compare.png`.
+
 ### Asset Pack 2 — Jakarta Urban Asset Expansion (`docs/reference-packs/asset-pack-2.md`)
 
 - `reference/assets/masjid-al-musyawarah-01.jpg` — *Masjid Al-Musyawarah Kelapa Gading (Desember 2024) 01.jpg* by Fasyakamil, Wikimedia Commons, **CC BY-SA 4.0** (https://commons.wikimedia.org/wiki/File:Masjid_Al-Musyawarah_Kelapa_Gading_(Desember_2024)_01.jpg). Used for contemporary Jakarta neighbourhood mosque elevation, turquoise dome, and minaret.

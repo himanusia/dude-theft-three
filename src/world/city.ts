@@ -11,6 +11,7 @@ import { buildRumahPadang } from './rumahpadang';
 import { buildMasjid } from './masjid';
 import { buildPasar } from './pasar';
 import { buildRonda } from './ronda';
+import { buildTerminal } from './terminal';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
@@ -1171,6 +1172,51 @@ export class City {
         break;
       }
       if (placed) break;
+    }
+
+    // terminal bus: 48 x 32 m of apron, canopy and bays needs a lot nothing else wants. The two
+    // elevated spines are only assigned by buildLayangRoad/buildMrt, which run *after* this pass,
+    // so clearance is measured against the same map paths those builders use -- nearLayang() and
+    // mrtSpine[] are still empty here and would pass every candidate (a check that cannot fail is
+    // not a clearance). 26 m from the layang deck, 30 m from the metro guideway, 17 m from every
+    // collider, and the exact footprint must clear every building rectangle.
+    {
+      const tollPath = ARTERIALS[0].path as [number, number][];
+      const metroPath = ARTERIALS[1].path as [number, number][];
+      const metroOffset = (ARTERIALS[1].width ?? 20) / 2 + 5.5;   // guideway runs beside the artery
+      const TW = 48, TD = 32;
+      for (const r of [58, 72, 88, 106, 124, 144]) {
+        let done = false;
+        for (let a = 0; a < 24 && !done; a++) {
+          const t = (a / 24) * Math.PI * 2 + 0.13;
+          const cx = sp.x + Math.cos(t) * r, cz = sp.z + 22 + Math.sin(t) * r;
+          if (this.distToPath(cx, cz, tollPath) < 26) continue;
+          if (this.distToPath(cx, cz, metroPath) < 30 + metroOffset) continue;
+          if (this.onRoad(cx, cz, 8) || isWater(cx, cz)) continue;
+          if (this.colliders.some((c) => cx > c.minX - 17 && cx < c.maxX + 17 && cz > c.minZ - 17 && cz < c.maxZ + 17)) continue;
+          const yaw = Math.atan2(sp.x - cx, sp.z - cz);
+          const halfX = Math.abs(Math.cos(yaw)) * (TW / 2) + Math.abs(Math.sin(yaw)) * (TD / 2);
+          const halfZ = Math.abs(Math.sin(yaw)) * (TW / 2) + Math.abs(Math.cos(yaw)) * (TD / 2);
+          // the apron is flat and cannot follow a hill: four corner samples have to agree
+          const corners = [[cx - halfX, cz - halfZ], [cx + halfX, cz - halfZ], [cx - halfX, cz + halfZ], [cx + halfX, cz + halfZ]]
+            .map(([qx, qz]) => this.groundHeightAt(qx, qz));
+          if (Math.max(...corners) - Math.min(...corners) > 0.6) continue;
+          const foot = { minX: cx - halfX, maxX: cx + halfX, minZ: cz - halfZ, maxZ: cz + halfZ };
+          if (this.footprints.some((f) => foot.minX < f.maxX && foot.maxX > f.minX && foot.minZ < f.maxZ && foot.maxZ > f.minZ)) continue;
+          // the block-edge tree pass ran before this one, so trunks already stand on most verges.
+          // A tree in the middle of the apron is the one thing a reserved lot cannot have.
+          if (this.treeTrunks.some((m: THREE.Matrix4) => {
+            const tx = m.elements[12], tz = m.elements[14];
+            return tx > foot.minX && tx < foot.maxX && tz > foot.minZ && tz < foot.maxZ;
+          })) continue;
+          const tg = buildTerminal(ctx, cx, cz, yaw);
+          this.placeOnGround(tg, cx, cz);
+          // reserve the lot, so nothing built later can stand on the apron
+          this.footprints.push(foot);
+          done = true;
+        }
+        if (done) break;
+      }
     }
 
     // masjid kampung, on the widest clear slot near the spawn
