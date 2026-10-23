@@ -204,3 +204,25 @@ in this city; no real street name is reproduced.
   Used to model `src/world/ronda.ts`: maroon steel posts, zinc roof with a dark red fascia, raised
   concrete platform, bunk with bolster, yellow RT/RW notice, blue-and-white kerb blocks.
   Comparison: `screenshots/proof/ronda-compare.png`.
+
+## Reference photography — kaki lima carts (`src/world/kakilima.ts`)
+
+No cart photograph is redistributed with the build: every panel, spoke and sign texture is generated
+in code, and the names are plesetan. The two photographs below were used as a shape study only, and
+they live in the gitignored `reference/` tree.
+
+- `reference/assets/kakilima-jakarta-01.jpg` — *Kakilima street vendors in Jakarta.jpg* by Gunawan
+  Kartapranata, Wikimedia Commons, **CC BY-SA 3.0**
+  (https://commons.wikimedia.org/wiki/File:Kakilima_street_vendors_in_Jakarta.jpg).
+  Used for: the two-wheel proportions (0.66–0.70 m spoked wheels with a black pneumatic tyre, steel
+  rim and hub, axle ~0.33 m up), wheels mounted outboard of the cabinet, the timber/cabinet body with
+  a painted lower band, the rectangular tarp awning on posts, and the straight push bar at waist
+  height.
+- `reference/assets/bakso-vendor-01.jpg` — *Tukang Bakso.jpg* by Agustinusraharjo, Wikimedia Commons,
+  **CC BY-SA 4.0** (https://commons.wikimedia.org/wiki/File:Tukang_Bakso.jpg).
+  Used for: the axle sitting ~75% of the body length from the vendor's end, the pair of braced legs
+  under that end, the tubular two-arm push handle projecting ~0.3 m past the rear face, and the
+  glassed display case over the cooking surface.
+
+Frame study: `screenshots/proof/gerobak-bakso.png`, `gerobak-nasgor.png`, `gerobak-sate.png`
+(camera framing and measurements in `screenshots/proof/gerobak-framing.json`).
