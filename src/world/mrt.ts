@@ -87,8 +87,10 @@ export function buildMrtStation(ctx: LayangCtx, x: number, z: number, yaw: numbe
   const stairZ = 18.5;
   const steps = 16;
   for (let i = 0; i < steps; i++) {
+    // Solid treads, not floating planks: each step is a block from the ground up to its height,
+    // otherwise the flight reads as a stack of slabs hovering in the air.
     const h = DECK - (i * DECK) / steps;
-    box(slab, 3.0, 0.22, 0.62, 0, h - 0.11, stairZ + i * 0.62);
+    box(slab, 3.0, h, 0.62, 0, h / 2, stairZ + i * 0.62);
   }
   for (const sx of [-1.6, 1.6]) {
     const rail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, steps * 0.62 + 1.2), steel);

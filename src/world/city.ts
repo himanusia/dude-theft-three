@@ -1284,7 +1284,11 @@ export class City {
       const [bx, bz] = spine[Math.min(spine.length - 1, i + 1)];
       const dx = bx - ax, dz = bz - az;
       const len = Math.hypot(dx, dz) || 1;
-      return [x + (dz / len) * 24, z - (dx / len) * 24] as [number, number];
+      // Over the pavement, not 24 m inside the blocks: an elevated metro in Jakarta runs above
+      // the verge at the road edge, and that is also the only place its piers and its stairs
+      // can stand without a building underneath.
+      const off = (ARTERIALS[1].width ?? 20) / 2 + 5.5;
+      return [x + (dz / len) * off, z - (dx / len) * off] as [number, number];
     });
     buildMrtLine(
       {
@@ -1299,12 +1303,16 @@ export class City {
     // A station belongs on its own guideway, so it is not displaced for clearance: the first
     // version asked for 20 m of empty ground beside a line whose own piers are colliders, and
     // every candidate was rejected, which is why the MRT line had no station at all.
-    // nearest point on the line to the player's spawn, so the station is where people start
+    // A station is only usable if you can walk to it. Pick the point on the line nearest the
+    // spawn *whose stair foot is clear*, rather than the nearest point full stop -- the first
+    // version put the hall and its stairs inside a block and it was invisible from the street.
     const sp = this.getSpawn();
+    const stairClear = (x: number, z: number) =>
+      this.colliders.every((c) => x < c.minX - 6 || x > c.maxX + 6 || z + 20 < c.minZ - 6 || z + 26 > c.maxZ + 6);
     let mid = shifted[0], bestD = Infinity;
     for (const pt of shifted) {
       const d = Math.hypot(pt[0] - sp.x, pt[1] - sp.z);
-      if (d < bestD) { bestD = d; mid = pt; }
+      if (d < bestD && stairClear(pt[0], pt[1])) { bestD = d; mid = pt; }
     }
     const sg = buildMrtStation(
       { group: this.group, colliders: this.colliders, audit: this.propAudit, groundHeightAt: (x, z) => this.groundHeightAt(x, z) },
