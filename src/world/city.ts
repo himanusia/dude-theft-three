@@ -1,5 +1,6 @@
 import { POIS } from './jakartamap';
 import { buildHalte } from './halte';
+import { buildKakiLima, buildSppg, buildKoperasi, KakiLimaKind } from './kakilima';
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
@@ -528,6 +529,7 @@ export class City {
     this.buildRoadRibbons();
     this.buildWater();
     this.buildDistrictProps();
+    this.buildStreetLife();
     // buildOjekBases() is written but off: parked at the POI coordinates the bikes ended up
     // inside the frontage wall, so nothing was visible from the street. It needs the same
     // verge spacing as the haltes before it ships.
@@ -766,6 +768,107 @@ export class City {
    * to the street, only at the POIs the map marks as passenger/food places, because a bike is
    * 11 draw calls and the frame has a budget to hold.
    */
+
+  /**
+   * Put something on the pavement instead of on a map coordinate.
+   *
+   * Every POI in the map is a point on a district, not a kerbside slot, which is why the first
+   * halte and the first row of ojeks ended up inside a frontage wall. This projects the point
+   * onto the nearest arterial, walks out to the middle of that road's pavement, and picks the
+   * side that is actually free.
+   */
+  snapToVerge(x: number, z: number): { x: number; z: number; yaw: number } | null {
+    let best: { d: number; cx: number; cz: number; nx: number; nz: number; yaw: number; half: number } | null = null;
+    for (const a of [...ARTERIALS, { path: RING_ROAD, width: 20 } as any]) {
+      const pts = a.path as [number, number][];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x1, z1] = pts[i];
+        const [x2, z2] = pts[i + 1];
+        const dx = x2 - x1;
+        const dz = z2 - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        const t = clamp(((x - x1) * dx + (z - z1) * dz) / len2, 0, 1);
+        const cx = x1 + dx * t;
+        const cz = z1 + dz * t;
+        const d = Math.hypot(x - cx, z - cz);
+        if (!best || d < best.d) {
+          const len = Math.sqrt(len2) || 1;
+          best = { d, cx, cz, nx: -dz / len, nz: dx / len, yaw: Math.atan2(dx, dz), half: a.width / 2 };
+        }
+      }
+    }
+    if (!best) return null;
+    const off = best.half + 1.9 + 1.6;          // middle of the 3.6 m pavement
+    const free = (px: number, pz: number) =>
+      this.colliders.every((c) => px < c.minX - 1.2 || px > c.maxX + 1.2 || pz < c.minZ - 1.2 || pz > c.maxZ + 1.2);
+    // walk along the kerb as well as across it: one POI can land where a shopfront juts out, and
+    // the slot two doors down is still on the same pavement
+    const dirX = best.nz;
+    const dirZ = -best.nx;
+    for (const along of [0, 12, -12, 24, -24, 36, -36, 48, -48]) {
+      for (const side of [1, -1]) {
+        const px = best.cx + dirX * along + best.nx * off * side;
+        const pz = best.cz + dirZ * along + best.nz * off * side;
+        if (free(px, pz) && !isWater(px, pz)) return { x: px, z: pz, yaw: best.yaw };
+      }
+    }
+    return null;
+  }
+
+  /** Haltes, food carts, the nutrition kitchen and the village cooperative, all kerbside. */
+
+  /** Place a street item on the ground and make its audit entry say the same height. */
+  private placeOnGround(g: THREE.Object3D, x: number, z: number) {
+    const y = this.groundHeightAt(x, z);
+    g.position.y = y;
+    const last = this.propAudit[this.propAudit.length - 1];
+    if (last) last.bottom = y;
+  }
+
+  buildStreetLife() {
+    const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+
+    for (const poi of POIS) {
+      if (poi.kind !== 'halte') continue;
+      const spot = this.snapToVerge(poi.x, poi.z);
+      if (!spot) continue;
+      if (!spot) continue;
+      const g = buildHalte(ctx, spot.x, spot.z, spot.yaw);
+      this.placeOnGround(g, spot.x, spot.z);
+    }
+
+    const carts: KakiLimaKind[] = ['bakso', 'nasgor', 'sate'];
+    let placedCarts = 0;
+    for (const poi of POIS) {
+      if (poi.kind !== 'kaki5') continue;
+      for (let i = 0; i < 3 && placedCarts < 6; i++) {
+        const spot = this.snapToVerge(poi.x + (i - 1) * 9, poi.z + (i - 1) * 4);
+        if (!spot) continue;
+        const g = buildKakiLima(ctx, carts[placedCarts % carts.length], spot.x, spot.z, spot.yaw + Math.PI / 2);
+        this.placeOnGround(g, spot.x, spot.z);
+        placedCarts++;
+      }
+    }
+
+    // the two institutions: a nutrition kitchen by the Blok M terminal, a koperasi in Kemang
+    const blokM = POIS.find((p) => p.name.startsWith('Terminal Blok M'));
+    if (blokM) {
+      const spot = this.snapToVerge(blokM.x, blokM.z + 26);
+      if (spot) {
+        const g = buildSppg(ctx, spot.x + 4, spot.z, spot.yaw);
+        this.placeOnGround(g, spot.x, spot.z);
+      }
+    }
+    const kemang = POIS.find((p) => p.kind === 'minimarket');
+    if (kemang) {
+      const spot = this.snapToVerge(kemang.x, kemang.z + 18);
+      if (spot) {
+        const g = buildKoperasi(ctx, spot.x, spot.z, spot.yaw);
+        this.placeOnGround(g, spot.x, spot.z);
+      }
+    }
+  }
+
   buildOjekBases() {
     let placed = 0;
     for (const poi of POIS) {
@@ -1578,7 +1681,11 @@ export class City {
         lightLampM.push(new THREE.Matrix4().makeTranslation(cx, 3.58, cz + 0.17));
       }
     }
-    this.propAudit = [];
+    // Drop only the entries this pass re-places. Clearing the whole list (the old behaviour)
+    // made the haltes and carts invisible to the audit, but keeping the stale stall entries
+    // flagged them against the terrain instead of the kerb they were later moved onto.
+    const REPLACED = new Set(['bin', 'hydrant', 'bench', 'bench-leg', 'traffic-mast', 'traffic-arm', 'traffic-lens', 'traffic-housing', 'stall']);
+    this.propAudit = this.propAudit.filter((e) => !REPLACED.has(e.name));
     // Ground props used to assume a kerb wherever the old grid said there was one. With
     // organic blocks a kerb exists only on real plates, so drop the instances that land on
     // asphalt and lift the rest onto the plate they actually stand on.
@@ -2056,8 +2163,8 @@ export class City {
             // skyline; one in five is now a taller building and one in six a low shophouse.
             const r = rand(0, 1);
             const h = r < 0.16 ? rand(4.5, 7) : r < 0.8 ? rand(8, 22) : rand(24, 46);
-            const px = x1 + dx * (t + w / 2) + nx * side * (road.width / 2 + 2.2 + d / 2);
-            const pz = z1 + dz * (t + w / 2) + nz * side * (road.width / 2 + 2.2 + d / 2);
+            const px = x1 + dx * (t + w / 2) + nx * side * (road.width / 2 + 6.2 + d / 2);
+            const pz = z1 + dz * (t + w / 2) + nz * side * (road.width / 2 + 6.2 + d / 2);
             const district = districtAtPoint(px, pz);
             const styleKey = (district === 'gambir' ? 'monas' : district) as keyof typeof DISTRICTS;
             const style = DISTRICTS[styleKey] || DISTRICTS.kampung;
