@@ -59,6 +59,36 @@ function fitFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, 
   }
 }
 
+
+/** Roller-shutter shopfront, shared by every frontage building. */
+let shutterMat: THREE.MeshStandardMaterial | null = null;
+function shopfrontMat(): THREE.MeshStandardMaterial {
+  if (shutterMat) return shutterMat;
+  const tex = canvasTexture(256, 128, (ctx, w, h) => {
+    // painted fascia
+    ctx.fillStyle = '#d8cfb8';
+    ctx.fillRect(0, 0, w, h * 0.34);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fillRect(0, h * 0.34 - 3, w, 3);
+    // roller door slats
+    for (let y = h * 0.34; y < h; y += 7) {
+      ctx.fillStyle = (Math.floor(y / 7) % 2) ? '#5a6068' : '#6b727b';
+      ctx.fillRect(0, y, w, 5);
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.fillRect(0, y + 5, w, 2);
+    }
+    // uneven wear so the row is not one clean print
+    for (let i = 0; i < 14; i++) {
+      ctx.fillStyle = `rgba(0,0,0,${rand(0.03, 0.1)})`;
+      ctx.fillRect(rand(0, w), rand(0, h), rand(4, 26), rand(3, 10));
+    }
+  });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 1);
+  shutterMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 });
+  return shutterMat;
+}
+
 function windowTexture(wall: any, style = 'grid') {
   // A Jakarta facade is mostly wall: plaster, ceramic tile or painted concrete, with windows
   // punched into it. The first version painted glass over almost the whole tile, so every
@@ -2315,10 +2345,7 @@ export class City {
               body.receiveShadow = true;
               group.add(body);
               // a shopfront band at street level so the row is not one blank slab
-              const base = new THREE.Mesh(
-                new THREE.BoxGeometry(w + 0.2, 3.2, 0.3),
-                new THREE.MeshStandardMaterial({ color: pick(['#2a3038', '#3a2f28', '#26343a']), roughness: 0.8 })
-              );
+              const base = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 3.2, 0.3), shopfrontMat());
               base.position.set(0, 1.9, -d / 2 - 0.16);
               group.add(base);
 
