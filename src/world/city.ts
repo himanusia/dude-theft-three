@@ -354,6 +354,18 @@ export class City {
   /** shopfront rings, merged into one mesh at the end of the block pass */
   declare shopfrontGeos: THREE.BufferGeometry[];
   declare propAudit: { name: string; x: number; z: number; bottom: number }[];
+  /**
+   * Live ojeks, so a capture or a game system can find one without reverse-engineering a
+   * propAudit slot: the group is where the mesh actually stands, and box is the delivery box's
+   * local bounds (null when a bike is built without one).
+   */
+  declare ojeks: {
+    group: THREE.Group;
+    x: number;
+    z: number;
+    yaw: number;
+    box: { center: THREE.Vector3; size: THREE.Vector3 } | null;
+  }[];
   declare shopDoors: { x: number; z: number; nx: number; nz: number; kind: InteriorKind; name: string }[];
   declare interiors: PlacedInterior[];
   declare clouds: THREE.Group;
@@ -1366,6 +1378,7 @@ export class City {
   }
 
   buildOjekBases() {
+    if (!this.ojeks) this.ojeks = [];
     let placed = 0;
     for (const poi of POIS) {
       if (poi.kind !== 'kaki5' && poi.kind !== 'terminal') continue;
@@ -1375,8 +1388,14 @@ export class City {
         const spot = this.snapToVerge(poi.x + i * 3.2 - 1.6, poi.z + 6);
         if (!spot) continue;
         const bike = new Ojek({ color: i === 0 ? 0xc0392b : 0x1f6f4a });
+        // The bike has to stand at its slot. placeOnGround only sets the height, so a group left
+        // at x=0/z=0 parked every ojek in the middle of the map: six slots audited as "on the
+        // ground" while the meshes were somewhere nobody could ever see them.
+        bike.group.position.set(spot.x, 0, spot.z);
         bike.group.rotation.y = spot.yaw + Math.PI / 2 + i * 0.1;
+        bike.group.name = `ojek-${this.ojeks.length}`;
         this.group.add(bike.group);
+        this.ojeks.push({ group: bike.group, x: spot.x, z: spot.z, yaw: bike.group.rotation.y, box: bike.cargoBoxBounds });
         this.propAudit.push({ name: 'ojek', x: spot.x, z: spot.z, bottom: 0 });
         this.placeOnGround(bike.group, spot.x, spot.z);
         this.colliders.push({ minX: spot.x - 0.55, maxX: spot.x + 0.55, minZ: spot.z - 1.1, maxZ: spot.z + 1.1, h: 1.6 });

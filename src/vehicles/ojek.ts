@@ -7,9 +7,11 @@ import { canvasTexture, shadowBlob } from '../core/utils';
  * jacket and a full-face helmet, a spare helmet hanging off the left mirror and a delivery
  * box on the rear rack.
  *
- * Reference: reference/assets/ojek-bang-wandi.jpg (CC BY-SA 4.0, Cun Cun) for the step-through
- * proportions, ojek-green kit from reference/assets/ojek-green-jacket.jpg, and the hanging
- * spare helmet + tubular rack from reference/assets/ojek-terminal-helmets.jpg. See CREDITS.md.
+ * Reference: reference/assets/kurir-delivery-01.jpg and -02.jpg (CC BY-SA 4.0, Waqas1000000000,
+ * via Wikimedia Commons) for the step-through proportions, the green courier kit and the rear
+ * mounting of the insulated box. Both are recorded in CREDITS.md; the three ojek stills this
+ * header used to name (bang-wandi, green-jacket, terminal-helmets) are not on disk and are not in
+ * CREDITS, so nothing here claims to be measured against them.
  *
  * Budget: one ojek is <= 2000 triangles and 11 draw calls, because the street can hold a lot
  * of them. That rules out one mesh per part, so everything is authored into four material
@@ -28,7 +30,17 @@ const DARK_METAL = 0x3c3f46;
 const SEAT = 0x272a31;
 const LENS = 0xe6edf2;
 const TAIL_LENS = 0xc4231b;
-const BOX = 0x1f2227;
+/**
+ * Instant-delivery box. Measured against reference/assets/kurir-delivery-01.jpg: the insulated
+ * case stands about one wheel tall on the rack and its lid reaches the seated rider's shoulder,
+ * and its face is a plain brand-green panel with a white logo plate. The first pass was a 0.27 m
+ * dark case on the rack: it read as a top box (and vanished against the tail) at street distance,
+ * and a dark box never says "courier" — green is what does that before any logo.
+ */
+const BOX_GREEN = 0x00b14f;
+const BOX_LID = 0x008f3f;
+/** local-space bounds of the cargo box, shared by the build and by the QA capture hook */
+const CARGO = { w: 0.42, h: 0.40, d: 0.40, y: 1.104, z: -0.68 };
 const JACKET = 0x1e8c4a;
 const JACKET_PANEL = 0x146b37;
 const PANTS = 0x232630;
@@ -193,6 +205,13 @@ export class Ojek {
   /** front wheel first; each pivot spins about local X */
   readonly wheels: { pivot: THREE.Group; front: boolean }[] = [];
   readonly size = { length: 1.86, width: 0.68, height: 1.63 };
+  /**
+   * Local-space bounds of the delivery box. The box is merged into the bike's gloss bucket for
+   * the draw-call budget, so there is no node to query at runtime: this is the handle a capture
+   * (or anything else) needs to aim at the box instead of guessing from the prop slot.
+   * Null when the bike is built without a box.
+   */
+  cargoBoxBounds: { center: THREE.Vector3; size: THREE.Vector3 } | null = null;
   private readonly disposables: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
 
   constructor(opts: OjekOptions = {}) {
@@ -202,9 +221,16 @@ export class Ojek {
     const spare = opts.spareHelmet !== false;
     const cargo = opts.cargoBox !== false;
 
+    this.group.name = 'ojek';
     this.buildBike(kit, paint, spare, cargo);
     this.buildRider(kit, jacket);
     this.buildWheels(kit);
+    if (cargo) {
+      this.cargoBoxBounds = {
+        center: new THREE.Vector3(0, CARGO.y, CARGO.z),
+        size: new THREE.Vector3(CARGO.w, CARGO.h, CARGO.d),
+      };
+    }
 
     // one merged mesh per material bucket — this is what keeps the draw calls down
     const gloss = this.material(0xffffff, { vertexColors: true, roughness: 0.28, metalness: 0.14, flatShading: true });
@@ -353,16 +379,19 @@ export class Ojek {
       kit.limb(S, 'metal', ALLOY, [0.165, 0.885, -0.42], [0.165, 0.885, -0.87], 0.019, 0.019, 5);
       kit.limb(S, 'metal', ALLOY, [-0.165, 0.885, -0.42], [-0.165, 0.885, -0.87], 0.019, 0.019, 5);
       kit.limb(S, 'metal', ALLOY, [0.165, 0.885, -0.86], [-0.165, 0.885, -0.86], 0.019, 0.019, 5);
-      kit.box(S, 'metal', ALLOY, [0.35, 0.018, 0.38], [0, 0.895, -0.65]); // rack platform
+      kit.box(S, 'metal', ALLOY, [CARGO.w, 0.018, CARGO.d + 0.06], [0, 0.895, CARGO.z + 0.02]); // rack platform
       kit.limb(S, 'metal', ALLOY, [0.165, 0.885, -0.45], [0.15, 0.775, -0.56], 0.019, 0.019, 5); // leg L
       kit.limb(S, 'metal', ALLOY, [-0.165, 0.885, -0.45], [-0.15, 0.775, -0.56], 0.019, 0.019, 5); // leg R
       kit.limb(S, 'metal', BLACK, [0.125, 0.885, -0.49], [-0.125, 0.885, -0.49], 0.018, 0.018, 5);
-      kit.box(S, 'gloss', BOX, [0.27, 0.23, 0.29], [0, 1.005, -0.63], [0, 0, 0],
-        taperBox(0.27, 0.23, 0.29, 0.95, 0.95, 0));
-      kit.box(S, 'matte', TRIM, [0.275, 0.018, 0.30], [0, 1.04, -0.63]); // lid seam
-      kit.box(S, 'matte', TRIM, [0.28, 0.03, 0.04], [0, 1.09, -0.63]); // strap over the lid
-      kit.box(S, 'gloss', TAIL_LENS, [0.26, 0.045, 0.01], [0, 0.885, -0.82], [0, 0, 0]);
-      kit.box(S, 'gloss', JACKET, [0.10, 0.10, 0.01], [0, 1.035, -0.823]); // delivery sticker
+      // insulated case: as wide as the rear body, lid up at the seated rider's shoulder
+      kit.box(S, 'gloss', BOX_GREEN, [CARGO.w, CARGO.h, CARGO.d], [0, CARGO.y, CARGO.z], [0, 0, 0],
+        taperBox(CARGO.w, CARGO.h, CARGO.d, 0.97, 0.95, 0));
+      kit.box(S, 'gloss', BOX_LID, [CARGO.w + 0.012, 0.045, CARGO.d + 0.012], [0, CARGO.y + CARGO.h / 2 + 0.02, CARGO.z]); // lid
+      kit.box(S, 'matte', TRIM, [0.055, 0.028, CARGO.d + 0.03], [0, CARGO.y + CARGO.h / 2 + 0.048, CARGO.z]); // strap over the lid
+      // white logo plate on each flank (the ref box is mostly this plate), reflective band low on the rear face
+      kit.box(S, 'matte', 0xe4e8e6, [0.008, 0.17, 0.26], [CARGO.w / 2 + 0.003, CARGO.y + 0.015, CARGO.z]);
+      kit.box(S, 'matte', 0xe4e8e6, [0.008, 0.17, 0.26], [-CARGO.w / 2 - 0.003, CARGO.y + 0.015, CARGO.z]);
+      kit.box(S, 'matte', 0xd8dde0, [0.28, 0.05, 0.008], [0, CARGO.y - 0.14, CARGO.z - CARGO.d / 2 - 0.003]);
     }
     if (spare) {
       // half-shell lid hooked over the left mirror stalk and hanging beside the leg shield
