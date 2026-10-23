@@ -530,12 +530,7 @@ export class City {
     this.buildWater();
     this.buildDistrictProps();
     this.buildStreetLife();
-    // buildOjekBases() is written but off: parked at the POI coordinates the bikes ended up
-    // inside the frontage wall, so nothing was visible from the street. It needs the same
-    // verge spacing as the haltes before it ships.
-    // buildHaltes() is written but not switched on: the platform colliders land on the verge
-    // where cars park, and qa caught a car stuck against one at 8 km/h. It goes live once the
-    // verge spacing is worked out against parking spots.
+    this.buildOjekBases();
 
     // road markings (instanced): dashed centre lines along the roads the map defines
     const mtx = new THREE.Matrix4();
@@ -876,14 +871,14 @@ export class City {
       if (placed >= 3) break;
       placed++;
       for (let i = 0; i < 2; i++) {
-        const x = poi.x + i * 1.1 - 0.55;
-        const z = poi.z + 2.4;
+        const spot = this.snapToVerge(poi.x + i * 3.2 - 1.6, poi.z + 6);
+        if (!spot) continue;
         const bike = new Ojek({ color: i === 0 ? 0xc0392b : 0x1f6f4a });
-        bike.group.position.set(x, terrainHeight(x, z), z);
-        bike.group.rotation.y = Math.PI * 0.62 + i * 0.12;
+        bike.group.rotation.y = spot.yaw + Math.PI / 2 + i * 0.1;
         this.group.add(bike.group);
-        this.propAudit.push({ name: 'ojek', x, z, bottom: terrainHeight(x, z) });
-        this.colliders.push({ minX: x - 0.55, maxX: x + 0.55, minZ: z - 1.1, maxZ: z + 1.1, h: 1.6 });
+        this.propAudit.push({ name: 'ojek', x: spot.x, z: spot.z, bottom: 0 });
+        this.placeOnGround(bike.group, spot.x, spot.z);
+        this.colliders.push({ minX: spot.x - 0.55, maxX: spot.x + 0.55, minZ: spot.z - 1.1, maxZ: spot.z + 1.1, h: 1.6 });
       }
     }
   }
