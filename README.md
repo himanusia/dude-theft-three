@@ -41,6 +41,10 @@ node tests/world/audit.mjs
 node tools/shoot-ojek.mjs          # headless: aims a camera at a live ojek and writes
                                    # screenshots/proof/kurir.png, or fails if the cargo box
                                    # is not actually in the frame
+node tools/shoot-facade.mjs        # headless: picks the street stance that puts the most
+                                   # visible upper-storey walls in frame at 1.7 m eye height,
+                                   # writes screenshots/proof/facade-fix.png, and measures the
+                                   # luminance spread of every wall in the saved PNG
 ```
 
 `city.ojeks` lists every live bike with its real group position and the cargo box's local

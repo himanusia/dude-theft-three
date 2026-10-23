@@ -202,86 +202,279 @@ function shopfrontMat(variant = 0): THREE.MeshStandardMaterial {
   return mat;
 }
 
-const windowTexCache = new Map<string, THREE.Texture>();
+// ---------------------------------------------------------------------------
+// Upper-storey facades.
+//
+// One tile is one storey: 4.2 m of wall by 3.2 m of height. A building stretches that tile with
+// its own UVs (facadeUV) instead of owning a texture, because the old path baked the repeat into
+// the cache key -- one canvas per (colour, style, repeat-x, repeat-y) -- and the city was paying
+// for ~1,400 textures. Now the key is (colour, style, variant): a few hundred at most, shared.
+//
+// Every tile carries the three things that stop a wall reading as one flat fill: a slab join at
+// the storey line, a window with a frame, a recessed reveal and a sill, and a trim colour that is
+// deliberately not the wall colour. The fittings you can walk under -- cornices, ledges, balcony
+// rails, pipes, AC boxes, penthouses, painted sign bands -- are geometry (addFacadeDetail), so
+// they cast their own shadow line under the sun.
+// ---------------------------------------------------------------------------
 
-function windowTexture(wall: any, style = 'grid', rx = 1, ry = 1) {
-  // One canvas per (wall colour, facade style), not one per building. The city has ~1,400
-  // buildings; giving each its own 128px canvas meant thousands of textures on the GPU, and a
-  // phone GL context starts failing depth/shadow shaders long before a desktop one does.
-  const key = `${wall}|${style}|${rx}x${ry}`;
-  const hit = windowTexCache.get(key);
+export type FacadeVariant = 'plain' | 'ledge' | 'balcony' | 'pipes' | 'ac' | 'penthouse' | 'signband';
+
+/** The ruko fittings, in the order one block mixes them. */
+export const FACADE_VARIANTS: FacadeVariant[] = ['plain', 'ledge', 'balcony', 'pipes', 'ac', 'penthouse', 'signband'];
+
+const FACADE_TILE_W = 4.2; // metres of wall in one tile, horizontally
+const FACADE_TILE_H = 3.2; // one storey
+
+/** Trims are a fixed three, so the tile key stays `wall|style|variant` instead of exploding. */
+const TRIM_COLORS = [0xefe7d6, 0x8b8377, 0x4b4239];
+const SIGN_BAND_COLORS = [0xc8452f, 0x1f6f8b, 0xd8a02a, 0x2f7a4f, 0x8a2f6b];
+
+const hexOf = (c: any): string => (typeof c === 'number' ? `#${c.toString(16).padStart(6, '0')}` : String(c));
+
+function wallLuminance(wall: any): number {
+  const h = hexOf(wall).replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+/** A light wall gets the dark trim and a dark wall the light one: the trim has to be seen. */
+function trimFor(wall: any): number {
+  const lum = wallLuminance(wall);
+  return lum > 0.66 ? TRIM_COLORS[2] : lum > 0.46 ? TRIM_COLORS[1] : TRIM_COLORS[0];
+}
+
+/** One window: recessed reveal, trim frame, transom, glass with a sky band, lit sill. */
+function paintWindow(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ww: number,
+  wh: number,
+  trim: string,
+  mullion = true
+) {
+  // the opening is cut back into the wall, so its top and left reveal sit in shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
+  ctx.fillRect(x - 3, y - 3, ww + 6, wh + 7);
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  ctx.fillRect(x + ww + 3, y - 3, 2, wh + 7); // right reveal catches the light
+  const g = ctx.createLinearGradient(x, y, x + ww, y + wh);
+  g.addColorStop(0, '#93b2c6');
+  g.addColorStop(0.45, '#527086');
+  g.addColorStop(1, '#2b3b49');
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, ww, wh);
+  ctx.fillStyle = 'rgba(232,246,255,0.34)'; // sky reflected in the head of the glass
+  ctx.fillRect(x, y, ww, Math.max(2, wh * 0.16));
+  ctx.fillStyle = 'rgba(250,238,214,0.14)'; // a curtain behind the panes
+  ctx.fillRect(x + ww * 0.08, y + wh * 0.22, ww * 0.3, wh * 0.78);
+  ctx.fillStyle = trim;
+  if (mullion) ctx.fillRect(x + ww / 2 - 1, y, 2, wh);
+  ctx.fillRect(x, y + wh * 0.38, ww, 2);
+  ctx.strokeStyle = trim;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x - 1.5, y - 1.5, ww + 3, wh + 3);
+  ctx.fillStyle = trim; // sill, then the shadow it drops
+  ctx.fillRect(x - 5, y + wh + 3, ww + 10, 4);
+  ctx.fillStyle = 'rgba(0,0,0,0.24)';
+  ctx.fillRect(x - 5, y + wh + 7, ww + 10, 3);
+}
+
+const facadeTileCache = new Map<string, THREE.Texture>();
+
+function windowTexture(wall: any, style = 'grid', variant: FacadeVariant = 'plain'): THREE.Texture {
+  const key = `${wall}|${style}|${variant}`;
+  const hit = facadeTileCache.get(key);
   if (hit) return hit;
-  // A Jakarta facade is mostly wall: plaster, ceramic tile or painted concrete, with windows
-  // punched into it. The first version painted glass over almost the whole tile, so every
-  // building in the city read as the same dark curtain wall no matter what colour it was
-  // given. One tile is now one floor, and the glass is an accent inside the wall.
+  const trim = hexOf(trimFor(wall));
   const map = canvasTexture(128, 128, (ctx, w, h) => {
-    const c = typeof wall === 'number' ? `#${wall.toString(16).padStart(6, '0')}` : String(wall);
-    ctx.fillStyle = c;
+    ctx.fillStyle = hexOf(wall);
     ctx.fillRect(0, 0, w, h);
 
-    // grime and patina, so the wall is not a flat poster colour
-    for (let i = 0; i < 30; i++) {
-      ctx.fillStyle = `rgba(0,0,0,${rand(0.015, 0.05)})`;
-      ctx.fillRect(rand(0, w), rand(0, h), rand(1, 6), rand(4, h));
+    // plaster: large value shifts and streak grime, so a "single colour" wall never is one
+    for (let i = 0; i < 5; i++) {
+      ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,252,240,0.10)' : 'rgba(20,16,10,0.10)';
+      ctx.fillRect(rand(0, w * 0.8), rand(0, h * 0.7), rand(18, w * 0.6), rand(12, h * 0.5));
+    }
+    // water stains running down from the slab line: the single biggest tell that a wall is
+    // plaster and not a filled rectangle, and it costs nothing at draw time
+    for (let i = 0; i < 9; i++) {
+      const sx = rand(0, w);
+      const sw = rand(3, 11);
+      const len = rand(h * 0.25, h * 0.9);
+      const grad = ctx.createLinearGradient(0, 4, 0, 4 + len);
+      grad.addColorStop(0, 'rgba(38,32,24,0.20)');
+      grad.addColorStop(1, 'rgba(38,32,24,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(sx, 4, sw, len);
+    }
+    for (let i = 0; i < 22; i++) {
+      ctx.fillStyle = `rgba(0,0,0,${rand(0.03, 0.09)})`;
+      ctx.fillRect(rand(0, w), rand(0, h - 8), rand(1, 5), rand(8, h * 0.6));
     }
 
-    const glass = (x: number, y: number, ww: number, wh: number) => {
-      const g = ctx.createLinearGradient(x, y, x + ww, y + wh);
-      g.addColorStop(0, '#7c9cb4');
-      g.addColorStop(0.45, '#4d6b83');
-      g.addColorStop(1, '#33495c');
-      ctx.fillStyle = g;
-      ctx.fillRect(x, y, ww, wh);
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.fillRect(x, y, ww, Math.max(1, wh * 0.22));
-    };
+    // the slab join, at the top of every storey, with the light catching its lower edge and a
+    // shadow falling out of it onto the wall below
+    ctx.fillStyle = 'rgba(0,0,0,0.40)';
+    ctx.fillRect(0, 0, w, 3);
+    ctx.fillStyle = 'rgba(255,255,255,0.26)';
+    ctx.fillRect(0, 3, w, 1);
+    const under = ctx.createLinearGradient(0, 4, 0, 22);
+    under.addColorStop(0, 'rgba(0,0,0,0.16)');
+    under.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = under;
+    ctx.fillRect(0, 4, w, 18);
+    // floor line at the foot of the storey, so the tile never butts into the next one flat
+    ctx.fillStyle = 'rgba(0,0,0,0.13)';
+    ctx.fillRect(0, h - 2, w, 2);
+
+    // a ledge course is a shadow-catcher: band in trim, then the shadow it throws
+    if (variant === 'ledge') {
+      ctx.fillStyle = trim;
+      ctx.fillRect(0, 4, w, 5);
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.fillRect(0, 9, w, 3);
+    }
 
     if (style === 'bands') {
-      // ONE floor per tile. The tile used to hold four 32 px rows while the mesh mapped it to a
-      // single 3.2 m floor, so the facade came out as horizontal stripes every 80 cm instead of
-      // a window band per storey.
-      // four panes with mullions, not one 8 m strip: a single opening read as a painted band
-      const panes = 4;
-      const gap = 10;
-      const pw = (w - gap * (panes + 1)) / panes;
-      for (let i = 0; i < panes; i++) {
-        glass(gap + i * (pw + gap), h * 0.28, pw, h * 0.3);
-      }
-      ctx.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx.fillRect(0, h - 6, w, 6);
-      ctx.fillStyle = 'rgba(255,255,255,0.10)';
-      ctx.fillRect(0, h - 8, w, 2);
-      return;
+      paintWindow(ctx, 12, 38, w - 24, 44, trim, false);
+      ctx.fillStyle = trim;
+      ctx.fillRect((w - 24) / 3 - 1, 38, 2, 44);
+      ctx.fillRect((2 * (w - 24)) / 3 - 1, 38, 2, 44);
+    } else if (style === 'strips') {
+      for (const x of [14, 55, 96]) paintWindow(ctx, x, 20, 18, 78, trim, false);
+    } else {
+      paintWindow(ctx, 14, 34, 42, 56, trim);
+      paintWindow(ctx, 72, 34, 42, 56, trim);
     }
-    if (style === 'strips') {
-      // punched vertical windows between wide piers
-      for (let x = 14; x < w - 18; x += 34) {
-        glass(x, 10, 10, h - 22);
+
+    if (variant === 'balcony') {
+      // the railing that closes in every ruko balcony, and the slab shadow under it
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';
+      ctx.fillRect(0, 90, w, 2);
+      ctx.fillStyle = trim;
+      ctx.fillRect(0, 82, w, 3);
+      for (let x = 4; x < w; x += 9) {
+        ctx.fillStyle = 'rgba(30,34,38,0.75)';
+        ctx.fillRect(x, 84, 2, 8);
       }
-      ctx.fillStyle = 'rgba(0,0,0,0.10)';
-      ctx.fillRect(0, 0, w, 6);
-      return;
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(0, 92, w, 8);
     }
-    // grid: small windows in plaster, the common shophouse/office look
-    const cols = 3;
-    const rows = 3;
-    const cw = w / cols;
-    const ch = h / rows;
-    for (let x = 0; x < cols; x++) {
-      for (let y = 0; y < rows; y++) {
-        const ww = cw * 0.36;
-        const wh = ch * 0.34;
-        glass(x * cw + (cw - ww) / 2, y * ch + ch * 0.26, ww, wh);
-        // frame
-        ctx.strokeStyle = 'rgba(0,0,0,0.22)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(x * cw + (cw - ww) / 2, y * ch + ch * 0.26, ww, wh);
+
+    if (variant === 'pipes') {
+      // service pipes run the height of the wall, so the tile continues from storey to storey
+      for (const px of [4, w - 8]) {
+        ctx.fillStyle = '#8d9298';
+        ctx.fillRect(px, 0, 4, h);
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(px + 4, 0, 1, h);
+        for (let y = 18; y < h - 8; y += 34) {
+          ctx.fillStyle = '#6f747a';
+          ctx.fillRect(px - 2, y, 8, 3);
+        }
       }
+      ctx.fillStyle = 'rgba(94,58,36,0.14)'; // rust bleed under the brackets
+      ctx.fillRect(2, 20, 10, 70);
+    }
+
+    if (variant === 'ac') {
+      // split-unit condenser bolted beside the window, with its drip stain on the plaster
+      const ax = 86;
+      const ay = 46;
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(ax - 1, ay - 1, 26, 20);
+      ctx.fillStyle = '#d9dad4';
+      ctx.fillRect(ax, ay, 24, 18);
+      ctx.fillStyle = '#9aa0a6';
+      for (let i = 0; i < 5; i++) ctx.fillRect(ax + 2, ay + 3 + i * 3, 20, 1);
+      ctx.fillStyle = 'rgba(40,34,24,0.16)';
+      ctx.fillRect(ax + 6, ay + 18, 6, 36);
+    }
+
+    if (variant === 'signband') {
+      // the painted band is geometry (one storey, not every storey): here only the ghost of
+      // where the old paint was stripped off
+      ctx.fillStyle = 'rgba(0,0,0,0.05)';
+      ctx.fillRect(10, 6, w - 20, 16);
     }
   });
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(1, 1);
+  facadeTileCache.set(key, map);
   return map;
 }
+
+/**
+ * Scale a box's face UVs so one tile is FACADE_TILE_W x FACADE_TILE_H metres, instead of one
+ * tile per face. `phase` shifts the columns per building so no two neighbours line up.
+ */
+function facadeUV(geo: THREE.BufferGeometry, w: number, h: number, d: number, phase: number) {
+  const uv = geo.attributes.uv as THREE.BufferAttribute;
+  // BoxGeometry face order: +x, -x, +y, -y, +z, -z, four vertices each
+  const spans: [number, number, number][] = [
+    [d, h, phase], [d, h, phase + 0.41],
+    [w, d, 0], [w, d, 0],
+    [w, h, phase + 0.13], [w, h, phase + 0.13],
+  ];
+  for (let f = 0; f < 6; f++) {
+    const [spanW, spanH, off] = spans[f];
+    const su = Math.max(1, Math.round(spanW / FACADE_TILE_W));
+    const sv = Math.max(1, Math.round(spanH / FACADE_TILE_H));
+    for (let i = 0; i < 4; i++) {
+      const k = f * 4 + i;
+      uv.setX(k, uv.getX(k) * su + off);
+      uv.setY(k, uv.getY(k) * sv);
+    }
+  }
+  uv.needsUpdate = true;
+}
+
+/** Vertex colours on a box, so every fitting in the city can share one material. */
+function paintGeometry(geo: THREE.BufferGeometry, hex: number) {
+  const c = new THREE.Color(hex);
+  const n = geo.attributes.position.count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] = c.r;
+    arr[i * 3 + 1] = c.g;
+    arr[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+}
+
+/** Deterministic 0..1 from a position, so a building's phase and palette survive a reload. */
+function hash01(x: number, z: number, salt = 0): number {
+  const s = Math.sin(x * 12.9898 + z * 78.233 + salt * 37.719) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+let facadeDetailMat: THREE.MeshStandardMaterial | null = null;
+
+/** One material for every fitting in the city: the colour is per-vertex, not per-material. */
+function facadeDetailMaterial(): THREE.MeshStandardMaterial {
+  if (!facadeDetailMat) {
+    facadeDetailMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0.04 });
+  }
+  return facadeDetailMat;
+}
+
+/**
+ * A shuffled deck of the facade variants, drawn one per building. A block gets its own deck, so
+ * every block carries at least five different facades instead of one tile repeated, and two
+ * buildings side by side are never the same variant until the deck runs out.
+ */
+function facadeDeck(): FacadeVariant[] {
+  const deck = [...FACADE_VARIANTS];
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
 function shopTexture(hue: any) {
   return canvasTexture(256, 64, (ctx, w, h) => {
     // facade base
@@ -322,31 +515,31 @@ function shopTexture(hue: any) {
 
 const emissiveCache = new Map<string, THREE.Texture>();
 
-function emissiveTexture(rx = 1, ry = 1): THREE.Texture {
-  // one glow mask per repeat bucket, shared by every building with the same footprint
-  const key = `${rx}x${ry}`;
-  const hit = emissiveCache.get(key);
+function emissiveTexture(style = 'grid'): THREE.Texture {
+  // One glow mask per window layout. It has to line up with the openings the diffuse tile
+  // painted, otherwise a lit window at night appears on a blank patch of plaster -- which is
+  // exactly what the old 4x4 random grid did.
+  const hit = emissiveCache.get(style);
   if (hit) return hit;
   const tex = canvasTexture(128, 128, (ctx, w, h) => {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
-    const cols = 4;
-    const rows = 4;
-    const pad = 6;
-    const cw = w / cols;
-    const ch = h / rows;
-    for (let x = 0; x < cols; x++) {
-      for (let y = 0; y < rows; y++) {
-        if (Math.random() < 0.55) {
-          ctx.fillStyle = `rgba(255,${randInt(180, 230)},${randInt(110, 170)},1)`;
-          ctx.fillRect(x * cw + pad, y * ch + pad, cw - pad * 2, ch - pad * 2.2);
-        }
-      }
+    const lit = (x: number, y: number, ww: number, wh: number) => {
+      ctx.fillStyle = `rgba(255,${randInt(190, 236)},${randInt(120, 176)},1)`;
+      ctx.fillRect(x, y, ww, wh);
+    };
+    if (style === 'bands') {
+      if (Math.random() < 0.8) lit(14, 40, w - 28, 40);
+    } else if (style === 'strips') {
+      for (const x of [16, 57, 98]) if (Math.random() < 0.6) lit(x, 22, 14, 74);
+    } else {
+      if (Math.random() < 0.7) lit(17, 37, 36, 50);
+      if (Math.random() < 0.55) lit(75, 37, 36, 50);
     }
   });
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(rx, ry);
-  emissiveCache.set(key, tex);
+  tex.repeat.set(1, 1);
+  emissiveCache.set(style, tex);
   return tex;
 }
 type InstancedAdder = (
@@ -573,6 +766,21 @@ export class City {
       }
     }
     this.buildingBuckets.clear();
+
+    // One mesh per block for every cornice, ledge, rail, pipe and AC box in it. The material is
+    // a single shared instance and the colours ride on the vertices, so this is one draw call
+    // for the fittings of a whole city block.
+    for (const [group, geos] of this.detailBuckets) {
+      if (!geos.length) continue;
+      const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, facadeDetailMaterial());
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+      for (const g of geos) g.dispose();
+    }
+    this.detailBuckets.clear();
   }
 
   finalizePlinths() {
@@ -1346,6 +1554,24 @@ export class City {
 
   /** frontage bodies live outside the block groups, so they merge into one set for the root */
   frontageBuckets = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>();
+
+  /**
+   * Facade fittings (cornices, ledges, rails, pipes, ACs, penthouses, sign bands) waiting to be
+   * merged: one geometry list per block group. They go into one mesh with one vertex-coloured
+   * material, so a block pays one extra draw call for all of its cornices.
+   */
+  detailBuckets = new Map<THREE.Group, THREE.BufferGeometry[]>();
+
+  /**
+   * Every facade that got built, with the variant and trim it was given. The screenshot harness
+   * reads this to prove a block really mixes its facades instead of asserting it in prose.
+   */
+  facadeAudit: {
+    x: number; z: number; h: number; variant: FacadeVariant; trim: number;
+    fcx: number; fcz: number; nx: number; nz: number; faceLen: number; baseY: number;
+    source: 'block' | 'frontage';
+    block: [number, number] | null;
+  }[] = [];
 
   /** every building footprint already placed, so two of them can never occupy the same ground */
   footprints: { minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
@@ -2501,10 +2727,11 @@ export class City {
         ]);
       }
     }
+    const deck = facadeDeck();
     for (const [ox, oz, w, d] of cells) {
       const [lo, hi] = style.heights;
       const h = rand(lo, hi);
-      this.makeBuilding(cx + ox, cz + oz, w, d, h, cx, cz, style);
+      this.makeBuilding(cx + ox, cz + oz, w, d, h, cx, cz, style, deck);
     }
     // market districts get tarpaulin stalls spilled onto the pavement
     if (id === 'tanahabang' || id === 'glodok') {
@@ -2528,14 +2755,14 @@ export class City {
         const z = cz - houseD - gapZ * 1.5 + i * (houseD + gapZ);
         const wall = pick(style.walls);
         const tex = windowTexture(wall, 'strips');
-        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(1.4, 1.1);
+        // the tile is one storey; the house's own UVs say how many storeys it is
         const body = new THREE.Mesh(
           new THREE.BoxGeometry(houseW, h, houseD),
           [new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }),
            new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.95 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }),
            new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 })]
         );
+        facadeUV(body.geometry, houseW, h, houseD, hash01(x, z, 3));
         body.position.set(x, h / 2 + 0.3, z);
         body.castShadow = true;
         body.receiveShadow = true;
@@ -2617,7 +2844,127 @@ export class City {
     }
   }
 
-  makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z, style: any = null) {
+  /**
+   * Fittings for one street-facing facade: the roofline cornice, a ledge at every other slab,
+   * and the equipment that makes a variant recognisable in silhouette.
+   *
+   * Everything is a plain box with vertex colours, collected per block group and merged into one
+   * mesh at the end of generation, so the entire city's fittings cost one extra draw call per
+   * block rather than one per building. The boxes exist because the brief is a *shadow* line
+   * under the sun: a painted ledge cannot cast one.
+   */
+  addFacadeDetail(o: {
+    x: number; z: number; w: number; d: number; h: number; yaw: number;
+    baseY: number;
+    fcx: number; fcz: number;   // centre of the street-facing face, world space
+    faceLen: number;            // how wide that face is
+    nx: number; nz: number;     // its outward normal
+    variant: FacadeVariant; trim: number; accent: number; seed: number;
+    source: 'block' | 'frontage';
+    /** the block centre this building was placed for; null for a frontage row */
+    block: [number, number] | null;
+  }) {
+    const { x, z, w, d, h, yaw, baseY, fcx, fcz, faceLen, nx, nz, variant, trim, accent, seed, source, block } = o;
+    this.facadeAudit.push({ x, z, h, variant, trim, fcx, fcz, nx, nz, faceLen, baseY, source, block });
+    if (h < 4.5 || faceLen < 4) return;
+    const geos: THREE.BufferGeometry[] = [];
+    const tx = Math.cos(yaw);
+    const tz = -Math.sin(yaw);
+    const floors = Math.max(1, Math.round(h / FACADE_TILE_H));
+
+    const part = (along: number, y: number, out: number, la: number, lu: number, lo: number, color: number) => {
+      const g = new THREE.BoxGeometry(la, lu, lo);
+      paintGeometry(g, color);
+      g.applyMatrix4(
+        new THREE.Matrix4()
+          .makeRotationY(yaw)
+          .setPosition(fcx + tx * along + nx * out, baseY + y, fcz + tz * along + nz * out)
+      );
+      geos.push(g);
+    };
+
+    // Roofline cornice: one ring around the box, so the top of the wall drops a shadow line
+    // onto the top storey instead of meeting the parapet flat.
+    const ring = new THREE.BoxGeometry(w + 0.55, 0.28, d + 0.55);
+    paintGeometry(ring, trim);
+    ring.applyMatrix4(new THREE.Matrix4().makeRotationY(yaw).setPosition(x, baseY + h - 0.55, z));
+    geos.push(ring);
+
+    // Ledge courses at the slab edges: shallow, and only on the street face, which is the face
+    // the player walks past. Every other slab, capped at four, so a 14-storey tower does not
+    // pay for a ledge per floor.
+    const every = floors > 8 ? 3 : 2;
+    let ledges = 0;
+    for (let f = every; f <= floors - 1 && ledges < 4; f += every) {
+      part(0, f * FACADE_TILE_H, 0.15, faceLen + 0.4, 0.16, 0.3, trim);
+      ledges++;
+    }
+
+    if (variant === 'balcony' && floors >= 2) {
+      // A slab and a closed rail across two bays of the facade, like the ruko balconies in the
+      // reference pack. One level only: at street level the eye reads the rail, not the count.
+      const railLen = Math.min(faceLen * 0.86, 7.5);
+      const depth = 0.85;
+      const f = Math.min(2, floors - 1);
+      const y = f * FACADE_TILE_H + 0.06;
+      part(0, y, depth / 2, railLen, 0.12, depth, trim);
+      part(0, y + 1.02, depth - 0.06, railLen, 0.06, 0.06, trim);
+      part(0, y + 0.16, depth - 0.06, railLen, 0.05, 0.05, trim);
+      const posts = Math.min(7, Math.max(3, Math.round(railLen / 2.2)));
+      for (let i = 0; i < posts; i++) {
+        const along = -railLen / 2 + (railLen * i) / (posts - 1);
+        part(along, y + 0.6, depth - 0.06, 0.05, 1.0, 0.05, 0x3a3f45);
+      }
+    } else if (variant === 'pipes' && floors >= 1) {
+      // Service pipes running the height of the wall, with their brackets and a drip shadow.
+      const along = -faceLen / 2 + 0.8;
+      const bottom = 2.6;
+      const top = Math.max(bottom + 1, h - 0.9);
+      const len = top - bottom;
+      part(along, bottom + len / 2, 0.13, 0.16, len, 0.16, 0x8d9298);
+      part(along - 0.26, bottom + len / 2, 0.08, 0.12, len, 0.12, 0x6f747a);
+      for (let i = 0; i < 3; i++) {
+        part(along, bottom + len * (0.25 + i * 0.3), 0.11, 0.42, 0.1, 0.22, 0x4c5055);
+      }
+    } else if (variant === 'ac') {
+      // Condensers bolted to the wall on two floors, the way a ruko fills up with them.
+      const n = Math.min(2, Math.max(1, floors - 1));
+      for (let i = 0; i < n; i++) {
+        const f = 1 + i * 2;
+        if (f >= floors) break;
+        part(faceLen * 0.24, f * FACADE_TILE_H + 0.62, 0.25, 0.82, 0.55, 0.46, 0xd9dad4);
+      }
+    } else if (variant === 'penthouse' && h > 9) {
+      // Setback penthouse: the roof gets a second, smaller volume instead of a flat lid.
+      const pw = Math.min(w * 0.58, w - 1.5);
+      const pd = Math.min(d * 0.5, d - 1.5);
+      const body = new THREE.BoxGeometry(pw, 2.7, pd);
+      paintGeometry(body, 0xe6dfce);
+      body.applyMatrix4(new THREE.Matrix4().makeRotationY(yaw).setPosition(x - nx * 0.4, baseY + h + 1.35, z - nz * 0.4));
+      geos.push(body);
+      const stub = new THREE.BoxGeometry(1.7, 2.0, 1.7);
+      paintGeometry(stub, 0xcfc7b8);
+      stub.applyMatrix4(
+        new THREE.Matrix4().makeRotationY(yaw).setPosition(x + tx * (w * 0.26), baseY + h + 1.0, z + tz * (w * 0.26))
+      );
+      geos.push(stub);
+    } else if (variant === 'signband') {
+      // One painted band, on the second storey only. A tile cannot do this: the tile repeats
+      // on every floor, so a band baked into it would stripe the whole building.
+      const y = FACADE_TILE_H * 1.55;
+      part(0, y, 0.07, faceLen * 0.94, 0.8, 0.14, accent);
+      part(0, y - 0.47, 0.06, faceLen * 0.94, 0.08, 0.1, 0x3b342b);
+      // a second, thinner band under it, so it reads as painted signage and not a stripe
+      part(0, y + 0.5, 0.06, faceLen * 0.7, 0.16, 0.12, 0xf1e9d8);
+    }
+    void seed;
+
+    const bucket = this.detailBuckets.get(this.group) ?? [];
+    for (const g of geos) bucket.push(g);
+    this.detailBuckets.set(this.group, bucket);
+  }
+
+  makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z, style: any = null, deck: FacadeVariant[] | null = null) {
     // One gate for every placement path. Block lots and street frontage both come through
     // here and each used to check only its own clearance: 462 pairs of buildings were
     // interpenetrating, the worst by 20 m, some sites used twice at identical coordinates.
@@ -2628,20 +2975,21 @@ export class City {
     if (this.onRoad(x, z, 5.4)) return null;   // 3.6 m trotoar + ~1.8 m setback
     this.footprints.push(rect);
 
-    const chromeLike = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
+    // Draw the facade variant only now that the lot is really being built: a rejected site
+    // used to consume a deck card, which is how a block of eight buildings could end up with
+    // three distinct facades instead of seven.
+    const facadeVariant: FacadeVariant = deck && deck.length ? deck.pop()! : pick(FACADE_VARIANTS);
     const variant = randInt(0, 2);
     const prof = this.facadeProfile(districtAtPoint(x, z), h);
     const wall = pick(prof.walls);
     const facade = prof.style;
-    const rx = Math.max(1, Math.round(w / 6.5));
-    const ry = Math.max(1, Math.round(h / 6.5));
-    // the repeat is part of the cache key, so a thousand buildings share a handful of textures
-    // instead of owning one canvas each -- which is what pushed a mobile GL context into
-    // MeshDepthMaterial shader failures
-    const tex = windowTexture(wall, facade, rx, ry);
-    const emis = emissiveTexture(rx, ry);
+    // One tile is one storey now, and the tile is stretched by the body's own UVs, so the
+    // material key no longer carries a repeat: neighbouring buildings can share the canvas
+    // instead of each owning a copy of it.
+    const tex = windowTexture(wall, facade, facadeVariant);
+    const emis = emissiveTexture(facade);
 
-    const matKey = `${wall}|${facade}|${rx}|${ry}`;
+    const matKey = `${wall}|${facade}|${facadeVariant}`;
     let sideMat = this.buildingMatCache.get(matKey);
     if (!sideMat) {
       sideMat = new THREE.MeshStandardMaterial({
@@ -2675,6 +3023,8 @@ export class City {
     // while the block itself costs a handful of calls instead of dozens.
     const bodyGeo = new THREE.BoxGeometry(w, h, d);
     bodyGeo.translate(x, h / 2 + 0.2, z);
+    // per-building UV phase: no two neighbours' window columns line up
+    facadeUV(bodyGeo, w, h, d, hash01(x, z, 3));
     const bucket = this.buildingBuckets.get(this.group) ?? new Map();
     const entry = bucket.get(matKey) ?? { mat: sideMat, geos: [] };
     // the roof faces use a separate material, so they stay a separate merged bucket
@@ -2806,6 +3156,26 @@ export class City {
     const tz = -nx;
     const doorX = faceX ? x + nx * (w / 2 + 0.02) : x + (w > d ? -w * 0.22 : 0);
     const doorZ = faceX ? z + (d > w ? -d * 0.22 : 0) : z + nz * (d / 2 + 0.02);
+    // Upper-storey fittings on the face that actually meets the street: cornice, ledge course
+    // and the variant's own hardware. Same normal as the door, so the shop and its balconies
+    // are on the same side of the building.
+    const faceHalf = Math.abs(nx) * (w / 2) + Math.abs(nz) * (d / 2);
+    this.addFacadeDetail({
+      x, z, w, d, h,
+      yaw: doorYaw,
+      baseY: 0.2,
+      fcx: x + nx * faceHalf,
+      fcz: z + nz * faceHalf,
+      faceLen: Math.abs(nx) * d + Math.abs(nz) * w,
+      nx,
+      nz,
+      variant: facadeVariant,
+      trim: trimFor(wall),
+      accent: SIGN_BAND_COLORS[Math.floor(hash01(x, z, 7) * SIGN_BAND_COLORS.length)],
+      seed: hash01(x, z, 11),
+      source: 'block',
+      block: [blockX, blockZ],
+    });
     this.doorMatrices.push(new THREE.Matrix4().makeRotationY(doorYaw).setPosition(doorX + nx * 0.06, 1.42, doorZ + nz * 0.06));
     this.handleMatrices.push(
       new THREE.Matrix4().makeTranslation(doorX + tx * 0.45 + nx * 0.14, 1.35, doorZ + tz * 0.45 + nz * 0.14)
@@ -3560,6 +3930,8 @@ export class City {
         const dz = (z2 - z1) / len;
         const nx = -dz;
         const nz = dx;
+        // one deck per street segment: the row mixes its facades instead of repeating one tile
+        const segmentDeck = facadeDeck();
         for (const side of [-1, 1]) {
           let t = 6;
           while (t < len - 6) {
@@ -3588,6 +3960,7 @@ export class City {
             const taken = this.footprints.some((f) => foot.minX < f.maxX && foot.maxX > f.minX && foot.minZ < f.maxZ && foot.maxZ > f.minZ);
             if (!onRoad && !isWater(px, pz) && !taken) {
               this.footprints.push(foot);
+              const fv = segmentDeck.length ? segmentDeck.pop()! : pick(FACADE_VARIANTS);
               const group = new THREE.Group();
               group.position.set(px, terrainHeight(px, pz), pz);
               group.rotation.y = Math.atan2(dx, dz);
@@ -3597,25 +3970,52 @@ export class City {
               const PASTELS = [0xd9cdb4, 0xe8dfcb, 0xc9d8c4, 0xe4c9c2, 0xb9c7d4, 0xd6c9a8, 0xcfcfc8, 0xb8a894];
               const wall = rand(0, 1) < 0.45 ? pick(PASTELS) : pick(style.walls);
               const facade = pick(['strips', 'grid', 'bands'] as const);
-              // one tile is one floor: ~3.2 m tall, 8 m wide. The repeat goes into the cache
-              // key -- mutating tex.repeat here would mutate every building sharing that
-              // texture, which is exactly what the cache made possible.
-              const frx = Math.max(1, Math.round(w / 8));
-              const fry = Math.max(1, Math.round(h / 3.2));
-              const tex = windowTexture(wall, facade, frx, fry);
-              const fkey = `frontage|${wall}|${facade}|${frx}|${fry}`;
+              // One tile is one storey. The repeat lives in the body's UVs, so the material --
+              // and the canvas behind it -- is shared with every other building that landed on
+              // the same colour, layout and variant.
+              const tex = windowTexture(wall, facade, fv);
+              const fkey = `frontage|${wall}|${facade}|${fv}`;
               let mat = this.buildingMatCache.get(fkey);
               if (!mat) {
-                mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
+                mat = new THREE.MeshStandardMaterial({
+                  map: tex,
+                  emissive: 0xffffff,
+                  emissiveMap: emissiveTexture(facade),
+                  emissiveIntensity: 0,
+                  roughness: 0.9,
+                });
                 this.buildingMatCache.set(fkey, mat);
+                this.emissiveMats.push(mat);
               }
               // world transform of the body: rotate by the row angle, then move to its slot
+              const frontY = terrainHeight(px, pz) + 0.3;
               const bodyGeo = new THREE.BoxGeometry(w, h, d);
+              facadeUV(bodyGeo, w, h, d, hash01(px, pz, 3));
               bodyGeo.rotateY(group.rotation.y);
-              bodyGeo.translate(px, terrainHeight(px, pz) + h / 2 + 0.3, pz);
+              bodyGeo.translate(px, frontY + h / 2, pz);
               const fe = this.frontageBuckets.get(fkey) ?? { mat, geos: [] };
               fe.geos.push(bodyGeo);
               this.frontageBuckets.set(fkey, fe);
+              // the same fittings the block lots get, on the face that meets the street
+              const fYaw = group.rotation.y;
+              const fnx = -Math.sin(fYaw);
+              const fnz = -Math.cos(fYaw);
+              this.addFacadeDetail({
+                x: px, z: pz, w, d, h,
+                yaw: fYaw,
+                baseY: frontY,
+                fcx: px + fnx * (d / 2),
+                fcz: pz + fnz * (d / 2),
+                faceLen: w,
+                nx: fnx,
+                nz: fnz,
+                variant: fv,
+                trim: trimFor(wall),
+                accent: SIGN_BAND_COLORS[Math.floor(hash01(px, pz, 7) * SIGN_BAND_COLORS.length)],
+                seed: hash01(px, pz, 11),
+                source: 'frontage',
+                block: null,
+              });
               // a shopfront band at street level so the row is not one blank slab
               const base = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 3.2, 0.3), shopfrontMat());
               base.position.set(0, 1.9, -d / 2 - 0.16);
