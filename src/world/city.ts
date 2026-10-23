@@ -22,16 +22,6 @@ import { terrainHeight } from './terrain';
 import { LOCAL_STREETS } from './streets';
 import { Car, driverLook } from '../vehicles/car';
 import { Ojek } from '../vehicles/ojek';
-import {
-  buildRoadSegment,
-  buildKerbWalk,
-  buildSignalIntersection,
-  buildUtilityPole,
-  buildStreetNameSign,
-  buildManhole,
-  buildDrainGrate,
-  buildBollard,
-} from './streetkit';
 
 // City-block scale. A block is 140 m and the pitch is 170 m, so the street between two
 // blocks is 30 m of asphalt and pavement - close to a real Jakarta block, and wide enough
@@ -191,24 +181,31 @@ function shopfrontMat(variant = 0): THREE.MeshStandardMaterial {
 
 const windowTexCache = new Map<string, THREE.Texture>();
 
+/**
+ * One facade tile is ONE STOREY, and the mesh repeats it (rx, ry) times.
+ *
+ * It used to be a 3x3 window grid mapped once onto the whole wall, so a 16 m shophouse showed
+ * three windows four metres wide and a 40 m tower showed three windows eleven metres tall: the
+ * "flat slab with one window slot" the owner kept photographing. A tile per storey gives windows
+ * a fixed real size and gives the wall a floor rhythm, which is what breaks a single colour.
+ * The tile carries its own relief: sill, drip shadow under the floor edge, a balcony rail in
+ * front of some bays and an air-con box beside one. What is drawn here costs no geometry and no
+ * extra draw call; the 3D cornice and service pipes are added by makeBuilding.
+ */
 function windowTexture(wall: any, style = 'grid', rx = 1, ry = 1) {
-  // One canvas per (wall colour, facade style), not one per building. The city has ~1,400
+  // One canvas per (wall colour, facade style, repeat), not one per building. The city has ~2,500
   // buildings; giving each its own 128px canvas meant thousands of textures on the GPU, and a
   // phone GL context starts failing depth/shadow shaders long before a desktop one does.
   const key = `${wall}|${style}|${rx}x${ry}`;
   const hit = windowTexCache.get(key);
   if (hit) return hit;
-  // A Jakarta facade is mostly wall: plaster, ceramic tile or painted concrete, with windows
-  // punched into it. The first version painted glass over almost the whole tile, so every
-  // building in the city read as the same dark curtain wall no matter what colour it was
-  // given. One tile is now one floor, and the glass is an accent inside the wall.
   const map = canvasTexture(128, 128, (ctx, w, h) => {
     const c = typeof wall === 'number' ? `#${wall.toString(16).padStart(6, '0')}` : String(wall);
     ctx.fillStyle = c;
     ctx.fillRect(0, 0, w, h);
 
     // grime and patina, so the wall is not a flat poster colour
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 26; i++) {
       ctx.fillStyle = `rgba(0,0,0,${rand(0.015, 0.05)})`;
       ctx.fillRect(rand(0, w), rand(0, h), rand(1, 6), rand(4, h));
     }
@@ -223,50 +220,93 @@ function windowTexture(wall: any, style = 'grid', rx = 1, ry = 1) {
       ctx.fillStyle = 'rgba(255,255,255,0.22)';
       ctx.fillRect(x, y, ww, Math.max(1, wh * 0.22));
     };
+    const sill = (x: number, y: number, ww: number) => {
+      ctx.fillStyle = 'rgba(255,255,255,0.30)';
+      ctx.fillRect(x - 2, y, ww + 4, 3);
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(x - 2, y + 3, ww + 4, 2);
+    };
+    const balcony = (x: number, y: number, ww: number) => {
+      // recessed shadow, then a rail: the bay sits 20 cm back behind its slab
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.fillRect(x - 3, y - 3, ww + 6, 12);
+      ctx.fillStyle = 'rgba(232,230,222,0.85)';
+      ctx.fillRect(x - 4, y + 9, ww + 8, 3);
+      ctx.fillStyle = 'rgba(60,64,70,0.55)';
+      for (let bx = x - 4; bx < x + ww + 4; bx += 5) ctx.fillRect(bx, y + 1, 2, 9);
+    };
 
     if (style === 'bands') {
-      // ONE floor per tile. The tile used to hold four 32 px rows while the mesh mapped it to a
-      // single 3.2 m floor, so the facade came out as horizontal stripes every 80 cm instead of
-      // a window band per storey.
-      // four panes with mullions, not one 8 m strip: a single opening read as a painted band
+      // a tower storey: one continuous glazed band behind piers, and a spandrel that is a
+      // different TONE from the glass wall — a tower whose spandrel is the same grey as its wall
+      // is the "one colour" the owner photographed
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';
+      ctx.fillRect(0, 0, w, 26);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(0, 25, w, 3);
       const panes = 4;
-      const gap = 10;
+      const gap = 9;
       const pw = (w - gap * (panes + 1)) / panes;
       for (let i = 0; i < panes; i++) {
-        glass(gap + i * (pw + gap), h * 0.28, pw, h * 0.3);
+        glass(gap + i * (pw + gap), 34, pw, 54);
+        ctx.fillStyle = 'rgba(0,0,0,0.30)';
+        ctx.fillRect(gap + i * (pw + gap) - 2, 34, 3, 54);
+      }
+      // a cream string course at the floor line: the horizontal that separates storeys
+      ctx.fillStyle = 'rgba(236,232,220,0.55)';
+      ctx.fillRect(0, h - 22, w, 5);
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(0, h - 17, w, 9);
+      ctx.fillStyle = 'rgba(40,44,50,0.45)';
+      for (let x = 4; x < w; x += 34) ctx.fillRect(x, 28, 4, h - 45);
+    } else if (style === 'strips') {
+      // punched vertical windows between wide piers
+      for (let x = 12; x < w - 16; x += 32) {
+        glass(x, 22, 12, h - 52);
+        sill(x - 1, h - 30, 14);
       }
       ctx.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx.fillRect(0, h - 6, w, 6);
-      ctx.fillStyle = 'rgba(255,255,255,0.10)';
-      ctx.fillRect(0, h - 8, w, 2);
-      return;
-    }
-    if (style === 'strips') {
-      // punched vertical windows between wide piers
-      for (let x = 14; x < w - 18; x += 34) {
-        glass(x, 10, 10, h - 22);
-      }
-      ctx.fillStyle = 'rgba(0,0,0,0.10)';
-      ctx.fillRect(0, 0, w, 6);
-      return;
-    }
-    // grid: small windows in plaster, the common shophouse/office look
-    const cols = 3;
-    const rows = 3;
-    const cw = w / cols;
-    const ch = h / rows;
-    for (let x = 0; x < cols; x++) {
-      for (let y = 0; y < rows; y++) {
-        const ww = cw * 0.36;
-        const wh = ch * 0.34;
-        glass(x * cw + (cw - ww) / 2, y * ch + ch * 0.26, ww, wh);
-        // frame
-        ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(0, h - 8, w, 8);
+    } else {
+      // grid: the common shophouse / office storey — three bays, windows punched into plaster
+      const cols = 3;
+      const cw = w / cols;
+      for (let i = 0; i < cols; i++) {
+        const ww = cw * 0.44;
+        const x = i * cw + (cw - ww) / 2;
+        const y = h * 0.26;
+        glass(x, y, ww, h * 0.40);
+        ctx.strokeStyle = 'rgba(0,0,0,0.26)';
         ctx.lineWidth = 1;
-        ctx.strokeRect(x * cw + (cw - ww) / 2, y * ch + ch * 0.26, ww, wh);
+        ctx.strokeRect(x, y, ww, h * 0.4);
+        sill(x, y + h * 0.40, ww);
+        if ((i + rx) % 3 === 0) balcony(x, y, ww);
+        // air-con box bolted beside the bay, as on every ruko
+        if ((i + ry) % 3 === 1) {
+          ctx.fillStyle = 'rgba(238,238,232,0.95)';
+          ctx.fillRect(x + ww + 2, y + h * 0.30, 15, 11);
+          ctx.fillStyle = 'rgba(120,126,132,0.95)';
+          ctx.fillRect(x + ww + 4, y + h * 0.30 + 3, 11, 5);
+        }
       }
+      // the floor itself: a shallow ledge with a shadow under it, the line that breaks the wall
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.fillRect(0, h - 19, w, 4);
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.fillRect(0, h - 15, w, 5);
+      ctx.fillStyle = 'rgba(0,0,0,0.10)';
+      ctx.fillRect(0, h - 10, w, 10);
+    }
+    // dirt streaks down the whole face
+    for (let i = 0; i < 30; i++) {
+      ctx.fillStyle = `rgba(40,34,24,${rand(0.02, 0.08)})`;
+      ctx.fillRect(rand(0, w), rand(10, h - 20), rand(2, 6), rand(8, 30));
     }
   });
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  // the tile is one storey: this is what gives the windows a real size on every wall
+  map.repeat.set(rx, ry);
+  windowTexCache.set(key, map);
   return map;
 }
 function shopTexture(hue: any) {
@@ -317,17 +357,15 @@ function emissiveTexture(rx = 1, ry = 1): THREE.Texture {
   const tex = canvasTexture(128, 128, (ctx, w, h) => {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
-    const cols = 4;
-    const rows = 4;
-    const pad = 6;
+    // Three bays in the same band the diffuse tile paints its windows in, so the night glow
+    // lands where the glass is. This tile repeats (rx, ry) exactly like the facade map.
+    const cols = 3;
     const cw = w / cols;
-    const ch = h / rows;
     for (let x = 0; x < cols; x++) {
-      for (let y = 0; y < rows; y++) {
-        if (Math.random() < 0.55) {
-          ctx.fillStyle = `rgba(255,${randInt(180, 230)},${randInt(110, 170)},1)`;
-          ctx.fillRect(x * cw + pad, y * ch + pad, cw - pad * 2, ch - pad * 2.2);
-        }
+      if (Math.random() < 0.55) {
+        const ww = cw * 0.44;
+        ctx.fillStyle = `rgba(255,${randInt(180, 230)},${randInt(110, 170)},1)`;
+        ctx.fillRect(x * cw + (cw - ww) / 2, h * 0.26, ww, h * 0.4);
       }
     }
   });
@@ -572,6 +610,23 @@ export class City {
       for (const g of list) g.dispose();
       list.length = 0;
     }
+    // two materials: the concrete ledge, and the galvanised service pipe
+    const reliefMats = [
+      new THREE.MeshStandardMaterial({ color: 0xd6d2c8, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: 0x8b9096, metalness: 0.35, roughness: 0.6 }),
+    ];
+    for (let v = 0; v < this.reliefGeos.length; v++) {
+      const list = this.reliefGeos[v];
+      if (!list.length) continue;
+      const merged = mergeGeometries(list, false);
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, reliefMats[v]);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+      for (const g of list) g.dispose();
+      list.length = 0;
+    }
   }
 
   buildClouds() {
@@ -777,7 +832,6 @@ export class City {
     }
 
     this.buildFrontage();
-    this.buildStreetKitCorner();
     this.buildTerrainFeatures();
     this.buildRoadRibbons();
     this.buildWater();
@@ -1133,6 +1187,26 @@ export class City {
     if (last) last.bottom = y;
   }
 
+  /**
+   * Stand a two-wheeler on the terrain: both tyres on the ground, pitched to the slope.
+   *
+   * `placeOnGround` samples one point, the group origin. A bike is 1.27 m between its axles, so on
+   * the hilly side of the map the far tyre hung 0.4 m over the asphalt while the near one touched
+   * it. Sampling the ground under each contact patch and pitching the body to that line puts both
+   * tyres down; `front`/`rear` are the contact offsets along the bike's own +Z.
+   */
+  private placeBikeOnGround(g: THREE.Object3D, x: number, z: number, yaw: number, front: number, rear: number) {
+    const gF = this.groundHeightAt(x + Math.sin(yaw) * front, z + Math.cos(yaw) * front);
+    const gR = this.groundHeightAt(x + Math.sin(yaw) * rear, z + Math.cos(yaw) * rear);
+    const sin = clamp((gR - gF) / (front - rear), -0.5, 0.5);
+    // order YXZ so the pitch is about the bike's own lateral axis after the yaw, not about world X
+    g.rotation.order = 'YXZ';
+    g.rotation.x = Math.asin(sin);
+    g.position.y = gF + front * sin;
+    const last = this.propAudit[this.propAudit.length - 1];
+    if (last) last.bottom = g.position.y;
+  }
+
   buildStreetLife() {
     const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
     let buses = 0;
@@ -1355,6 +1429,14 @@ export class City {
   plinthGeos: THREE.BufferGeometry[][] = [[], [], []];
 
   /**
+   * Upper-storey relief: the cornice over the shopfront and a service pipe down the wall.
+   * Bucketed by material, merged into one mesh each at the end, so 2,500 buildings cost two draw
+   * calls instead of two per building. The window texture paints floor ledges and balcony rails;
+   * these two are real geometry, which is what casts a shadow and breaks the slab in profile.
+   */
+  reliefGeos: THREE.BufferGeometry[][] = [[], []];
+
+  /**
    * true when (x, z) lies within `margin` metres of the *edge* of any arterial or the ring.
    *
    * The margin is what makes a pavement possible. A building needs road half-width + 3.6 m of
@@ -1511,7 +1593,8 @@ export class City {
         this.group.add(bike.group);
         this.ojeks.push({ group: bike.group, x: spot.x, z: spot.z, yaw: bike.group.rotation.y, box: bike.cargoBoxBounds });
         this.propAudit.push({ name: 'ojek', x: spot.x, z: spot.z, bottom: 0 });
-        this.placeOnGround(bike.group, spot.x, spot.z);
+        // both tyres, not just the group origin: the ojek floated one wheel on the hills
+        this.placeBikeOnGround(bike.group, spot.x, spot.z, bike.group.rotation.y, 0.74, -0.53);
         this.colliders.push({ minX: spot.x - 0.55, maxX: spot.x + 0.55, minZ: spot.z - 1.1, maxZ: spot.z + 1.1, h: 1.6 });
       }
     }
@@ -1838,46 +1921,6 @@ export class City {
     }
   }
 
-  /**
-   * The street kit, wired: one four-arm local junction, its pavements, and the furniture line that
-   * repeats along it, all from `src/world/streetkit.ts`.
-   *
-   * This is the kit's first tenant, not a replacement of the inline road code yet. It stands on open
-   * ground east of the Thamrin corridor (96, -116) because that is the nearest 34 m square the
-   * generator leaves free of block plates, local-street ribbons and arterial pavement - checked
-   * against `this.blocks` and `this.roads`, not guessed. The four arms are the map's local class
-   * (8 m) and the kerbs are the kit's 30 cm / 12 cm trotoar module, so a later pass can lift the
-   * rest of the network onto the same vocabulary.
-   */
-  buildStreetKitCorner() {
-    const kx = 96;
-    const kz = -116;
-    const ground = (x: number, z: number) => terrainHeight(x, z);
-    const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
-
-    buildSignalIntersection(ctx, kx, kz, 0, { roadClass: 'local', armsM: 13, cornerRadiusM: 7, ground });
-
-    // the north approach continues past the junction as a road segment, so the carriageway, edge
-    // lines and double centre line come from the same builder the junction's arms use
-    buildRoadSegment(ctx, kx, kz + 30, 0, { roadClass: 'local', lengthM: 26, median: 'paint', ground });
-
-    // trotoar up the north arm and along the west arm, one module each side
-    buildKerbWalk(ctx, kx + 4.3, kz + 8.65, 0, { lengthM: 8.7, crossingAt: -0.5, ground });
-    buildKerbWalk(ctx, kx - 4.3, kz + 8.65, Math.PI, { lengthM: 8.7, crossingAt: -0.5, ground });
-    buildKerbWalk(ctx, kx - 10.5, kz + 4.3, -Math.PI / 2, { lengthM: 13, tactile: false, ground });
-    buildKerbWalk(ctx, kx - 10.5, kz - 4.3, Math.PI / 2, { lengthM: 13, tactile: false, ground });
-
-    // the furniture that repeats: two poles with one sagging span between them, the name blade on
-    // the corner, the bollards at the crossing mouth, and the covers in the carriageway
-    buildUtilityPole(ctx, kx + 8.6, kz + 6.0, 0, { spanM: 12, ground });
-    buildUtilityPole(ctx, kx + 20.6, kz + 6.0, 0, { spanM: 12, cables: false, ground });
-    buildStreetNameSign(ctx, kx + 5.7, kz + 5.2, Math.PI / 2, { ground });
-    buildBollard(ctx, kx + 4.5, kz + 5.6, 0, { ground });
-    buildBollard(ctx, kx + 4.5, kz + 7.0, 0, { ground });
-    buildManhole(ctx, kx + 1.2, kz + 14.0, 0, { ground });
-    buildDrainGrate(ctx, kx - 2.4, kz + 15.0, 0, { ground });
-  }
-
   buildWater() {
     const shape = new THREE.Shape();
     shape.moveTo(-WORLD_HALF - 900, -WORLD_HALF - 900);
@@ -2069,8 +2112,11 @@ export class City {
     const prof = this.facadeProfile(districtAtPoint(x, z), h);
     const wall = pick(prof.walls);
     const facade = prof.style;
-    const rx = Math.max(1, Math.round(w / 6.5));
-    const ry = Math.max(1, Math.round(h / 6.5));
+    // One tile is one storey of three bays (~3.2 m and ~9.6 m of facade), so a 20 m wall gets six
+    // window rows instead of one stretched row. Bounded, because the repeat is part of the
+    // texture cache key and every extra bucket is another 128px canvas on the GPU.
+    const rx = clamp(Math.round(w / 9.6), 1, 6);
+    const ry = clamp(Math.round(h / 3.3), 1, 14);
     // the repeat is part of the cache key, so a thousand buildings share a handful of textures
     // instead of owning one canvas each -- which is what pushed a mobile GL context into
     // MeshDepthMaterial shader failures
@@ -2104,6 +2150,40 @@ export class City {
       const pg = new THREE.BoxGeometry(w + 0.34, 3.2, d + 0.34);
       pg.translate(x, 1.9 + 0.2, z);
       this.plinthGeos[variant].push(pg);
+
+      // ---- upper storeys: a real cornice, and a pipe running down one corner --------------
+      // The plinth already gives the ground floor shutters, glazing and awnings; above it the
+      // wall was one colour with a window grid painted on. A cornice is the line that separates
+      // the shop from the floors above it, and it takes the shape out of the silhouette.
+      if (h > 6) {
+        const cap = new THREE.BoxGeometry(w + 0.62, 0.16, d + 0.62);
+        cap.translate(x, 3.86, z);
+        this.reliefGeos[0].push(cap);
+      }
+      // one more ledge every second storey on anything tall enough to read as a block
+      for (let y = 3.86 + 6.6; y < h - 1.2; y += 6.6) {
+        const band = new THREE.BoxGeometry(w + 0.2, 0.1, d + 0.2);
+        band.translate(x, y, z);
+        this.reliefGeos[0].push(band);
+      }
+      // a service pipe on one corner: the vertical that stops a wall being a single flat sheet.
+      // It goes on the street face (the one away from the block centre, same rule the shop door
+      // uses), because a pipe on the back corner is a pipe nobody ever sees.
+      if (h > 8 && Math.random() < 0.8) {
+        const odx = x - blockX;
+        const odz = z - blockZ;
+        const onX = Math.abs(odx) > Math.abs(odz);
+        const out = (onX ? odx : odz) >= 0 ? 1 : -1;
+        const px = onX ? x + out * (w / 2 + 0.05) : x + (w / 2 - 0.55);
+        const pz = onX ? z + (d / 2 - 0.55) : z + out * (d / 2 + 0.05);
+        const pipe = new THREE.BoxGeometry(onX ? 0.16 : 0.14, h - 0.4, onX ? 0.14 : 0.16);
+        pipe.translate(px, (h - 0.4) / 2 + 0.4, pz);
+        this.reliefGeos[1].push(pipe);
+        // a short elbow at the bottom, so the pipe lands on the wall instead of hovering
+        const foot = new THREE.BoxGeometry(onX ? 0.3 : 0.14, 0.24, onX ? 0.14 : 0.3);
+        foot.translate(px - (onX ? out * 0.08 : 0), 0.55, pz - (onX ? 0 : out * 0.08));
+        this.reliefGeos[1].push(foot);
+      }
     }
 
     // One draw call per building was the single largest cost in the frame. Bodies that share a
@@ -2352,27 +2432,34 @@ export class City {
       const s = rand(0.85, 1.25);
       const tx = cx + pick([-half, half]) + rand(-1, 1);
       const tz = cz + pick([-half, half]) + rand(-1, 1);
-      const trunk = new THREE.Matrix4().makeTranslation(tx, 1.8 * s + 0.26, tz);
+      // same local seating as tree(): this group is already lifted to the block's terrain height
+      const g = this.groundHeightAt(tx, tz) - this.group.position.y;
+      const trunk = new THREE.Matrix4().makeTranslation(tx, g + 1.8 * s, tz);
       trunk.scale(new THREE.Vector3(s, s, s));
       this.treeTrunks.push(trunk);
-      const crown = new THREE.Matrix4().makeTranslation(tx, 4.3 * s + 0.26, tz);
+      const crown = new THREE.Matrix4().makeTranslation(tx, g + 4.3 * s, tz);
       crown.scale(new THREE.Vector3(s, s, s));
       this.treeCrowns.push(crown);
     }
   }
 
   tree(x: number, z: number, scale = 1) {
+    // `this.group` is whatever layer is being built right now: during the block pass it is a block
+    // group already lifted to its own terrain height, so the trunk's y has to be LOCAL to it.
+    // (Feeding the absolute ground height there doubled the slope and hung every park tree in the
+    // air — 60 m on the Bogor foothills. The old `+ 0.28` was a flat-world stand-in for the plate.)
+    const ground = this.groundHeightAt(x, z) - this.group.position.y;
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22 * scale, 0.32 * scale, 3.2 * scale, 6),
       new THREE.MeshStandardMaterial({ color: 0x6b4f34, roughness: 1 })
     );
-    trunk.position.set(x, 1.6 * scale + 0.28, z);
+    trunk.position.set(x, ground + 1.6 * scale, z);
     trunk.castShadow = true;
     this.group.add(trunk);
     const leafMat = new THREE.MeshStandardMaterial({ color: pick([0x2bae4a, 0x1c7c3b, 0x39c455]), roughness: 1, flatShading: true });
     for (let i = 0; i < 2; i++) {
       const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(rand(1.5, 2.1) * scale, 0), leafMat);
-      leaf.position.set(x + rand(-0.5, 0.5) * scale, (3.4 + i * 1.2) * scale, z + rand(-0.5, 0.5) * scale);
+      leaf.position.set(x + rand(-0.5, 0.5) * scale, ground + (3.4 + i * 1.2) * scale, z + rand(-0.5, 0.5) * scale);
       leaf.castShadow = true;
       this.group.add(leaf);
     }
