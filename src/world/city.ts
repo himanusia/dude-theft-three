@@ -1778,16 +1778,99 @@ export class City {
         // The bike has to stand at its slot. placeOnGround only sets the height, so a group left
         // at x=0/z=0 parked every ojek in the middle of the map: six slots audited as "on the
         // ground" while the meshes were somewhere nobody could ever see them.
-        bike.group.position.set(spot.x, 0, spot.z);
-        bike.group.rotation.y = spot.yaw + Math.PI / 2 + i * 0.1;
+        const yaw = spot.yaw + Math.PI / 2 + i * 0.1;
+        // the slot is where the rank starts; the stance is where both tyres can actually stand
+        const stance = this.ojekStance(spot.x, spot.z, yaw);
+        if (!stance) continue;
         bike.group.name = `ojek-${this.ojeks.length}`;
         this.group.add(bike.group);
-        this.ojeks.push({ group: bike.group, x: spot.x, z: spot.z, yaw: bike.group.rotation.y, box: bike.cargoBoxBounds });
-        this.propAudit.push({ name: 'ojek', x: spot.x, z: spot.z, bottom: 0 });
-        this.placeOnGround(bike.group, spot.x, spot.z);
-        this.colliders.push({ minX: spot.x - 0.55, maxX: spot.x + 0.55, minZ: spot.z - 1.1, maxZ: spot.z + 1.1, h: 1.6 });
+        this.standOjek(bike, stance, yaw);
+        this.ojeks.push({ group: bike.group, x: stance.x, z: stance.z, yaw, box: bike.cargoBoxBounds });
+        // the slot sample, not the lower tyre: the audit asks where the prop was placed, and the
+        // pitch below is a tyre-contact correction on top of that
+        this.propAudit.push({ name: 'ojek', x: stance.x, z: stance.z, bottom: this.groundHeightAt(stance.x, stance.z) });
+        this.colliders.push({ minX: stance.x - 0.55, maxX: stance.x + 0.55, minZ: stance.z - 1.1, maxZ: stance.z + 1.1, h: 1.6 });
       }
     }
+  }
+
+  /**
+   * Stand a bike on the two surfaces its axles stand on, not on one sample at its slot.
+   *
+   * `placeOnGround` seats a prop from a single height at its audit slot. An ojek is 1.27 m between
+   * axles and parks nose-in across a kerb, so one tyre stood on the pavement and the other hung
+   * 0.20 m over the gutter - the "ojek floats" the owner photographed. The contact is solved
+   * against the measured tread, not against a formula: each wheel's own bounding box is read back,
+   * the gap to the surface under its axle is measured, and position plus pitch are corrected until
+   * both treads are on the ground. The pitch is about the bike's lateral axis because the Euler
+   * order is YXZ (yaw first, then lean in the machine's own frame).
+   */
+  private standOjek(bike: Ojek, stance: { x: number; z: number; gF: number; gR: number }, yaw: number) {
+    bike.group.rotation.order = 'YXZ';
+    bike.group.rotation.y = yaw;
+    bike.group.rotation.x = 0;
+    bike.group.position.set(stance.x, (stance.gF + stance.gR) / 2 - bike.contactY, stance.z);
+    const [frontPivot, rearPivot] = bike.wheels;
+    const span = frontPivot.pivot.position.z - rearPivot.pivot.position.z || 1;
+    for (let pass = 0; pass < 4; pass++) {
+      bike.group.updateMatrixWorld(true);
+      const tread = bike.wheels.map((w) => new THREE.Box3().setFromObject(w.pivot).min.y);
+      const err = [stance.gF - tread[0], stance.gR - tread[1]];
+      bike.group.position.y += (err[0] + err[1]) / 2;
+      bike.group.rotation.x += -(err[0] - err[1]) / span;
+    }
+    bike.group.updateMatrixWorld(true);
+  }
+
+  /**
+   * Where an ojek can actually stand, and on what.
+   *
+   * The rank is parked nose-in at the kerb, so the slot sample can leave one tyre on the pavement
+   * and the other over the gutter (a 26 cm step the analytic ground does report). Walk the machine
+   * along its own axis and across the verge until both axles read the same height, and return that
+   * stance; null when the verge has no such spot, so the caller skips the bike instead of parking
+   * it across a kerb.
+   *
+   * The height that comes back is the BUILT surface, not the analytic one: `city.pavementBand`
+   * knows where paving is planned, but the street kit cuts gaps for bus bays and driveways, and a
+   * bike seated on a planned-but-absent slab floats a full kerb above the asphalt. The ray is cast
+   * before the bike joins the group, so it can only hit the street.
+   */
+  private ojekStance(x: number, z: number, yaw: number): { x: number; z: number; gF: number; gR: number } | null {
+    const f = { x: Math.sin(yaw), z: Math.cos(yaw) };
+    const across = { x: f.z, z: -f.x };
+    const front = 0.74; // local axle offsets, front first (vehicles/ojek.ts)
+    const rear = -0.53;
+    this.group.updateMatrixWorld(true);
+    for (const along of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6]) {
+      for (const side of [0, 0.4, -0.4, 0.8, -0.8]) {
+        const cx = x + f.x * along + across.x * side;
+        const cz = z + f.z * along + across.z * side;
+        const fx = cx + f.x * front, fz = cz + f.z * front;
+        const rx = cx + f.x * rear, rz = cz + f.z * rear;
+        if (Math.abs(this.groundHeightAt(fx, fz) - this.groundHeightAt(rx, rz)) > 0.04) continue;
+        const gF = this.builtGround(fx, fz);
+        const gR = this.builtGround(rx, rz);
+        if (gF === null || gR === null) continue;
+        if (Math.abs(gF - gR) > 0.04) continue;
+        return { x: cx, z: cz, gF, gR };
+      }
+    }
+    return null;
+  }
+
+  /** the built surface under (x,z) nearest the analytic ground, or null when nothing is there */
+  private builtGround(x: number, z: number): number | null {
+    const near = this.groundHeightAt(x, z);
+    const ray = new THREE.Raycaster(new THREE.Vector3(x, near + 1.6, z), new THREE.Vector3(0, -1, 0), 0, 3.2);
+    const hits = ray.intersectObject(this.group, true) as { point: THREE.Vector3 }[];
+    let best: number | null = null;
+    let bestD = 0.12;
+    for (const h of hits) {
+      const d = Math.abs(h.point.y - near);
+      if (d <= bestD) { bestD = d; best = h.point.y; }
+    }
+    return best;
   }
 
   buildDistrictProps() {
