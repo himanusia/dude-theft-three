@@ -175,7 +175,15 @@ function shopfrontMat(variant = 0): THREE.MeshStandardMaterial {
   return mat;
 }
 
-function windowTexture(wall: any, style = 'grid') {
+const windowTexCache = new Map<string, THREE.Texture>();
+
+function windowTexture(wall: any, style = 'grid', rx = 1, ry = 1) {
+  // One canvas per (wall colour, facade style), not one per building. The city has ~1,400
+  // buildings; giving each its own 128px canvas meant thousands of textures on the GPU, and a
+  // phone GL context starts failing depth/shadow shaders long before a desktop one does.
+  const key = `${wall}|${style}|${rx}x${ry}`;
+  const hit = windowTexCache.get(key);
+  if (hit) return hit;
   // A Jakarta facade is mostly wall: plaster, ceramic tile or painted concrete, with windows
   // punched into it. The first version painted glass over almost the whole tile, so every
   // building in the city read as the same dark curtain wall no matter what colour it was
@@ -285,8 +293,14 @@ function shopTexture(hue: any) {
   });
 }
 
-function emissiveTexture() {
-  return canvasTexture(128, 128, (ctx, w, h) => {
+const emissiveCache = new Map<string, THREE.Texture>();
+
+function emissiveTexture(rx = 1, ry = 1): THREE.Texture {
+  // one glow mask per repeat bucket, shared by every building with the same footprint
+  const key = `${rx}x${ry}`;
+  const hit = emissiveCache.get(key);
+  if (hit) return hit;
+  const tex = canvasTexture(128, 128, (ctx, w, h) => {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
     const cols = 4;
@@ -303,8 +317,11 @@ function emissiveTexture() {
       }
     }
   });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(rx, ry);
+  emissiveCache.set(key, tex);
+  return tex;
 }
-
 type InstancedAdder = (
   geo: THREE.BufferGeometry,
   material: THREE.Material,
@@ -1672,14 +1689,13 @@ export class City {
     const prof = this.facadeProfile(districtAtPoint(x, z), h);
     const wall = pick(prof.walls);
     const facade = prof.style;
-    const tex = windowTexture(wall, facade);
-    const emis = emissiveTexture();
     const rx = Math.max(1, Math.round(w / 6.5));
     const ry = Math.max(1, Math.round(h / 6.5));
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    emis.wrapS = emis.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(rx, ry);
-    emis.repeat.set(rx, ry);
+    // the repeat is part of the cache key, so a thousand buildings share a handful of textures
+    // instead of owning one canvas each -- which is what pushed a mobile GL context into
+    // MeshDepthMaterial shader failures
+    const tex = windowTexture(wall, facade, rx, ry);
+    const emis = emissiveTexture(rx, ry);
 
     const sideMat = new THREE.MeshStandardMaterial({
       map: tex,
