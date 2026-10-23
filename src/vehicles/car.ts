@@ -595,6 +595,29 @@ export class Car {
     // left-hand drive, sitting where the steering wheel is; a modelled body knows its own size
     if (this.driverAnchor) g.position.copy(this.driverAnchor);
     else g.position.set(-0.4, 0.98, -0.22);
+    // The driver is 1.80 m of blocks seated at 0.98 m, so his head sat above a 1.45 m sedan
+    // roof and above a 1.65 m van roof: a head sticking out of the cab, on every car in the
+    // city. Measure the shell that exists and scale the body to fit under it.
+    this.mesh.updateMatrixWorld(true);
+    const shell = new THREE.Box3();
+    for (const child of this.mesh.children) {
+      if (child === g) continue;
+      shell.expandByObject(child);
+    }
+    if (isFinite(shell.max.y)) {
+      const roofLocal = shell.max.y - this.mesh.position.y;
+      // Scaling the driver alone does not move his seat: the anchor is a position, not part of
+      // the scaled geometry, so the head still floated 0.17 m above a sedan roof. Solve for the
+      // scale, then place the anchor so the crown of the hair lands just under the shell.
+      const HAIR_TOP = 0.83;
+      const want = roofLocal - 0.05;
+      if (g.position.y + HAIR_TOP > want) {
+        const k = Math.max(0.55, (want - 0.12) / HAIR_TOP);
+        g.scale.setScalar(k);
+        g.position.y = want - HAIR_TOP * k;
+      }
+    }
+    g.userData.isDriver = true;
     this.mesh.add(g);
     this.driver = g;
     return g;

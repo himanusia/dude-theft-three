@@ -1124,8 +1124,39 @@ export class City {
   /** the deck the layang was built on, so a shop never ends up underneath it */
   layangSpine: [number, number][] = [];
 
+  /** every building footprint already placed, so two of them can never occupy the same ground */
+  footprints: { minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
+
   /** ground-floor plinth geometry, bucketed by texture variant, merged at the end of generation */
   plinthGeos: THREE.BufferGeometry[][] = [[], [], []];
+
+  /**
+   * true when (x, z) lies within `margin` metres of the *edge* of any arterial or the ring.
+   *
+   * The margin is what makes a pavement possible. A building needs road half-width + 3.6 m of
+   * trotoar + ~2 m of setback, and the first version only asked for half the building's own
+   * width, which put frontage 0.5 m from the kerb and left the sidewalk ribbon nowhere to go --
+   * the reason a street and its pavement looked like one flat surface.
+   */
+  onRoad(x: number, z: number, margin: number): boolean {
+    const roads: { path: [number, number][]; half: number }[] = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], half: a.width / 2 })),
+      { path: RING_ROAD, half: 10 },
+    ];
+    for (const { path, half } of roads) {
+      const pad = half + margin;
+      for (let i = 1; i < path.length; i++) {
+        const [x1, z1] = path[i - 1];
+        const [x2, z2] = path[i];
+        const dx = x2 - x1, dz = z2 - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+        t = Math.max(0, Math.min(1, t));
+        if (Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)) < pad) return true;
+      }
+    }
+    return false;
+  }
 
   /** true when (x, z) is within `pad` metres of the elevated deck's centreline */
   nearLayang(x: number, z: number, pad: number): boolean {
@@ -1744,6 +1775,16 @@ export class City {
   }
 
   makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z, style: any = null) {
+    // One gate for every placement path. Block lots and street frontage both come through
+    // here and each used to check only its own clearance: 462 pairs of buildings were
+    // interpenetrating, the worst by 20 m, some sites used twice at identical coordinates.
+    const rect = { minX: x - w / 2 - 0.4, maxX: x + w / 2 + 0.4, minZ: z - d / 2 - 0.4, maxZ: z + d / 2 + 0.4 };
+    for (const f of this.footprints) {
+      if (rect.minX < f.maxX && rect.maxX > f.minX && rect.minZ < f.maxZ && rect.maxZ > f.minZ) return null;
+    }
+    if (this.onRoad(x, z, 5.4)) return null;   // 3.6 m trotoar + ~1.8 m setback
+    this.footprints.push(rect);
+
     const chromeLike = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
     const variant = randInt(0, 2);
     const prof = this.facadeProfile(districtAtPoint(x, z), h);
@@ -2679,7 +2720,16 @@ export class City {
             for (const other of roads) {
               if (this.distToPath(px, pz, other.path) < other.width / 2 + 2) { onRoad = true; break; }
             }
-            if (!onRoad && !isWater(px, pz)) {
+            // The frontage row never asked whether the ground was already taken, so it built
+            // straight through block lots: 462 pairs of interpenetrating buildings, worst 20 m.
+            // It also never checked its own footprint against the road it faces.
+            const foot = {
+              minX: px - Math.max(w, d) / 2 - 0.4, maxX: px + Math.max(w, d) / 2 + 0.4,
+              minZ: pz - Math.max(w, d) / 2 - 0.4, maxZ: pz + Math.max(w, d) / 2 + 0.4,
+            };
+            const taken = this.footprints.some((f) => foot.minX < f.maxX && foot.maxX > f.minX && foot.minZ < f.maxZ && foot.maxZ > f.minZ);
+            if (!onRoad && !isWater(px, pz) && !taken) {
+              this.footprints.push(foot);
               const group = new THREE.Group();
               group.position.set(px, terrainHeight(px, pz), pz);
               group.rotation.y = Math.atan2(dx, dz);
@@ -2689,10 +2739,10 @@ export class City {
               const PASTELS = [0xd9cdb4, 0xe8dfcb, 0xc9d8c4, 0xe4c9c2, 0xb9c7d4, 0xd6c9a8, 0xcfcfc8, 0xb8a894];
               const wall = rand(0, 1) < 0.45 ? pick(PASTELS) : pick(style.walls);
               const facade = pick(['strips', 'grid', 'bands'] as const);
-              const tex = windowTexture(wall, facade);
-              tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-              // one tile is one floor: ~3.2 m tall, 8 m wide
-              tex.repeat.set(Math.max(1, w / 8), Math.max(1, h / 3.2));
+              // one tile is one floor: ~3.2 m tall, 8 m wide. The repeat goes into the cache
+              // key -- mutating tex.repeat here would mutate every building sharing that
+              // texture, which is exactly what the cache made possible.
+              const tex = windowTexture(wall, facade, Math.max(1, Math.round(w / 8)), Math.max(1, Math.round(h / 3.2)));
               const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
               const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
               body.position.y = h / 2 + 0.3;
