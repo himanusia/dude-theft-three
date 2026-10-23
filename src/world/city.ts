@@ -4,6 +4,7 @@ import { buildKakiLima, buildSppg, buildKoperasi, KakiLimaKind } from './kakilim
 import { TransjakartaBus } from '../vehicles/transjakarta';
 import { buildLayang } from './layang';
 import { buildKrl } from './krl';
+import { buildMinimarket } from './minimarket';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
@@ -913,6 +914,14 @@ export class City {
         this.placeOnGround(g, spot.x, spot.z);
       }
     }
+    for (const poi of POIS) {
+      if (poi.kind !== 'minimarket') continue;
+      const spot = this.snapToVerge(poi.x, poi.z - 26);
+      if (!spot) continue;
+      const g = buildMinimarket(ctx, spot.x, spot.z, spot.yaw + Math.PI, poi.name);
+      this.placeOnGround(g, spot.x, spot.z);
+    }
+
     const kemang = POIS.find((p) => p.kind === 'minimarket');
     if (kemang) {
       const spot = this.snapToVerge(kemang.x, kemang.z + 18);
