@@ -22,6 +22,16 @@ import { terrainHeight } from './terrain';
 import { LOCAL_STREETS } from './streets';
 import { Car, driverLook } from '../vehicles/car';
 import { Ojek } from '../vehicles/ojek';
+import {
+  buildRoadSegment,
+  buildKerbWalk,
+  buildSignalIntersection,
+  buildUtilityPole,
+  buildStreetNameSign,
+  buildManhole,
+  buildDrainGrate,
+  buildBollard,
+} from './streetkit';
 
 // City-block scale. A block is 140 m and the pitch is 170 m, so the street between two
 // blocks is 30 m of asphalt and pavement - close to a real Jakarta block, and wide enough
@@ -767,6 +777,7 @@ export class City {
     }
 
     this.buildFrontage();
+    this.buildStreetKitCorner();
     this.buildTerrainFeatures();
     this.buildRoadRibbons();
     this.buildWater();
@@ -1825,6 +1836,46 @@ export class City {
       m.receiveShadow = true;
       this.group.add(m);
     }
+  }
+
+  /**
+   * The street kit, wired: one four-arm local junction, its pavements, and the furniture line that
+   * repeats along it, all from `src/world/streetkit.ts`.
+   *
+   * This is the kit's first tenant, not a replacement of the inline road code yet. It stands on open
+   * ground east of the Thamrin corridor (96, -116) because that is the nearest 34 m square the
+   * generator leaves free of block plates, local-street ribbons and arterial pavement - checked
+   * against `this.blocks` and `this.roads`, not guessed. The four arms are the map's local class
+   * (8 m) and the kerbs are the kit's 30 cm / 12 cm trotoar module, so a later pass can lift the
+   * rest of the network onto the same vocabulary.
+   */
+  buildStreetKitCorner() {
+    const kx = 96;
+    const kz = -116;
+    const ground = (x: number, z: number) => terrainHeight(x, z);
+    const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+
+    buildSignalIntersection(ctx, kx, kz, 0, { roadClass: 'local', armsM: 13, cornerRadiusM: 7, ground });
+
+    // the north approach continues past the junction as a road segment, so the carriageway, edge
+    // lines and double centre line come from the same builder the junction's arms use
+    buildRoadSegment(ctx, kx, kz + 30, 0, { roadClass: 'local', lengthM: 26, median: 'paint', ground });
+
+    // trotoar up the north arm and along the west arm, one module each side
+    buildKerbWalk(ctx, kx + 4.3, kz + 8.65, 0, { lengthM: 8.7, crossingAt: -0.5, ground });
+    buildKerbWalk(ctx, kx - 4.3, kz + 8.65, Math.PI, { lengthM: 8.7, crossingAt: -0.5, ground });
+    buildKerbWalk(ctx, kx - 10.5, kz + 4.3, -Math.PI / 2, { lengthM: 13, tactile: false, ground });
+    buildKerbWalk(ctx, kx - 10.5, kz - 4.3, Math.PI / 2, { lengthM: 13, tactile: false, ground });
+
+    // the furniture that repeats: two poles with one sagging span between them, the name blade on
+    // the corner, the bollards at the crossing mouth, and the covers in the carriageway
+    buildUtilityPole(ctx, kx + 8.6, kz + 6.0, 0, { spanM: 12, ground });
+    buildUtilityPole(ctx, kx + 20.6, kz + 6.0, 0, { spanM: 12, cables: false, ground });
+    buildStreetNameSign(ctx, kx + 5.7, kz + 5.2, Math.PI / 2, { ground });
+    buildBollard(ctx, kx + 4.5, kz + 5.6, 0, { ground });
+    buildBollard(ctx, kx + 4.5, kz + 7.0, 0, { ground });
+    buildManhole(ctx, kx + 1.2, kz + 14.0, 0, { ground });
+    buildDrainGrate(ctx, kx - 2.4, kz + 15.0, 0, { ground });
   }
 
   buildWater() {

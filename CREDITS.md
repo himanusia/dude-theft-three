@@ -105,6 +105,53 @@ palette (and the brief) — the stations in the photographs are grey/blue.
   the game's own car dimensions at load time; the angkot stays a custom body built from the
   reference photographs below.
 
+## Reference photography — street kit (`src/world/streetkit.ts`)
+
+Studied before modelling each part; local copies sit in `reference/assets/` at web resolution.
+`reference/` is gitignored, so none of these photographs are redistributed with the repository or the
+build. Every 3D mesh is original code.
+
+- `reference/assets/street-ref-1.jpg` — *Marka Jalan Garis Putih Di Jalan Arumbinang Kebumen* by
+  **DARMAS BS 9**, Wikimedia Commons, **CC BY-SA 4.0**
+  (https://commons.wikimedia.org/wiki/File:Marka_Jalan_Garis_Putih_Di_Jalan_Arumbinang_Kebumen.jpg).
+  Drove `buildRoadSegment`: white (not yellow) dashed centre line roughly 10-12 cm wide with a 3 m
+  dash / 5 m gap, no painted edge line on a kampung street, matt dark asphalt.
+  Comparison: `screenshots/proof/streetkit-road-compare.png`.
+- `reference/assets/street-ref-2.jpg` — *JalanJenderalSudirmanJakarta* by **Sanko**, Wikimedia
+  Commons, **CC BY-SA 3.0**
+  (https://commons.wikimedia.org/wiki/File:JalanJenderalSudirmanJakarta.jpg).
+  Drove the 20 m arterial layout: raised kerbed median with planting, white edge lines and lane
+  dividers, and the red-block trotoar beside it.
+  Comparison: `screenshots/proof/streetkit-road-arterial-compare.png`.
+- `reference/assets/street-ref-3.jpg` — *Pejalan Kaki di Trotoar*, **Government of Indonesia**,
+  Wikimedia Commons, **public domain**
+  (https://commons.wikimedia.org/wiki/File:Pejalan_Kaki_di_Trotoar.jpg).
+  Drove `buildKerbWalk`: long rectangular pavers laid in bands, a yellow tactile strip about 0.3-0.4 m
+  wide through the walk, and a narrow linear drain channel at the planter edge.
+  Comparison: `screenshots/proof/streetkit-kerb-compare.png`.
+- `reference/assets/street-ref-4.jpg` — *Lemabang Intersection - Palembang, SS (24 April 2023)* by
+  **Firzafp**, Wikimedia Commons, **CC BY-SA 4.0**
+  (https://commons.wikimedia.org/wiki/File:Lemabang_Intersection_-_Palembang,_SS_(24_April_2023).jpg).
+  Drove `buildSignalIntersection`: four arms, a wide kerb return at each corner, longitudinal zebra
+  stripes, a white stop line, a black-and-yellow striped pole base, and controller cabinets on a
+  plinth on the pavement.
+  Comparison: `screenshots/proof/streetkit-junction-compare.png`.
+- `reference/assets/street-ref-5.jpg` — *Lampu Lalu Lintas Atau Lampu Apill Sesuai Fungsinya* by
+  **SATELITBM**, Wikimedia Commons, **CC BY-SA 4.0**
+  (https://commons.wikimedia.org/wiki/File:Lampu_Lalu_Lintas_Atau_Lampu_Apill_Sesuai_Fungsinya.jpg).
+  Drove `buildTrafficLight`: slim tubular cantilever mast arm, a vertical three-aspect head (red,
+  amber, green) hung under the arm with short hoods, and roughly 6 m to the head.
+  Comparison: `screenshots/proof/streetkit-signal-compare.png`.
+- `reference/assets/street-ref-6.jpg` — *A utility pole in a street in Klaten* by **NawanP**,
+  Wikimedia Commons, **CC BY 4.0**
+  (https://commons.wikimedia.org/wiki/File:A_utility_pole_in_a_street_in_Klaten.jpg).
+  Drove `buildUtilityPole`: tapered concrete pole, steel crossarm with ribbed porcelain insulators,
+  a pole-mounted transformer on a bracket, and slack catenary jumper leads (8-10 cable runs).
+  Comparison: `screenshots/proof/streetkit-furniture-compare.png`.
+
+Street name blades in the kit are plesetan (`JL. TAMRIN RAYA`, `GANG KELINCI`), like every other sign
+in this city; no real street name is reproduced.
+
 ## Reference photography (compared side by side, not redistributed as texture)
 
 - `reference/assets/pospolisi-ref-1.jpg` — *Pos Polisi Alun-alun Jombang* by Wikimedia Commons
