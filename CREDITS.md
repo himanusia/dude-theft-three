@@ -111,3 +111,7 @@ palette (and the brief) — the stations in the photographs are grey/blue.
   contributor, **CC BY 4.0**. Used to model `src/world/pospolisi.ts`
   (blue sign board over a blue booth, white office with terracotta roof, bollards).
   Comparison: `screenshots/proof/pospolisi-compare.png`.
+
+- `reference/assets/padang-ref-0.jpg` — *Rumah Makan Padang Sederhana*, panoramio, Wikimedia Commons,
+  **CC BY 3.0**. Used to model `src/world/rumahpadang.ts` (gonjong roof, carved band, glazed
+  upper facade, red name plate). Comparison: `screenshots/proof/padang-compare.png`.
