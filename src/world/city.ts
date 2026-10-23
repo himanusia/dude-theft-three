@@ -1,6 +1,7 @@
 import { POIS } from './jakartamap';
 import { buildHalte } from './halte';
 import { buildKakiLima, buildSppg, buildKoperasi, KakiLimaKind } from './kakilima';
+import { TransjakartaBus } from '../vehicles/transjakarta';
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
@@ -727,6 +728,7 @@ export class City {
    * parallel to it, roof over the platform and the tactile edge facing the carriageway.
    */
   buildHaltes() {
+    let buses = 0;
     for (const poi of POIS) {
       if (poi.kind !== 'halte') continue;
       let best = { d: Infinity, yaw: 0, nx: 0, nz: 1, half: 10 };
@@ -822,14 +824,26 @@ export class City {
 
   buildStreetLife() {
     const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+    let buses = 0;
 
     for (const poi of POIS) {
       if (poi.kind !== 'halte') continue;
       const spot = this.snapToVerge(poi.x, poi.z);
       if (!spot) continue;
-      if (!spot) continue;
       const g = buildHalte(ctx, spot.x, spot.z, spot.yaw);
       this.placeOnGround(g, spot.x, spot.z);
+      // a bus berthed beside the first two haltes, so the street shows the busway running
+      if (buses < 2) {
+        const bus = new TransjakartaBus({ simple: false });
+        const bx = spot.x - Math.sin(spot.yaw + Math.PI / 2) * 3.4;
+        const bz = spot.z - Math.cos(spot.yaw + Math.PI / 2) * 3.4;
+        bus.group.rotation.y = spot.yaw;
+        this.group.add(bus.group);
+        this.propAudit.push({ name: 'transjakarta', x: bx, z: bz, bottom: 0 });
+        this.placeOnGround(bus.group, bx, bz);
+        this.colliders.push({ minX: bx - 1.4, maxX: bx + 1.4, minZ: bz - 9, maxZ: bz + 9, h: 3.2 });
+        buses++;
+      }
     }
 
     const carts: KakiLimaKind[] = ['bakso', 'nasgor', 'sate'];
@@ -1354,14 +1368,32 @@ export class City {
     b.receiveShadow = true;
     this.group.add(b);
 
-    // parapet so the roofline is not a razor edge
-    const parapet = new THREE.Mesh(
-      new THREE.BoxGeometry(w + 0.34, 0.42, d + 0.34),
-      new THREE.MeshStandardMaterial({ color: 0xd2d0d8, roughness: 0.9 })
-    );
-    parapet.position.set(x, h + 0.12, z);
-    parapet.castShadow = true;
-    this.group.add(parapet);
+    // Roofline by building type. A flat parapet on every box is what made the city read as
+    // "all the same": a low shophouse in a kampung has a pitched clay roof, an office tower has
+    // a parapet. The roof is the silhouette the eye uses to separate one street from another.
+    if (h <= 14) {
+      const tileMat = new THREE.MeshStandardMaterial({ color: style ? style.roof : 0x8c4a3a, roughness: 0.95 });
+      const pitch = Math.min(2.6, w * 0.16);
+      for (const sgn of [-1, 1]) {
+        const slope = new THREE.Mesh(new THREE.BoxGeometry(w + 0.7, 0.18, Math.hypot(d / 2 + 0.5, pitch)), tileMat);
+        slope.position.set(x, h + 0.2 + pitch / 2, z + sgn * (d / 4 + 0.1));
+        slope.rotation.x = sgn * Math.atan2(pitch, d / 2 + 0.5);
+        slope.castShadow = true;
+        this.group.add(slope);
+      }
+      // ridge cap
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.8, 0.16, 0.34), tileMat);
+      ridge.position.set(x, h + 0.2 + pitch, z);
+      this.group.add(ridge);
+    } else {
+      const parapet = new THREE.Mesh(
+        new THREE.BoxGeometry(w + 0.34, 0.42, d + 0.34),
+        new THREE.MeshStandardMaterial({ color: 0xd2d0d8, roughness: 0.9 })
+      );
+      parapet.position.set(x, h + 0.12, z);
+      parapet.castShadow = true;
+      this.group.add(parapet);
+    }
 
     // occasional billboard with real text, like the reference storefronts
     if (Math.random() < 0.6 && h < 34) {
