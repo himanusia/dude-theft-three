@@ -3286,27 +3286,56 @@ export class City {
       const s = rand(0.85, 1.25);
       const tx = cx + pick([-half, half]) + rand(-1, 1);
       const tz = cz + pick([-half, half]) + rand(-1, 1);
-      const trunk = new THREE.Matrix4().makeTranslation(tx, 1.8 * s + 0.26, tz);
+      // the block group is lifted to the terrain at its centre, and this tree stands at the edge:
+      // sample the surface under the trunk and convert it into the group's frame
+      const gy = this.localGroundY(tx, tz);
+      const trunk = new THREE.Matrix4().makeTranslation(tx, gy + 1.8 * s, tz);
       trunk.scale(new THREE.Vector3(s, s, s));
       this.treeTrunks.push(trunk);
-      const crown = new THREE.Matrix4().makeTranslation(tx, 4.3 * s + 0.26, tz);
+      const crown = new THREE.Matrix4().makeTranslation(tx, gy + 4.3 * s, tz);
       crown.scale(new THREE.Vector3(s, s, s));
       this.treeCrowns.push(crown);
     }
   }
 
+  /**
+   * The ground under (x,z), expressed in the local frame of the group currently being built.
+   *
+   * `this.group` is swapped to a block group while the city generates, and that group is lifted to
+   * `terrainHeight` at the block's CENTRE (see buildBlocks). A prop 13 m away therefore sees a
+   * local zero that is not the ground under its own footprint: the trees in the parks and lots
+   * stood a fixed 0.28 m over that local zero, which is 0.4-0.7 m of daylight on a slope.
+   * `tests/world/placement.mjs` reports it as a floating pier, because a 3 m trunk is a thin tall
+   * column. Anything added to a lifted group has to convert the world height back into local.
+   */
+  private localGroundY(x: number, z: number): number {
+    let y = 0;
+    for (let g: THREE.Object3D | null = this.group; g; g = g.parent) y += g.position.y;
+    return this.groundHeightAt(x, z) - y;
+  }
+
+  /**
+   * A tree, seated on the ground under its own trunk.
+   *
+   * A block group is lifted to the terrain height at the block's CENTRE, and the park/lot tree
+   * stands up to 13 m away, so the group's local zero is not the ground under this trunk. The
+   * previous build put every trunk at a fixed 0.28 m over that local zero, which on a hillside is
+   * up to 1.2 m of daylight under the bark - `tests/world/placement.mjs` reports it as a floating
+   * pier because a 4 m trunk is a thin tall column.
+   */
   tree(x: number, z: number, scale = 1) {
+    const base = this.localGroundY(x, z);
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22 * scale, 0.32 * scale, 3.2 * scale, 6),
       new THREE.MeshStandardMaterial({ color: 0x6b4f34, roughness: 1 })
     );
-    trunk.position.set(x, 1.6 * scale + 0.28, z);
+    trunk.position.set(x, base + 1.6 * scale, z);
     trunk.castShadow = true;
     this.group.add(trunk);
     const leafMat = new THREE.MeshStandardMaterial({ color: pick([0x2bae4a, 0x1c7c3b, 0x39c455]), roughness: 1, flatShading: true });
     for (let i = 0; i < 2; i++) {
       const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(rand(1.5, 2.1) * scale, 0), leafMat);
-      leaf.position.set(x + rand(-0.5, 0.5) * scale, (3.4 + i * 1.2) * scale, z + rand(-0.5, 0.5) * scale);
+      leaf.position.set(x + rand(-0.5, 0.5) * scale, base + (3.4 + i * 1.2) * scale, z + rand(-0.5, 0.5) * scale);
       leaf.castShadow = true;
       this.group.add(leaf);
     }
