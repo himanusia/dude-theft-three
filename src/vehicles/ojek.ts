@@ -51,6 +51,29 @@ const SKIN = 0xb07a55;
 const SANDAL = 0x3b2e26;
 /** the rider figure is authored around the saddle; lifting the whole group seats it on top */
 const RIDER_LIFT = 0.05;
+/**
+ * Tyre section. The tread is a 14-sided ring, so the lowest thing on the wheel is a flat chord at
+ * (ring + tube) * cos(pi / sides) below the axle, not the ideal radius. The axle has to sit at
+ * that measured drop for the tread to land exactly on the group's own y = 0 plane: authored at the
+ * ideal 0.225 m radius it hovered both tyres 5.6 mm above the asphalt in every shot, and the
+ * distance covered by one wheel turn was told to the same wrong number.
+ */
+const TYRE_RING = 0.155;
+const TYRE_TUBE = 0.07;
+const TYRE_SIDES = 14;
+
+/** How far the built tread reaches below its axle. Measured, so a section change cannot drift. */
+function treadDrop(): number {
+  const ring = new THREE.TorusGeometry(TYRE_RING, TYRE_TUBE, 4, TYRE_SIDES);
+  ring.rotateY(Math.PI / 2);
+  ring.computeBoundingBox();
+  const drop = -(ring.boundingBox?.min.y ?? -(TYRE_RING + TYRE_TUBE));
+  ring.dispose();
+  return drop;
+}
+
+/** axle height above the contact plane == the rolling radius of a faceted tyre */
+const AXLE_Y = treadDrop();
 
 type Bucket = 'gloss' | 'matte' | 'metal' | 'graphic';
 type Space = 'bike' | 'rider' | 'wheelF' | 'wheelR';
@@ -212,6 +235,12 @@ export class Ojek {
    * Null when the bike is built without a box.
    */
   cargoBoxBounds: { center: THREE.Vector3; size: THREE.Vector3 } | null = null;
+  /**
+   * Local y of the lowest point of the machine, measured off the finished group (0 for this model,
+   * because the tread is authored on the origin plane). A capture or a placement check can compare
+   * `group.position.y + contactY` with the surface under the tyres instead of assuming 0.
+   */
+  readonly contactY: number;
   private readonly disposables: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
 
   constructor(opts: OjekOptions = {}) {
@@ -261,7 +290,8 @@ export class Ojek {
 
     for (const [space, front] of [['wheelF', true], ['wheelR', false]] as [Space, boolean][]) {
       const pivot = new THREE.Group();
-      pivot.position.set(0, 0.225, front ? 0.74 : -0.53);
+      // axle at the tread's measured drop: the flat bottom facet lands on the group's y = 0 plane
+      pivot.position.set(0, AXLE_Y, front ? 0.74 : -0.53);
       for (const bucket of ['matte', 'metal'] as Bucket[]) {
         const geo = kit.merge(space, bucket);
         if (!geo) continue;
@@ -275,9 +305,11 @@ export class Ojek {
       this.wheels.push({ pivot, front });
     }
 
-    // the same soft blob every other vehicle and ped in the game drops on the road
+    // the same soft blob every other vehicle and ped in the game drops on the road. It sits 6 mm
+    // above the contact plane, not 12: a blob that hovers over the asphalt reads as the bike
+    // floating even when the tread is touching it, because the eye takes the shadow as the floor.
     const blob = shadowBlob(0.78, 1.9, 0.4);
-    blob.position.set(0, 0.012, -0.05);
+    blob.position.set(0, 0.006, -0.05);
     this.group.add(blob);
     for (const m of [gloss, matte, metal, atlas]) this.disposables.push(m);
     const tex = atlas.map;
@@ -285,6 +317,12 @@ export class Ojek {
 
     this.rider.position.y = RIDER_LIFT;
     this.group.add(this.rider);
+
+    // Measure the finished machine instead of trusting the build: the tread has to be the lowest
+    // thing in the group and it has to sit on y = 0, or the bike floats above / sinks into the
+    // surface the city placed it on.
+    this.group.updateMatrixWorld(true);
+    this.contactY = new THREE.Box3().setFromObject(this.group).min.y;
   }
 
   private material(color: number, params: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
@@ -302,10 +340,15 @@ export class Ojek {
     // upper leg shield: wider at the top, raked back
     kit.box(S, 'gloss', paint, [0.34, 0.40, 0.14], [0, 0.74, 0.58], [0.12, 0, 0],
       taperBox(0.34, 0.40, 0.14, 1.18, 0.8, -0.06));
-    // lower cowl: a separate, forward-leaning black plane — two planes read as a scooter
-    // front end, one tall box reads as a slab
-    kit.box(S, 'matte', 0x232529, [0.27, 0.20, 0.10], [0, 0.50, 0.625], [0.42, 0, 0],
-      taperBox(0.27, 0.20, 0.10, 1.12, 0.8, 0.02));
+    // lower cowl: the inner face of the leg shield, run from the deck up to the apron. Vertical on
+    // purpose: the first pass raked it back 23 deg, which looked right but left a wedge of open air
+    // *behind* the panel from the deck up to the shield — the slot a rider's shins sit in front of,
+    // and the reason the front end read as two separate parts. A wall on the deck's own front edge
+    // (z 0.45) closes it, and the rake is carried by the painted apron above instead. Painted, not
+    // black: on a Beat that wall is the inside of the leg shield, and a dark one read as a step
+    // where the body should run straight from the shield down to the deck.
+    kit.box(S, 'gloss', paint, [0.30, 0.30, 0.14], [0, 0.45, 0.52], [0, 0, 0],
+      taperBox(0.30, 0.30, 0.14, 1.05, 1.0, 0));
     kit.box(S, 'matte', TRIM, [0.07, 0.34, 0.04], [0, 0.74, 0.655], [0.12, 0, 0]); // central spine
     // headlamp sits proud of the apron face, wide and low like the reference
     kit.box(S, 'matte', BLACK, [0.235, 0.14, 0.05], [0, 0.815, 0.635], [0.12, 0, 0]); // lamp surround
@@ -333,6 +376,22 @@ export class Ojek {
       taperBox(0.09, 0.22, 0.48, 0.78, 0.84, 0));
     kit.box(S, 'gloss', paint, [0.09, 0.22, 0.48], [-0.225, 0.70, -0.40], [0, 0, 0],
       taperBox(0.09, 0.22, 0.48, 0.78, 0.84, 0));
+    // Footboard to seat. The deck stops at z -0.01 and the rear cowls only start at z -0.16, so
+    // between them the bike was hollow from the deck up to the saddle: daylight straight through
+    // under the seat. A Beat fills that with the centre tunnel (the "tank" cover a rider's knees
+    // sit against) and painted side covers. The step-through in front of z 0.13 stays open, which
+    // is the part that has to read as a scooter.
+    for (const s of [1, -1]) {
+      kit.box(S, 'gloss', paint, [0.06, 0.44, 0.34], [s * 0.15, 0.52, -0.04], [0, 0, 0],
+        taperBox(0.06, 0.44, 0.34, 0.86, 0.9, 0));
+    }
+    kit.box(S, 'matte', 0x232529, [0.25, 0.40, 0.32], [0, 0.50, -0.04], [0, 0, 0],
+      taperBox(0.25, 0.40, 0.32, 1.04, 0.94, 0));
+    // ...and the same hole from the other end: the two rear cowls are 0.09 m skins at x +/-0.225,
+    // so the middle under the pillion was open to the far side of the bike. An airbox/frame mass
+    // between them closes it without hiding the rear wheel or the swingarm below.
+    kit.box(S, 'matte', 0x232529, [0.36, 0.18, 0.46], [0, 0.63, -0.38], [0, 0, 0],
+      taperBox(0.36, 0.18, 0.46, 0.92, 0.9, 0));
     kit.box(S, 'gloss', paint, [0.26, 0.20, 0.26], [0, 0.73, -0.72], [-0.2, 0, 0],
       taperBox(0.26, 0.20, 0.26, 0.7, 0.8, 0.02)); // tail
     kit.box(S, 'gloss', TAIL_LENS, [0.16, 0.065, 0.035], [0, 0.805, -0.875], [-0.2, 0, 0]);
@@ -363,8 +422,8 @@ export class Ojek {
     kit.limb(S, 'metal', ALLOY, [0, 0.40, 0.74], [0, 0.62, 0.70], 0.03, 0.026, 6); // steering stem
 
     // --- drivetrain -----------------------------------------------------------------------
-    // compact engine low and rearward: the open triangle under the seat is what reads as
-    // an underbone frame rather than a solid moped body
+    // compact engine low and rearward, with the frame open between the deck and the engine: that
+    // gap is what reads as an underbone frame rather than a solid moped body
     kit.box(S, 'matte', DARK_METAL, [0.15, 0.20, 0.26], [0.085, 0.31, -0.52], [0, 0, 0],
       taperBox(0.15, 0.20, 0.26, 0.84, 0.9, 0));
     kit.limb(S, 'metal', DARK_METAL, [0.115, 0.28, -0.44], [0.115, 0.245, -0.60], 0.036, 0.044, 6); // swingarm
@@ -467,13 +526,14 @@ export class Ojek {
 
   private buildWheels(kit: Kit): void {
     const build = (space: Space, width: number) => {
-      const tyre = new THREE.TorusGeometry(0.155, 0.07, 4, 14);
+      const tyre = new THREE.TorusGeometry(TYRE_RING, TYRE_TUBE, 4, TYRE_SIDES);
       tyre.rotateY(Math.PI / 2);
       kit.add(space, 'matte', tyre, TYRE);
-      const rim = new THREE.CylinderGeometry(0.145, 0.145, width * 0.55, 10);
+      const rim = new THREE.CylinderGeometry(TYRE_RING - 0.01, TYRE_RING - 0.01, width * 0.55, 10);
       rim.rotateZ(Math.PI / 2);
       kit.add(space, 'metal', rim, ALLOY);
-      const hub = new THREE.CylinderGeometry(0.042, 0.042, width, 8);
+      // 6 sides on a 42 mm hub: invisible at street distance, and it pays for a body panel
+      const hub = new THREE.CylinderGeometry(0.042, 0.042, width, 6);
       hub.rotateZ(Math.PI / 2);
       kit.add(space, 'metal', hub, DARK_METAL);
       // three flat spokes per side, cheap and enough to read as a cast wheel
@@ -486,7 +546,7 @@ export class Ojek {
     build('wheelF', 0.09);
     build('wheelR', 0.11);
     // front brake disc sits outboard on the axle
-    const disc = new THREE.CylinderGeometry(0.105, 0.105, 0.008, 10);
+    const disc = new THREE.CylinderGeometry(0.105, 0.105, 0.008, 8);
     disc.rotateZ(Math.PI / 2);
     disc.translate(0.055, 0, 0);
     kit.add('wheelF', 'metal', disc, DARK_METAL);
@@ -502,7 +562,7 @@ export class Ojek {
 
   /** Idle life: wheels roll with distance covered, rider breathes and leans a touch. */
   update(dt: number, speed = 0, time = 0): void {
-    const spin = (speed * dt) / 0.225;
+    const spin = (speed * dt) / AXLE_Y;
     for (const w of this.wheels) w.pivot.rotation.x += spin;
     const lean = Math.sin(time * 0.9) * 0.008;
     this.rider.rotation.z = lean;
