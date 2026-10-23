@@ -104,3 +104,10 @@ palette (and the brief) — the stations in the photographs are grey/blue.
   `suv`. Licence text ships with the models in `public/models/cars/KENNEY-LICENSE.txt`. Scaled to
   the game's own car dimensions at load time; the angkot stays a custom body built from the
   reference photographs below.
+
+## Reference photography (compared side by side, not redistributed as texture)
+
+- `reference/assets/pospolisi-ref-1.jpg` — *Pos Polisi Alun-alun Jombang* by Wikimedia Commons
+  contributor, **CC BY 4.0**. Used to model `src/world/pospolisi.ts`
+  (blue sign board over a blue booth, white office with terracotta roof, bollards).
+  Comparison: `screenshots/proof/pospolisi-compare.png`.

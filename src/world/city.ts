@@ -5,6 +5,7 @@ import { TransjakartaBus } from '../vehicles/transjakarta';
 import { buildLayang } from './layang';
 import { buildKrl } from './krl';
 import { buildMinimarket } from './minimarket';
+import { buildPosPolisi } from './pospolisi';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
@@ -920,6 +921,14 @@ export class City {
     const sp = this.getSpawn();
     const mg = buildMinimarket(ctx, sp.x, sp.z + 22, Math.PI, 'INDOMERET');
     this.placeOnGround(mg, sp.x, sp.z + 22);
+    // police post beside the minimarket, on the first slot that clears every collider
+    for (const [dx, dz] of [[13, 0], [17, 0], [21, 0], [-13, 0], [-17, 0], [13, 12], [13, -12], [0, 16]]) {
+      const cx = sp.x + dx, cz = sp.z + 22 + dz;
+      if (this.colliders.some((c) => cx > c.minX - 8 && cx < c.maxX + 8 && cz > c.minZ - 8 && cz < c.maxZ + 8)) continue;
+      const pg = buildPosPolisi(ctx, cx, cz, 0);
+      this.placeOnGround(pg, cx, cz);
+      break;
+    }
 
     const kemang = POIS.find((p) => p.kind === 'minimarket');
     if (kemang) {
