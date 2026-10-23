@@ -3,9 +3,11 @@
 // it.
 //
 // Two things this harness refuses to guess at:
-//   - the contact. It raycasts down onto the built scene at each wheel (the bike's own meshes
+//   - the contact. It raycasts down onto the built scene under each wheel (the bike's own meshes
 //     excluded) because `city.groundHeightAt` is an analytic height while what a player sees is the
-//     terrain mesh; quoting only the analytic number can call a floating bike grounded.
+//     terrain mesh; quoting only the analytic number can call a floating bike grounded. Each tyre
+//     is measured against its own lowest point, because the city now pitches a parked bike to the
+//     grade between its axles so both treads touch: one whole-bike minimum cannot describe that.
 //   - the camera. A close-up is useless if a warung counter or a lamp post stands between the lens
 //     and the bike, or if a wall two metres behind the subject fills the frame, so every candidate
 //     placement is tested against `city.colliders` and for a framed silhouette before it is used.
@@ -20,8 +22,15 @@ const CHROME =
 const BASE = process.env.DTA_URL || process.argv[2] || 'http://127.0.0.1:8765';
 const OUT = process.env.OUT || 'screenshots/proof';
 const PREFIX = process.env.OJEK_PREFIX || 'ojek-fix';
-/** a tread more than this far off the surface it stands on is a float (or a sink) */
-const MAX_GAP = 0.02;
+/**
+ * A tread more than MAX_FLOAT above the surface is a bike in the air. A tread BELOW it is not a
+ * float: `city.groundHeightAt` is the analytic terrain, while the terrain mesh interpolates between
+ * its vertices and can sit ~4 cm above that line, so a parked tyre reads as a couple of centimetres
+ * into the asphalt on a slope. Sinking past MAX_SINK is still a placement error (a wheel buried in
+ * the kerb), but a small sink is the tyre touching.
+ */
+const MAX_FLOAT = 0.02;
+const MAX_SINK = 0.08;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -76,19 +85,20 @@ try {
 
     const bikes = (city.ojeks || []).map((entry, i) => {
       const root = entry.group;
-      // the lowest point of the finished machine, measured (not assumed): this is the tread
-      const lowest = new THREE.Box3().setFromObject(root).min.y;
       // wheel pivots are the two child groups sitting off-centre on the wheelbase
       const pivots = root.children.filter((c) => c.isGroup && Math.abs(c.position.z) > 0.3);
       const wheels = pivots.map((pivot) => {
         const wp = new THREE.Vector3();
         pivot.getWorldPosition(wp);
+        // THIS tyre's own lowest point, not the whole bike's: a machine pitched to the grade has
+        // two different contact heights, and the whole-bike minimum can only describe one of them
+        const tread = new THREE.Box3().setFromObject(pivot).min.y;
         const surface = surfaceAt(wp.x, wp.z, root, wp.y + 2);
         return {
           z: +pivot.position.z.toFixed(3),
-          contactY: +lowest.toFixed(4),
+          contactY: +tread.toFixed(4),
           surfaceY: surface === null ? null : +surface.toFixed(4),
-          gap: surface === null ? null : +(lowest - surface).toFixed(4),
+          gap: surface === null ? null : +(tread - surface).toFixed(4),
         };
       });
       const worst = wheels.reduce((a, w) => Math.max(a, Math.abs(w.gap ?? 9)), 0);
@@ -296,18 +306,29 @@ try {
   }
 
   const chosen = plan.bikes[plan.target];
-  const worst = Math.max(...chosen.wheels.map((w) => Math.abs(w.gap ?? 9)));
+  const gaps = chosen.wheels.map((w) => (w.gap === null ? 9 : w.gap));
+  const worstFloat = Math.max(...gaps);
+  const worstSink = Math.max(...gaps.map((g) => -g));
+  const contactOk = worstFloat <= MAX_FLOAT && worstSink <= MAX_SINK;
   console.log(
     'CONTACT',
-    JSON.stringify({ bike: chosen.name, wheels: chosen.wheels, worstGapM: +worst.toFixed(4), gate: MAX_GAP, pass: worst <= MAX_GAP })
+    JSON.stringify({
+      bike: chosen.name,
+      wheels: chosen.wheels,
+      worstFloatM: +worstFloat.toFixed(4),
+      worstSinkM: +worstSink.toFixed(4),
+      gateFloat: MAX_FLOAT,
+      gateSink: MAX_SINK,
+      pass: contactOk,
+    })
   );
   if (errors.length) console.log('PAGE ERRORS', JSON.stringify(errors.slice(0, 4)));
   if (hollow.length) {
     console.error(`closure: still hollow at ${hollow.map((h) => h.at).join(', ')}`);
     process.exitCode = 1;
   }
-  if (worst > MAX_GAP) {
-    console.error(`contact: ${chosen.name} has a tyre ${worst.toFixed(3)} m off the surface`);
+  if (!contactOk) {
+    console.error(`contact: ${chosen.name} floats ${worstFloat.toFixed(3)} m / sinks ${worstSink.toFixed(3)} m`);
     process.exitCode = 1;
   }
 } finally {
