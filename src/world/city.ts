@@ -2657,15 +2657,28 @@ export class City {
   }
 
   randomSidewalkPoint() {
-    const b = pick(this.blocks);
-    const edge = Math.floor(rand(0, 4));
-    const size = b.size ?? BLOCK;
-    const off = size / 2 + 3.4;
-    const t = rand(-size / 2 + 2, size / 2 - 2);
-    if (edge === 0) return new THREE.Vector3(b.x + t, 0, b.z - off);
-    if (edge === 1) return new THREE.Vector3(b.x + t, 0, b.z + off);
-    if (edge === 2) return new THREE.Vector3(b.x - off, 0, b.z + t);
-    return new THREE.Vector3(b.x + off, 0, b.z + t);
+    // A pavement point is only useful if something can stand on it. Crates, barrels and cash
+    // pickups are all placed with this call, and a point inside a bench or a halte produced a
+    // pickup nobody could reach: the player is pushed out of the collider before the 1.7 m
+    // radius is ever satisfied.
+    let last = new THREE.Vector3();
+    for (let attempt = 0; attempt < 14; attempt++) {
+      const b = pick(this.blocks);
+      const edge = Math.floor(rand(0, 4));
+      const size = b.size ?? BLOCK;
+      const off = size / 2 + 3.4;
+      const t = rand(-size / 2 + 2, size / 2 - 2);
+      if (edge === 0) last.set(b.x + t, 0, b.z - off);
+      else if (edge === 1) last.set(b.x + t, 0, b.z + off);
+      else if (edge === 2) last.set(b.x - off, 0, b.z + t);
+      else last.set(b.x + off, 0, b.z + t);
+      if (this.nearLayang(last.x, last.z, 6)) continue;
+      const blocked = this.colliders.some(
+        (c) => last.x > c.minX - 1.2 && last.x < c.maxX + 1.2 && last.z > c.minZ - 1.2 && last.z < c.maxZ + 1.2
+      );
+      if (!blocked) return last.clone();
+    }
+    return last;
   }
 
   update(dt: number, dayT: any) {
