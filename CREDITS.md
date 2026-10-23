@@ -130,3 +130,20 @@ palette (and the brief) — the stations in the photographs are grey/blue.
   Commons, **CC BY-SA 4.0**. Used to model `src/world/pasar.ts`: exposed timber trusses under a zinc
   roof, green directional board with red arrows, yellow banner, trestle stall tables, plastic stools.
   Comparison: `screenshots/proof/pasar-compare.png`.
+
+### Asset Pack 2 — Jakarta Urban Asset Expansion (`docs/reference-packs/asset-pack-2.md`)
+
+- `reference/assets/masjid-al-musyawarah-01.jpg` — *Masjid Al-Musyawarah Kelapa Gading (Desember 2024) 01.jpg* by Fasyakamil, Wikimedia Commons, **CC BY-SA 4.0** (https://commons.wikimedia.org/wiki/File:Masjid_Al-Musyawarah_Kelapa_Gading_(Desember_2024)_01.jpg). Used for contemporary Jakarta neighbourhood mosque elevation, turquoise dome, and minaret.
+- `reference/assets/masjid-al-musyawarah-02.jpg` — *Masjid Al-Musyawarah Kelapa Gading (Desember 2024) 02.jpg* by Fasyakamil, Wikimedia Commons, **CC BY-SA 4.0** (https://commons.wikimedia.org/wiki/File:Masjid_Al-Musyawarah_Kelapa_Gading_(Desember_2024)_02.jpg). Used for courtyard plaza paving, boundary wall railings, and shaded entry arcade.
+- `reference/assets/pasar-klender-facade.jpg` — *PasarKlender1.jpg* by Midori, Wikimedia Commons, **CC BY-SA 3.0** (https://commons.wikimedia.org/wiki/File:PasarKlender1.jpg). Used for traditional municipal market hall facade, PD Pasar Jaya signage, clerestory ventilation roof, and ground-floor rolling door kiosks.
+- `reference/assets/pasar-klender-interior.jpg` — *PasarKlender5.jpg* by Midori, Wikimedia Commons, **CC BY-SA 3.0** (https://commons.wikimedia.org/wiki/File:PasarKlender5.jpg). Used for interior market stalls (*los pasar*), tiled display benches, pedestrian aisles, overhead trusses, and hanging tarpaulins.
+- `reference/assets/terminal-senen-lanes.jpg` — *Jalur keberangkatan Terminal Senen, 2023.jpg* by Naufal P, Wikimedia Commons, **CC BY-SA 4.0** (https://commons.wikimedia.org/wiki/File:Jalur_keberangkatan_Terminal_Senen,_2023.jpg). Used for bus terminal departure lanes, raised passenger boarding islands with hazard stripes, queue railings, and cantilevered canopy.
+- `reference/assets/terminal-senen-shelter.jpg` — *Metrotrans and Mikrotrans in Senen bus station, 2023.jpg* by Naufal P, Wikimedia Commons, **CC BY-SA 4.0** (https://commons.wikimedia.org/wiki/File:Metrotrans_and_Mikrotrans_in_Senen_bus_station,_2023.jpg). Used for modern transit shelter bay, orange TransJakarta Metrotrans low-floor bus, and cyan JakLingko Mikrotrans angkot minivan.
+- `reference/assets/kurir-delivery-01.jpg` — *Grab Delivery 1.jpg* by Waqas1000000000, Wikimedia Commons, **CC BY-SA 4.0** (https://commons.wikimedia.org/wiki/File:Grab_Delivery_1.jpg). Used for app-based motorbike delivery courier, green insulated cargo box, reflective rider jacket, and handlebar phone mount.
+- `reference/assets/kurir-delivery-02.jpg` — *Grab Delivery 2.jpg* by Waqas1000000000, Wikimedia Commons, **CC BY-SA 4.0** (https://commons.wikimedia.org/wiki/File:Grab_Delivery_2.jpg). Used for delivery box rear mounting rigging, tie-down bungee straps, Indonesian license plate, and rear moped ergonomics.
+- `reference/assets/pos-ronda-01.jpg` — *Pos Ronda Geneng, Jombang-3.jpg* by Indonesiagood, Wikimedia Commons, **CC BY 4.0** (https://commons.wikimedia.org/wiki/File:Pos_Ronda_Geneng,_Jombang-3.jpg). Used for neighbourhood security post (*pos ronda* / *gardu siskamling*), limasan roof, perimeter bench seating, hanging bamboo *kentongan*, and civic plinth.
+
+- `reference/assets/ronda-ref-0.jpg` — *Pos Ronda Geneng, Jombang*, Wikimedia Commons, **CC BY 4.0**.
+  Used to model `src/world/ronda.ts`: maroon steel posts, zinc roof with a dark red fascia, raised
+  concrete platform, bunk with bolster, yellow RT/RW notice, blue-and-white kerb blocks.
+  Comparison: `screenshots/proof/ronda-compare.png`.

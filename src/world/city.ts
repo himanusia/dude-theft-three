@@ -10,6 +10,7 @@ import { buildPosPolisi } from './pospolisi';
 import { buildRumahPadang } from './rumahpadang';
 import { buildMasjid } from './masjid';
 import { buildPasar } from './pasar';
+import { buildRonda } from './ronda';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
@@ -1125,6 +1126,23 @@ export class City {
       this.placeOnGround(pg, cx, cz);
       break;
     }
+    // pos ronda: small, repeated three times, on the first clear verge slots found
+    {
+      let placed = 0;
+      for (const r of [18, 26, 34, 44, 56, 70, 86, 104]) {
+        for (let a = 0; a < 12 && placed < 3; a++) {
+          const t = (a / 12) * Math.PI * 2 + placed;
+          const cx = sp.x + Math.cos(t) * r, cz = sp.z + 22 + Math.sin(t) * r;
+          if (this.nearLayang(cx, cz, 8)) continue;
+          if (this.colliders.some((c) => cx > c.minX - 5 && cx < c.maxX + 5 && cz > c.minZ - 5 && cz < c.maxZ + 5)) continue;
+          const rg = buildRonda(ctx, cx, cz, Math.atan2(sp.x - cx, sp.z - cz));
+          this.placeOnGround(rg, cx, cz);
+          placed++;
+        }
+        if (placed >= 3) break;
+      }
+    }
+
     // pasar daerah, on a wide clear lot a little further out than the mosque
     for (const r of [46, 58, 72, 88, 104, 120]) {
       let placed = false;
