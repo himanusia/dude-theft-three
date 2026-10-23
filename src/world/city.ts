@@ -644,9 +644,9 @@ export class City {
   }
 
   buildTreeInstances() {
-    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 2.8, 6);
+    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 3.6, 6);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4f34, roughness: 1 });
-    const crownGeo = new THREE.IcosahedronGeometry(1.7, 0);
+    const crownGeo = new THREE.IcosahedronGeometry(1.45, 0);
     const crownMat = new THREE.MeshStandardMaterial({ color: 0x2bae4a, roughness: 1, flatShading: true });
 
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, this.treeTrunks.length);
@@ -1536,10 +1536,10 @@ export class City {
       const s = rand(0.85, 1.25);
       const tx = cx + pick([-half, half]) + rand(-1, 1);
       const tz = cz + pick([-half, half]) + rand(-1, 1);
-      const trunk = new THREE.Matrix4().makeTranslation(tx, 1.4 * s + 0.26, tz);
+      const trunk = new THREE.Matrix4().makeTranslation(tx, 1.8 * s + 0.26, tz);
       trunk.scale(new THREE.Vector3(s, s, s));
       this.treeTrunks.push(trunk);
-      const crown = new THREE.Matrix4().makeTranslation(tx, 3.5 * s + 0.26, tz);
+      const crown = new THREE.Matrix4().makeTranslation(tx, 4.3 * s + 0.26, tz);
       crown.scale(new THREE.Vector3(s, s, s));
       this.treeCrowns.push(crown);
     }
