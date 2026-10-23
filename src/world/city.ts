@@ -46,6 +46,19 @@ export const WORLD_HALF = GRID * PITCH + BLOCK * 0.5;
 const WALLS = ['#e9e7ef', '#dfe6ee', '#f2e7d8', '#d9e4e6', '#efe3ea', '#e6ecdf'];
 const NIGHT = 0x0a0d18;
 
+/**
+ * The roads that carry a raised trotoar: the arterials and the ring.
+ *
+ * One list, because four things have to agree about it - the kerb that is swept along it, the
+ * paving behind that kerb, where a pedestrian can cross it, and the ground height anything
+ * standing on it needs. Local streets are asphalt only, so they are not here.
+ */
+const WALK_ROADS = [
+  ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })),
+  { path: RING_ROAD as [number, number][], width: 20 },
+];
+
+
 // Every interior kind is built once; shop doors cycle through this pool, so all
 // seven rooms are reachable no matter how the city is randomised.
 const SHOP_KINDS: InteriorKind[] = ['minimarket', 'warteg', 'kopi', 'bengkel', 'apotek', 'laundry', 'salon'];
@@ -392,6 +405,9 @@ export class City {
   declare skyTop: THREE.Color;
   declare skyBottom: THREE.Color;
   declare dashMatrices: any[];
+  /** [roadIndex, distanceAlongRoad] for every pedestrian crossing the network implies. */
+  crossings: { road: number; u: number }[] = [];
+
   declare doorMatrices: THREE.Matrix4[];
   declare handleMatrices: THREE.Matrix4[];
   declare stepMatrices: { m: THREE.Matrix4; scale: number }[];
@@ -694,6 +710,7 @@ export class City {
     const dashMat = new THREE.MeshStandardMaterial({ color: 0xf7f5e8, roughness: 0.6 });
     const dashGeo = new THREE.BoxGeometry(0.42, 0.02, 2.6);
     this.dashMatrices = [];
+    this.crossings = [];
     this.doorMatrices = [];
     this.handleMatrices = [];
     this.stepMatrices = [];
@@ -805,7 +822,7 @@ export class City {
           const x = x1 + (x2 - x1) * t;
           const z = z1 + (z2 - z1) * t;
           q.setFromAxisAngle(up, yaw);
-          this.dashMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.075, z), q, new THREE.Vector3(1, 1, 1)));
+          this.dashMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.056, z), q, new THREE.Vector3(1, 1, 1)));
         }
       }
     }
@@ -816,29 +833,9 @@ export class City {
     dashMesh.frustumCulled = false;
     this.group.add(dashMesh);
 
-    // crosswalks at intersections (instanced)
-    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xe4e2ea, roughness: 0.85 });
-    const stripeGeo = new THREE.BoxGeometry(0.7, 0.02, 3.2);
-    const stripeMatrices = [];
-    for (let i = -GRID - 1; i <= GRID; i++) {
-      for (let j = -GRID - 1; j <= GRID; j++) {
-        const x = (i + 0.5) * PITCH;
-        const z = (j + 0.5) * PITCH;
-        for (let k = -3; k <= 3; k++) {
-          stripeMatrices.push(
-            new THREE.Matrix4().makeTranslation(x + k * 1.7, 0.03, z + BLOCK * 0.5 + ROAD * 0.5 + 1.4)
-          );
-          const rot = new THREE.Matrix4().makeRotationY(Math.PI / 2);
-          rot.setPosition(x + BLOCK * 0.5 + ROAD * 0.5 + 1.4, 0.03, z + k * 1.7);
-          stripeMatrices.push(rot);
-        }
-      }
-    }
-    const stripeMesh = new THREE.InstancedMesh(stripeGeo, stripeMat, stripeMatrices.length);
-    stripeMatrices.forEach((m, i) => stripeMesh.setMatrixAt(i, m));
-    stripeMesh.instanceMatrix.needsUpdate = true;
-    stripeMesh.frustumCulled = false;
-    this.group.add(stripeMesh);
+    // Crossings are built from the road network in buildRoadRibbons(); the old stripes here were
+    // instanced on the (i+0.5)*PITCH block lattice at y=0.03, which is inside blocks now that
+    // districts are polygons, and under the carriageway even where it was on a road.
 
     this.buildEntranceInstances();
     this.buildLampInstances();
@@ -1175,8 +1172,10 @@ export class City {
     if (blokM) {
       const spot = this.snapToVerge(blokM.x, blokM.z + 26);
       if (spot) {
+        // the kitchen stands 4 m off its slot, so it has to be seated on the ground under that
+        // spot: sampling at the slot left a 26 cm gap to the pavement it actually stands on
         const g = buildSppg(ctx, spot.x + 4, spot.z, spot.yaw);
-        this.placeOnGround(g, spot.x, spot.z);
+        this.placeOnGround(g, spot.x + 4, spot.z);
       }
     }
     // One minimarket on a fixed, verifiable site: 22 m up the spawn street, facing back at the
@@ -1728,49 +1727,169 @@ export class City {
     return sites;
   }
 
-  /** One flat ribbon per road and river: quad strips merged into a single geometry each. */
-  /**
-   * A road surface that follows the terrain.
-   *
-   * The heightfield is a coarse mesh, so a ribbon built one quad per path segment floats or sinks
-   * wherever the ground bulges between its corners. Every segment is therefore cut into ~8 m
-   * pieces and each piece samples the ground on both kerbs, which is what keeps the carriageway
-   * visible instead of buried under the terrain.
-   */
+  /** A flat ribbon of `width` at height `y` above the terrain, sampled every ~8 m. */
   ribbon(points: [number, number][], width: number, y: number): THREE.BufferGeometry {
-    const pos: number[] = [];
-    const idx: number[] = [];
+    return this.sweepSurface(points, [[-width / 2, y], [width / 2, y]], 1);
+  }
+
+  /**
+   * A path resampled every `step` metres, carrying its left normal and the distance travelled.
+   *
+   * Road, gutter, kerb and pavement are all swept from the same stations, so their edges line up
+   * to the millimetre instead of drifting apart wherever two sweeps bend differently.
+   */
+  private samplePath(points: [number, number][], step = 8) {
+    const out: { x: number; z: number; nx: number; nz: number; u: number; dx: number; dz: number }[] = [];
+    let u = 0;
     for (let i = 0; i < points.length - 1; i++) {
       const [x1, z1] = points[i];
       const [x2, z2] = points[i + 1];
       const dx = x2 - x1;
       const dz = z2 - z1;
       const len = Math.hypot(dx, dz) || 1;
-      const nx = (-dz / len) * (width / 2);
-      const nz = (dx / len) * (width / 2);
-      const steps = Math.max(1, Math.ceil(len / 8));
-      for (let k = 0; k < steps; k++) {
-        const t0 = k / steps;
-        const t1 = (k + 1) / steps;
-        const ax = x1 + dx * t0;
-        const az = z1 + dz * t0;
-        const bx = x1 + dx * t1;
-        const bz = z1 + dz * t1;
-        const base = pos.length / 3;
-        pos.push(
-          ax + nx, y + terrainHeight(ax + nx, az + nz), az + nz,
-          ax - nx, y + terrainHeight(ax - nx, az - nz), az - nz,
-          bx + nx, y + terrainHeight(bx + nx, bz + nz), bz + nz,
-          bx - nx, y + terrainHeight(bx - nx, bz - nz), bz - nz
-        );
-        idx.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+      const nx = -dz / len;
+      const nz = dx / len;
+      const steps = Math.max(1, Math.ceil(len / step));
+      // start at k=1 on later segments: repeating the joint vertex makes a zero-width quad,
+      // which is a degenerate triangle and a NaN normal
+      for (let k = i === 0 ? 0 : 1; k <= steps; k++) {
+        const t = k / steps;
+        out.push({ x: x1 + dx * t, z: z1 + dz * t, nx, nz, u: u + len * t, dx: dx / len, dz: dz / len });
+      }
+      u += len;
+    }
+    return out;
+  }
+
+  /** The station at a given distance along a sampled path, interpolated between samples. */
+  private stationAt(stations: ReturnType<City['samplePath']>, u: number) {
+    if (u <= stations[0].u) return stations[0];
+    const last = stations[stations.length - 1];
+    if (u >= last.u) return last;
+    let i = 1;
+    while (i < stations.length - 1 && stations[i].u < u) i++;
+    const p = stations[i - 1];
+    const q = stations[i];
+    const t = q.u > p.u ? (u - p.u) / (q.u - p.u) : 0;
+    return {
+      x: p.x + (q.x - p.x) * t,
+      z: p.z + (q.z - p.z) * t,
+      nx: p.nx + (q.nx - p.nx) * t,
+      nz: p.nz + (q.nz - p.nz) * t,
+      dx: p.dx + (q.dx - p.dx) * t,
+      dz: p.dz + (q.dz - p.dz) * t,
+      u,
+    };
+  }
+
+  /**
+   * Quad strip from cross-sections: rows advance along the path, columns across it, UVs are in
+   * metres divided by the tile size so a texture lands at a real-world scale.
+   *
+   * Winding is the whole point. With the columns ordered by increasing lateral offset and the
+   * rows advancing along the path, the triangle (row, col), (row, col+1), (row+1, col) faces the
+   * sky. The old ribbon() pushed the same four corners in *decreasing* lateral order, so every
+   * carriageway, pavement and river in the city carried a normal of (0,-1,0): FrontSide culled
+   * them from above and what the player actually saw was the concrete ground plane. That is the
+   * "carriageway and pavement are one surface" the owner reported twice - the carriageway was
+   * not drawn at all.
+   */
+  private stripGeometry(rows: THREE.Vector3[][], us: number[], vs: number[], tone?: number[]): THREE.BufferGeometry {
+    const cols = vs.length;
+    const pos: number[] = [];
+    const uv: number[] = [];
+    const idx: number[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = 0; j < cols; j++) {
+        const p = rows[i][j];
+        pos.push(p.x, p.y, p.z);
+        uv.push(us[i], vs[j]);
+      }
+    }
+    for (let i = 0; i < rows.length - 1; i++) {
+      for (let j = 0; j < cols - 1; j++) {
+        const a = i * cols + j;
+        const b = a + 1;
+        const c = a + cols;
+        const d = c + 1;
+        idx.push(a, b, c, c, b, d);
       }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    if (tone) {
+      // per-column tone, multiplied into the map: this is how the foot of a kerb stone gets its
+      // grime and the chamfer under the cap gets its line of light, at mesh resolution instead
+      // of at texture resolution
+      const col: number[] = [];
+      for (let i = 0; i < rows.length; i++) for (let j = 0; j < cols; j++) col.push(tone[j], tone[j], tone[j]);
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    }
     g.setIndex(idx);
     g.computeVertexNormals();
     return g;
+  }
+
+  /**
+   * Sweep a cross-section along a path.
+   *
+   * `profile` is [lateralOffset, heightAboveTerrain] in metres ordered by increasing lateral
+   * offset (positive = the path's left normal); `tile` is how many metres one texture repeat
+   * covers; `gaps` are [from, to] distances along the path where the surface is cut open, which
+   * is how a dropped kerb gets its opening.
+   */
+  private sweepSurface(
+    points: [number, number][],
+    profile: [number, number, number?][],
+    tile: number,
+    gaps: [number, number][] = []
+  ): THREE.BufferGeometry {
+    const ordered = [...profile].sort((a, b) => a[0] - b[0]);
+    const ton = ordered.map((p) => p[2]);
+    // v is the 3D distance travelled along the section, not the lateral offset: a 25 cm kerb face
+    // that spans 2 cm of offset would otherwise get 2 cm of UV and stretch the concrete into
+    // stripes over the one surface that has to catch the light.
+    const vs: number[] = [0];
+    for (let j = 1; j < ordered.length; j++) {
+      const dl = ordered[j][0] - ordered[j - 1][0];
+      const dh = ordered[j][1] - ordered[j - 1][1];
+      vs.push(vs[j - 1] + Math.hypot(dl, dh) / tile);
+    }
+    const stations = this.samplePath(points);
+    const total = stations[stations.length - 1].u;
+    const runs: [number, number][] = [];
+    let cursor = 0;
+    for (const [from, to] of [...gaps].sort((a, b) => a[0] - b[0])) {
+      if (from > cursor) runs.push([cursor, Math.min(from, total)]);
+      cursor = Math.max(cursor, to);
+    }
+    if (cursor < total) runs.push([cursor, total]);
+    if (!runs.length) runs.push([0, total]);
+    const parts: THREE.BufferGeometry[] = [];
+    for (const [a, b] of runs) {
+      if (b - a < 0.05) continue;
+      const rows: THREE.Vector3[][] = [];
+      const us: number[] = [];
+      const first = this.stationAt(stations, a);
+      const last = this.stationAt(stations, b);
+      const pick: typeof stations = [first];
+      for (const s of stations) if (s.u > a + 0.01 && s.u < b - 0.01) pick.push(s);
+      pick.push(last);
+      for (const st of pick) {
+        const row: THREE.Vector3[] = [];
+        for (const [at, h] of ordered) {
+          const x = st.x + st.nx * at;
+          const z = st.z + st.nz * at;
+          row.push(new THREE.Vector3(x, terrainHeight(x, z) + h, z));
+        }
+        rows.push(row);
+        us.push(st.u / tile);
+      }
+      if (rows.length > 1) parts.push(this.stripGeometry(rows, us, vs, ton.some((t) => t !== undefined) ? ton.map((t) => t ?? 1) : undefined));
+    }
+    if (parts.length === 1) return parts[0];
+    return mergeGeometries(parts) ?? parts[0];
   }
 
 
@@ -1797,44 +1916,489 @@ export class City {
       { name: 'Ring Road', width: 20, path: RING_ROAD as [number, number][] },
       ...LOCAL_STREETS.map((s, i) => ({ name: `Local Street ${i}`, width: s.width, path: s.path as [number, number][] })),
     ];
-    const asphalt = new THREE.MeshStandardMaterial({ color: 0x1b1f24, roughness: 1 });
-    const ring = new THREE.MeshStandardMaterial({ color: 0x1e2228, roughness: 0.98 });
-    const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });
-    for (const st of LOCAL_STREETS) {
-      const m = new THREE.Mesh(this.ribbon(st.path as [number, number][], st.width, 0.05), asphalt);
-      m.receiveShadow = true;
-      this.group.add(m);
-    }
-    for (const a of ARTERIALS) {
-      const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.05), asphalt);
-      m.receiveShadow = true;
-      this.group.add(m);
-    }
-    const r = new THREE.Mesh(this.ribbon(RING_ROAD, 20, 0.06), ring);
-    r.receiveShadow = true;
-    this.group.add(r);
+    const mats = this.roadMaterials();
+    const geo = {
+      local: [] as THREE.BufferGeometry[],
+      arterial: [] as THREE.BufferGeometry[],
+      ring: [] as THREE.BufferGeometry[],
+      walk: [] as THREE.BufferGeometry[],
+      kerb: [] as THREE.BufferGeometry[],
+      gutter: [] as THREE.BufferGeometry[],
+      line: [] as THREE.BufferGeometry[],
+      shoulder: [] as THREE.BufferGeometry[],
+      water: [] as THREE.BufferGeometry[],
+      ramp: [] as THREE.BufferGeometry[],
+    };
 
-    // Pavements. Without a kerb the buildings meet the asphalt and every street reads as a
-    // corridor between walls; Jakarta roads all have a raised trotoar with a kerb stone.
-    const trotoar = new THREE.MeshStandardMaterial({ color: 0x9d988c, roughness: 0.98 });
-    const kerbMat = new THREE.MeshStandardMaterial({ color: 0xd6d0c2, roughness: 0.95 });
-    for (const road of [...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })), { path: RING_ROAD as [number, number][], width: 20 }]) {
+    for (const st of LOCAL_STREETS) {
+      geo.local.push(this.sweepSurface(st.path as [number, number][], [[-st.width / 2, 0.05], [st.width / 2, 0.05]], 4));
+    }
+
+    const arterialRoads = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })),
+      { path: RING_ROAD as [number, number][], width: 20 },
+    ];
+    // Crossings are planned before anything is swept: the kerb has to know where its openings
+    // are, or the dropped kerb would be a second surface laid over a solid stone.
+    this.crossings = this.planCrossings();
+    const gapsByRoad = arterialRoads.map((_, ri) =>
+      this.crossings.filter((c) => c.road === ri).map((c) => [c.u - 1.2, c.u + 1.2] as [number, number])
+    );
+
+    for (let ri = 0; ri < arterialRoads.length; ri++) {
+      const road = arterialRoads[ri];
+      const e = road.width / 2;
+      const asphalt = this.sweepSurface(road.path, [[-(e - 0.58), 0.05], [e - 0.58, 0.05]], 4);
+      geo.arterial.push(asphalt);
+      // 1.5 m of shoulder on the twice-lane arterials; the lane edge line marks its inner edge
+      const shoulder = road.width >= 16;
+      const inner = shoulder ? 2.08 : 0.70;
       for (const side of [-1, 1]) {
-        const walk = this.offsetPath(road.path, side * (road.width / 2 + 1.9));
-        const m = new THREE.Mesh(this.ribbon(walk, 3.6, 0.26), trotoar);
-        m.receiveShadow = true;
-        this.group.add(m);
-        // the kerb face itself, 12 cm proud of the walk
-        const edge = this.offsetPath(road.path, side * (road.width / 2 + 0.15));
-        const k = new THREE.Mesh(this.ribbon(edge, 0.3, 0.28), kerbMat);
-        k.receiveShadow = true;
-        this.group.add(k);
+        /**
+         * The kerb, as a cross-section rather than a painted stripe.
+         *
+         * gutter (dark concrete, 4 cm below the carriageway):
+         *   e-0.58  0.050  lip, flush with the asphalt
+         *   e-0.55  0.026  the step down
+         *   e-0.12  0.010  invert: the wet line that runs beside every Jakarta kerb
+         *   e-0.06  0.016  the channel climbs to the foot of the stone
+         *
+         * stone (toned by column, so the face is darker than the cap):
+         *   e+0.00  0.060  0.55  foot, in shadow and grime
+         *   e+0.02  0.300  0.80  24 cm of vertical face: this is what casts the shadow line
+         *   e+0.05  0.315  1.00  chamfer that catches the light
+         *   e+0.17  0.315  0.97  12 cm of cap, proud of the paving
+         *   e+0.20  0.260  0.90  chamfer down onto the trotoar
+         *
+         * 30 cm of stone, 12 cm proud, on a 4 cm gutter channel.
+         */
+        geo.gutter.push(
+          this.sweepSurface(
+            road.path,
+            [
+              [side * (e - 0.58), 0.05, 0.92], // lip: same concrete as the asphalt edge, so the join is not a line
+              [side * (e - 0.55), 0.026, 0.6], // the step down
+              [side * (e - 0.12), 0.01, 0.42], // invert: the dark wet line
+              [side * (e - 0.06), 0.016, 0.62], // climbs to the foot of the stone
+            ],
+            1.2,
+            gapsByRoad[ri]
+          )
+        );
+        geo.kerb.push(
+          this.sweepSurface(
+            road.path,
+            [
+              [side * (e - 0.06), 0.016, 0.55],
+              [side * (e + 0.0), 0.06, 0.58],
+              [side * (e + 0.02), 0.3, 0.8],
+              [side * (e + 0.05), 0.315, 1.0],
+              [side * (e + 0.17), 0.315, 0.97],
+              [side * (e + 0.2), 0.26, 0.9],
+            ],
+            1.2,
+            gapsByRoad[ri]
+          )
+        );
+        // 3.6 m of paving behind the stone, its inner edge exactly on the kerb cap chamfer, and a
+        // back face so the slab is not a sheet hovering 26 cm over the ground behind it
+        geo.walk.push(
+          this.sweepSurface(
+            road.path,
+            [
+              [side * (e + 0.2), 0.26],
+              [side * (e + 3.8), 0.26],
+              [side * (e + 3.8), 0.0],
+            ],
+            2.4
+          )
+        );
+        geo.line.push(
+          this.sweepSurface(
+            road.path,
+            [[side * (e - inner - 0.15), 0.056], [side * (e - inner), 0.056]],
+            1
+          )
+        );
+        if (shoulder) {
+          // older, paler asphalt between the lane line and the gutter: the shoulder
+          geo.shoulder.push(
+            this.sweepSurface(road.path, [[side * (e - 0.585), 0.0525], [side * (e - inner), 0.0525]], 2)
+          );
+        }
       }
     }
+
     for (const rv of RIVERS) {
-      const m = new THREE.Mesh(this.ribbon(rv.path, rv.width, 0.05), water);
-      m.receiveShadow = true;
-      this.group.add(m);
+      geo.water.push(this.sweepSurface(rv.path, [[-rv.width / 2, 0.05], [rv.width / 2, 0.05]], 1));
+    }
+
+    // one mesh per material: the old code made a mesh per road per side and paid ~40 draw calls
+    // for what is one continuous surface
+    const buckets: { geos: THREE.BufferGeometry[]; mat: THREE.Material; name: string; receive: boolean }[] = [
+      { geos: geo.local, mat: mats.asphalt, name: 'road-local', receive: true },
+      { geos: geo.arterial, mat: mats.asphalt, name: 'road-arterial', receive: true },
+      { geos: geo.shoulder, mat: mats.shoulder, name: 'road-shoulder', receive: true },
+      { geos: geo.line, mat: mats.line, name: 'lane-edge', receive: false },
+      { geos: geo.walk, mat: mats.walk, name: 'trotoar', receive: true },
+      { geos: geo.kerb, mat: mats.kerb, name: 'kerb', receive: true },
+      { geos: geo.gutter, mat: mats.gutter, name: 'gutter', receive: true },
+      { geos: geo.ramp, mat: mats.kerb, name: 'kerb-ramp', receive: true },
+      { geos: geo.water, mat: mats.water, name: 'river', receive: false },
+    ];
+    for (const b of buckets) {
+      if (!b.geos.length) continue;
+      const merged = b.geos.length === 1 ? b.geos[0] : mergeGeometries(b.geos);
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, b.mat);
+      mesh.name = b.name;
+      mesh.receiveShadow = b.receive;
+      this.group.add(mesh);
+    }
+
+    this.buildCrossingDressing(arterialRoads, mats);
+  }
+
+  /**
+   * Carriageway and pavement, as materials drawn at a real-world scale.
+   *
+   * The asphalt is a 4 m tile of value-only grain (1.5-4.5 cm specks), so at 1.7 m the eye reads
+   * grain instead of a flat fill; the trotoar is 30 cm pavers with a joint, a bevel and its own
+   * value per paver on a 2.4 m tile; the kerb carries a 1.2 m stone joint and a gradient that
+   * darkens it towards the gutter. Every variation is in value, never in hue: a warm patch on the
+   * road reads as a stain at eye height, which is what the last texture pass had to undo.
+   */
+  private roadMaterials() {
+    const asphaltTex = canvasTexture(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#282c32';
+      ctx.fillRect(0, 0, w, h);
+      // aggregate. light and dark specks are balanced so the tile mean stays on the base colour
+      for (let i = 0; i < 4200; i++) {
+        const g = Math.round(44 + rand(-13, 13));
+        ctx.fillStyle = `rgb(${g - 3},${g},${g + 5})`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 3), rand(1, 3));
+      }
+      // resurfacing ghosts, 40-90 cm across, kept very faint: at eye height a stronger oval reads
+      // as a stain on the road, which is the defect the last texture pass had to undo
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i % 2 ? 'rgba(20,22,26,0.07)' : 'rgba(60,64,70,0.06)';
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(26, 58), rand(18, 40), rand(0, 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // hairline cracks: one every couple of metres, never dead straight
+      ctx.strokeStyle = 'rgba(16,18,21,0.5)';
+      ctx.lineWidth = 1.1;
+      for (let i = 0; i < 4; i++) {
+        let x = rand(0, w);
+        let y = rand(0, h);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for (let k = 0; k < 5; k++) {
+          x += rand(-16, 16);
+          y += rand(-16, 16);
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    });
+    asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
+
+    const walkTex = canvasTexture(1024, 1024, (ctx, w, h) => {
+      const n = 8; // 30 cm pavers on a 2.4 m tile
+      const cell = w / n;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          // each paver its own value: a uniform grid of one grey is exactly what the trotoar was
+          const v = rand(-10, 10);
+          ctx.fillStyle = `rgb(${Math.round(172 + v)},${Math.round(167 + v)},${Math.round(155 + v * 0.8)})`;
+          ctx.fillRect(i * cell, j * cell, cell, cell);
+          // grain inside the paver
+          for (let k = 0; k < 90; k++) {
+            const g = Math.round(128 + rand(-20, 26));
+            ctx.fillStyle = `rgba(${g},${g - 4},${g - 12},0.20)`;
+            ctx.fillRect(i * cell + rand(0, cell), j * cell + rand(0, cell), rand(1, 3), rand(1, 3));
+          }
+          // bevelled edges: light on the top-left, shadow on the bottom-right
+          ctx.fillStyle = 'rgba(255,255,255,0.15)';
+          ctx.fillRect(i * cell + 3, j * cell + 3, cell - 6, 3);
+          ctx.fillStyle = 'rgba(0,0,0,0.10)';
+          ctx.fillRect(i * cell + 3, j * cell + cell - 6, cell - 6, 3);
+        }
+      }
+      // joints: dark, 3 px, i.e. 7 mm at this scale
+      ctx.fillStyle = 'rgba(84,80,72,0.85)';
+      for (let k = 0; k <= n; k++) {
+        ctx.fillRect(Math.min(w - 3, k * cell - 1), 0, 3, h);
+        ctx.fillRect(0, Math.min(h - 3, k * cell - 1), w, 3);
+      }
+      // chips and the odd stain, so the grid does not read as a spreadsheet
+      for (let i = 0; i < 26; i++) {
+        ctx.fillStyle = `rgba(${rand(0, 1) > 0.4 ? '92,88,80' : '206,200,188'},${rand(0.08, 0.22)})`;
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(3, 16), rand(3, 12), rand(0, 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+    walkTex.wrapS = walkTex.wrapT = THREE.RepeatWrapping;
+
+    const kerbTex = canvasTexture(128, 256, (ctx, w, h) => {
+      // v runs from the gutter (bottom of the canvas) to the cap, so a vertical gradient is the
+      // grime: the foot of the stone is dirty, the cap is washed by the rain
+      const grad = ctx.createLinearGradient(0, h, 0, 0);
+      grad.addColorStop(0, '#8d8880');
+      grad.addColorStop(0.45, '#b6b0a4');
+      grad.addColorStop(1, '#d6d0c0');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 900; i++) {
+        const g = Math.round(188 + rand(-18, 18));
+        ctx.fillStyle = `rgba(${g},${g - 5},${g - 16},0.35)`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 4), rand(1, 3));
+      }
+      // stone joints every 1.2 m along the kerb
+      ctx.fillStyle = 'rgba(64,60,54,0.55)';
+      ctx.fillRect(0, 0, 3, h);
+      ctx.fillRect(w - 4, 0, 3, h);
+    });
+    kerbTex.wrapS = kerbTex.wrapT = THREE.RepeatWrapping;
+
+    const tactileTex = canvasTexture(128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#c4941a';
+      ctx.fillRect(0, 0, w, h);
+      const n = 6; // 5 cm domes on a 30 cm tile
+      const cell = w / n;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          const cx = i * cell + cell / 2;
+          const cy = j * cell + cell / 2;
+          const g = ctx.createRadialGradient(cx - 2, cy - 3, 1, cx, cy, cell * 0.42);
+          g.addColorStop(0, '#e8c04a');
+          g.addColorStop(0.7, '#b8860f');
+          g.addColorStop(1, '#8c6408');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(cx, cy, cell * 0.32, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    });
+    tactileTex.wrapS = tactileTex.wrapT = THREE.RepeatWrapping;
+
+    const shoulderTex = canvasTexture(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#31353b';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 3400; i++) {
+        const g = Math.round(54 + rand(-14, 16));
+        ctx.fillStyle = `rgba(${g},${g + 1},${g + 5},0.5)`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 3), rand(1, 3));
+      }
+      // patch repairs: the shoulder is the oldest asphalt on a Jakarta road
+      for (let i = 0; i < 5; i++) {
+        ctx.fillStyle = i % 2 ? 'rgba(28,30,34,0.16)' : 'rgba(78,82,88,0.10)';
+        ctx.fillRect(rand(0, w), rand(0, h), rand(30, 90), rand(20, 60));
+      }
+    });
+    shoulderTex.wrapS = shoulderTex.wrapT = THREE.RepeatWrapping;
+
+    const gutterTex = canvasTexture(128, 128, (ctx, w, h) => {
+      // the channel is wet concrete: dark, cool, and never uniform
+      ctx.fillStyle = '#57544e';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 700; i++) {
+        const g = Math.round(88 + rand(-16, 18));
+        ctx.fillStyle = `rgba(${g},${g - 2},${g - 6},0.5)`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 4), rand(1, 2));
+      }
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = 'rgba(30,32,34,0.35)';
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(8, 30), rand(4, 14), rand(0, 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+    gutterTex.wrapS = gutterTex.wrapT = THREE.RepeatWrapping;
+
+    return {
+      // the road is darker and rougher than the walk: 0.97 against 0.86, so it takes the light
+      // as a matte surface and the paving keeps a little sheen
+      asphalt: new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.97 }),
+      shoulder: new THREE.MeshStandardMaterial({ map: shoulderTex, roughness: 0.98 }),
+      walk: new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.86 }),
+      // the kerb stone carries a per-column tone (dark foot, bright chamfer) as vertex colours
+      kerb: new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.8, vertexColors: true }),
+      gutter: new THREE.MeshStandardMaterial({ map: gutterTex, roughness: 0.92, vertexColors: true }),
+      line: new THREE.MeshStandardMaterial({ color: 0xe8e4d6, roughness: 0.7 }),
+      tactile: new THREE.MeshStandardMaterial({ map: tactileTex, roughness: 0.78 }),
+      water: new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 }),
+    };
+  }
+
+  /** Parameter along the first segment where two centrelines cross, or null when they miss. */
+  private segmentCross(p1: [number, number], p2: [number, number], p3: [number, number], p4: [number, number]) {
+    const d1x = p2[0] - p1[0];
+    const d1z = p2[1] - p1[1];
+    const d2x = p4[0] - p3[0];
+    const d2z = p4[1] - p3[1];
+    const den = d1x * d2z - d1z * d2x;
+    if (Math.abs(den) < 1e-6) return null; // parallel
+    const t = ((p3[0] - p1[0]) * d2z - (p3[1] - p1[1]) * d2x) / den;
+    const s = ((p3[0] - p1[0]) * d1z - (p3[1] - p1[1]) * d1x) / den;
+    if (t < 0 || t > 1 || s < 0 || s > 1) return null;
+    return { t };
+  }
+
+  /** Distance along a polyline of the point `t` of segment `i`. */
+  private distanceAt(path: [number, number][], i: number, t: number) {
+    let u = 0;
+    for (let k = 1; k < i; k++) u += Math.hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1]);
+    return u + t * Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+  }
+
+  /**
+   * Where a pedestrian can actually cross, derived from the road network.
+   *
+   * The old stripes were instanced on the (i+0.5)*PITCH block lattice, which stopped matching
+   * the streets when the city moved to organic districts; they also sat at y=0.03, under the
+   * carriageway, so they were invisible as well as misplaced. A crossing is now a place where
+   * an arterial meets another road, set clear of the junction, and it exists only where there is
+   * a kerb to step off.
+   */
+  planCrossings() {
+    const arterialRoads = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })),
+      { path: RING_ROAD as [number, number][], width: 20 },
+    ];
+    const others = [
+      ...LOCAL_STREETS.map((s) => ({ path: s.path as [number, number][], width: s.width })),
+      ...arterialRoads,
+    ];
+    const out: { road: number; u: number }[] = [];
+    const seen: [number, number][] = [];
+    for (let ri = 0; ri < arterialRoads.length; ri++) {
+      const a = arterialRoads[ri];
+      const stations = this.samplePath(a.path, 4);
+      const total = stations[stations.length - 1].u;
+      for (const b of others) {
+        if (a.path === b.path) continue;
+        for (let i = 1; i < a.path.length; i++) {
+          for (let j = 1; j < b.path.length; j++) {
+            const hit = this.segmentCross(a.path[i - 1], a.path[i], b.path[j - 1], b.path[j]);
+            if (!hit) continue;
+            const u = this.distanceAt(a.path, i, hit.t);
+            for (const side of [-1, 1]) {
+              // clear of the other carriageway, so the stripes are not painted inside a junction
+              const at = u + side * (b.width / 2 + 3.4);
+              if (at < 8 || at > total - 8) continue;
+              const st = this.stationAt(stations, at);
+              if (seen.some(([x, z]) => Math.hypot(x - st.x, z - st.z) < 9)) continue;
+              seen.push([st.x, st.z]);
+              out.push({ road: ri, u: at });
+            }
+          }
+        }
+      }
+    }
+    return out.sort((p, q) => p.road - q.road || p.u - q.u);
+  }
+
+  /** A dropped kerb: the pavement edge ramps down to the gutter across a crossing. */
+  private rampGeometry(
+    st: { x: number; z: number; nx: number; nz: number; dx: number; dz: number },
+    side: number,
+    e: number
+  ) {
+    const nx = st.nx * side;
+    const nz = st.nz * side;
+    const at = (along: number, lat: number, h: number) => {
+      const x = st.x + st.dx * along + nx * lat;
+      const z = st.z + st.dz * along + nz * lat;
+      return new THREE.Vector3(x, terrainHeight(x, z) + h, z);
+    };
+    // rows advance from the pavement toward the road, columns along it: the top faces the sky
+    const top = this.stripGeometry(
+      [
+        [at(-1.2, e + 0.2, 0.26), at(1.2, e + 0.2, 0.26)],
+        [at(-1.2, e - 0.58, 0.05), at(1.2, e - 0.58, 0.05)],
+      ],
+      [0, 1],
+      [0, 1],
+      [0.9, 0.9]
+    );
+    // a wall under the back edge, so the opening reads as a shadow instead of a hole
+    const wall = this.stripGeometry(
+      [
+        [at(-1.2, e + 0.2, 0.26), at(1.2, e + 0.2, 0.26)],
+        [at(-1.2, e + 0.2, -0.02), at(1.2, e + 0.2, -0.02)],
+      ],
+      [0, 1],
+      [0, 1],
+      [0.7, 0.7]
+    );
+    return mergeGeometries([top, wall]) ?? top;
+  }
+
+  /**
+   * Zebra, tactile pad and dropped kerb, one set per planned crossing.
+   *
+   * The three belong together: the pad marks the crossing, the ramp is the opening in the kerb
+   * behind it, and the stripes say which way to walk. A tactile strip with nothing to step off is
+   * a painted rectangle.
+   */
+  private buildCrossingDressing(
+    arterialRoads: { path: [number, number][]; width: number }[],
+    mats: ReturnType<City['roadMaterials']>
+  ) {
+    if (!this.crossings.length) return;
+    const stripes: THREE.Matrix4[] = [];
+    const pads: THREE.Matrix4[] = [];
+    const ramps: THREE.BufferGeometry[] = [];
+    const padGeo = new THREE.PlaneGeometry(0.6, 2.4);
+    {
+      // one texture tile per 30 cm: 2 x 8 repeats across a 60 x 240 cm pad
+      const uv = padGeo.getAttribute('uv') as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2, uv.getY(i) * 8);
+      uv.needsUpdate = true;
+      padGeo.rotateX(-Math.PI / 2);
+    }
+    for (const c of this.crossings) {
+      const road = arterialRoads[c.road];
+      const st = this.stationAt(this.samplePath(road.path, 4), c.u);
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(st.dx, st.dz));
+      const e = road.width / 2;
+      // bars parallel to the traffic, stepping across the carriageway
+      for (let lat = -(e - 0.95); lat <= e - 0.95 + 0.01; lat += 0.95) {
+        const x = st.x + st.nx * lat;
+        const z = st.z + st.nz * lat;
+        stripes.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.056, z), q, new THREE.Vector3(1, 1, 1)));
+      }
+      for (const side of [-1, 1]) {
+        const x = st.x + st.nx * side * (e + 0.55);
+        const z = st.z + st.nz * side * (e + 0.55);
+        pads.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.2665, z), q, new THREE.Vector3(1, 1, 1)));
+        ramps.push(this.rampGeometry(st, side, e));
+      }
+    }
+    const stripeGeo = new THREE.BoxGeometry(0.45, 0.012, 3);
+    const stripeMesh = new THREE.InstancedMesh(stripeGeo, mats.line, stripes.length);
+    stripes.forEach((m, i) => stripeMesh.setMatrixAt(i, m));
+    stripeMesh.instanceMatrix.needsUpdate = true;
+    stripeMesh.name = 'crossing-stripes';
+    this.group.add(stripeMesh);
+
+    const padMesh = new THREE.InstancedMesh(padGeo, mats.tactile, pads.length);
+    pads.forEach((m, i) => padMesh.setMatrixAt(i, m));
+    padMesh.instanceMatrix.needsUpdate = true;
+    padMesh.receiveShadow = true;
+    padMesh.name = 'tactile';
+    this.group.add(padMesh);
+
+    const rampGeo = mergeGeometries(ramps) ?? ramps[0];
+    if (rampGeo) {
+      const rampMesh = new THREE.Mesh(rampGeo, mats.kerb);
+      rampMesh.name = 'kerb-ramp';
+      rampMesh.receiveShadow = true;
+      this.group.add(rampMesh);
     }
   }
 
@@ -3131,12 +3695,33 @@ export class City {
   // sidewalk plate height (blocks sit ~26cm above the asphalt)
   groundHeightAt(x: number, z: number) {
     // terrain first, then the kerb: the city sits on ground that is no longer a table
-    let h = terrainHeight(x, z);
+    const h = terrainHeight(x, z);
     for (const b of this.blocks) {
       const half = (b.size ?? BLOCK) / 2 + 1.2; // props stand at the plate edge, not the centre
       if (Math.abs(x - b.x) < half && Math.abs(z - b.z) < half) return h + 0.26;
     }
+    // the trotoar beside every arterial is the same 26 cm of concrete as a block plate, and
+    // everything places itself through this function: without this test every halte, cart and
+    // ojek on the pavement stood 26 cm inside the slab the moment it became visible
+    const band = this.pavementBand(x, z);
+    if (band) return h + band;
     return h;
+  }
+
+  /**
+   * How far above the terrain the pavement is at (x, z), 0 when there is none.
+   *
+   * Only the arterials and the ring carry a trotoar ribbon (3.6 m of paving behind a 30 cm kerb);
+   * a local street is asphalt and nothing else, so a point beside one is just ground.
+   */
+  pavementBand(x: number, z: number): number {
+    for (const road of WALK_ROADS) {
+      const d = this.distToPath(x, z, road.path);
+      const e = road.width / 2;
+      // the kerb cap ends at half+0.20, the paving runs 3.6 m behind it
+      if (d >= e + 0.2 && d <= e + 3.8) return 0.26;
+    }
+    return 0;
   }
 
   randomRoadPoint(minDistFrom = null, min = 40) {
