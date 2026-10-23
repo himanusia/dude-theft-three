@@ -2108,6 +2108,13 @@ window.__game = {
       camYaw = Math.atan2(-(x - player.pos.x), -(z - player.pos.z));
     },
     teleport(x: number, z: number) {
+      // carry a driven car along: the seated player is snapped back to the seat every frame, so
+      // teleporting on foot only looked like it worked and then undid itself
+      if (player.inCar) {
+        player.inCar.pos.set(x, player.inCar.y, z);
+        player.inCar.y = city.groundHeightAt(x, z);
+        player.inCar.mesh.position.copy(player.inCar.pos);
+      }
       player.pos.set(x, 0, z);
       player.y = city.groundHeightAt(x, z);
       player.vel.set(0, 0, 0);

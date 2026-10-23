@@ -82,8 +82,8 @@ export function buildLayang(ctx: LayangCtx, path: [number, number][], opts: Laya
       const pz = z1 + dz * t;
       const h = deckY - 1.2;
       for (const side of [-1, 1]) {
-        const qx = px + nx * side * (width / 2 - 1.9);
-        const qz = pz + nz * side * (width / 2 - 1.9);
+        const qx = px + nx * side * (width / 2 + 0.6);
+        const qz = pz + nz * side * (width / 2 + 0.6);
         const g = ctx.groundHeightAt(qx, qz);
         pierM.push(new THREE.Matrix4().compose(new THREE.Vector3(qx, g + h / 2, qz), q, new THREE.Vector3(1, h, 1)));
         ctx.colliders.push({ minX: qx - 0.95, maxX: qx + 0.95, minZ: qz - 0.95, maxZ: qz + 0.95, h });
