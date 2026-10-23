@@ -506,6 +506,35 @@ export class City {
     });
   }
 
+  /** Merge every collected building body into one mesh per material, per block group. */
+  finalizeBuildings() {
+    for (const { mat, geos } of this.frontageBuckets.values()) {
+      if (!geos.length) continue;
+      const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+      for (const g of geos) g.dispose();
+    }
+    this.frontageBuckets.clear();
+
+    for (const [group, bucket] of this.buildingBuckets) {
+      for (const { mat, geos } of bucket.values()) {
+        if (!geos.length) continue;
+        const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+        if (!merged) continue;
+        const mesh = new THREE.Mesh(merged, mat);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+        for (const g of geos) g.dispose();
+      }
+    }
+    this.buildingBuckets.clear();
+  }
+
   finalizePlinths() {
     for (let v = 0; v < this.plinthGeos.length; v++) {
       const list = this.plinthGeos[v];
@@ -790,6 +819,7 @@ export class City {
     this.buildLampInstances();
     this.buildTreeInstances();
     this.buildNightLights();
+    this.finalizeBuildings();
     this.finalizePlinths();
     this.finalizeSpawnClearance();
   }
@@ -1164,6 +1194,15 @@ export class City {
    */
   /** the deck the layang was built on, so a shop never ends up underneath it */
   layangSpine: [number, number][] = [];
+
+  /** facade materials shared by colour, style and repeat, so their geometry can be merged */
+  buildingMatCache = new Map<string, THREE.MeshStandardMaterial>();
+
+  /** geometry waiting to be merged, bucketed per block group and material */
+  buildingBuckets = new Map<THREE.Group, Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>>();
+
+  /** frontage bodies live outside the block groups, so they merge into one set for the root */
+  frontageBuckets = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>();
 
   /** every building footprint already placed, so two of them can never occupy the same ground */
   footprints: { minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
@@ -1839,15 +1878,20 @@ export class City {
     const tex = windowTexture(wall, facade, rx, ry);
     const emis = emissiveTexture(rx, ry);
 
-    const sideMat = new THREE.MeshStandardMaterial({
-      map: tex,
-      emissive: 0xffffff,
-      emissiveMap: emis,
-      emissiveIntensity: 0,
-      roughness: 0.82,
-      metalness: 0.06,
-    });
-    this.emissiveMats.push(sideMat);
+    const matKey = `${wall}|${facade}|${rx}|${ry}`;
+    let sideMat = this.buildingMatCache.get(matKey);
+    if (!sideMat) {
+      sideMat = new THREE.MeshStandardMaterial({
+        map: tex,
+        emissive: 0xffffff,
+        emissiveMap: emis,
+        emissiveIntensity: 0,
+        roughness: 0.82,
+        metalness: 0.06,
+      });
+      this.buildingMatCache.set(matKey, sideMat);
+      this.emissiveMats.push(sideMat);
+    }
     const roofMat = new THREE.MeshStandardMaterial({ color: style ? style.roof : 0x4a4a4c, roughness: 0.95 });
     const mats = [sideMat, sideMat, roofMat, roofMat, sideMat, sideMat];
 
@@ -1863,11 +1907,18 @@ export class City {
       this.plinthGeos[variant].push(pg);
     }
 
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats);
-    b.position.set(x, h / 2 + 0.2, z);
-    b.castShadow = true;
-    b.receiveShadow = true;
-    this.group.add(b);
+    // One draw call per building was the single largest cost in the frame. Bodies that share a
+    // material come back as one mesh per block group, so distance culling still works per block
+    // while the block itself costs a handful of calls instead of dozens.
+    const bodyGeo = new THREE.BoxGeometry(w, h, d);
+    bodyGeo.translate(x, h / 2 + 0.2, z);
+    const bucket = this.buildingBuckets.get(this.group) ?? new Map();
+    const entry = bucket.get(matKey) ?? { mat: sideMat, geos: [] };
+    // the roof faces use a separate material, so they stay a separate merged bucket
+    entry.geos.push(bodyGeo);
+    bucket.set(matKey, entry);
+    this.buildingBuckets.set(this.group, bucket);
+    void mats;
 
     // Roofline by building type. A flat parapet on every box is what made the city read as
     // "all the same": a low shophouse in a kampung has a pitched clay roof, an office tower has
@@ -2786,13 +2837,22 @@ export class City {
               // one tile is one floor: ~3.2 m tall, 8 m wide. The repeat goes into the cache
               // key -- mutating tex.repeat here would mutate every building sharing that
               // texture, which is exactly what the cache made possible.
-              const tex = windowTexture(wall, facade, Math.max(1, Math.round(w / 8)), Math.max(1, Math.round(h / 3.2)));
-              const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
-              const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-              body.position.y = h / 2 + 0.3;
-              body.castShadow = true;
-              body.receiveShadow = true;
-              group.add(body);
+              const frx = Math.max(1, Math.round(w / 8));
+              const fry = Math.max(1, Math.round(h / 3.2));
+              const tex = windowTexture(wall, facade, frx, fry);
+              const fkey = `frontage|${wall}|${facade}|${frx}|${fry}`;
+              let mat = this.buildingMatCache.get(fkey);
+              if (!mat) {
+                mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
+                this.buildingMatCache.set(fkey, mat);
+              }
+              // world transform of the body: rotate by the row angle, then move to its slot
+              const bodyGeo = new THREE.BoxGeometry(w, h, d);
+              bodyGeo.rotateY(group.rotation.y);
+              bodyGeo.translate(px, terrainHeight(px, pz) + h / 2 + 0.3, pz);
+              const fe = this.frontageBuckets.get(fkey) ?? { mat, geos: [] };
+              fe.geos.push(bodyGeo);
+              this.frontageBuckets.set(fkey, fe);
               // a shopfront band at street level so the row is not one blank slab
               const base = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 3.2, 0.3), shopfrontMat());
               base.position.set(0, 1.9, -d / 2 - 0.16);

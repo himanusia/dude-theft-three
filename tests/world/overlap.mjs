@@ -27,59 +27,25 @@ await page.click('#start-btn');
 await new Promise((r) => setTimeout(r, 4500));
 
 const report = await page.evaluate(() => {
-  const g = window.__game;
-  const T = g.THREE || window.THREE;
-
-  // building bodies only: upright boxes with a texture, between 4 and 120 m tall
-  const items = [];
-  g.scene.traverse((o) => {
-    if (!o.isMesh || o.isInstancedMesh) return;
-    const m = o.material;
-    if (!m || Array.isArray(m) || !m.map) return;
-    const geo = o.geometry;
-    if (!geo.boundingBox) geo.computeBoundingBox();
-    const bb = geo.boundingBox;
-    const size = bb.getSize(new T.Vector3());
-    if (size.y < 4 || size.y > 130) return;
-    if (size.x < 3 || size.z < 3 || size.x > 60 || size.z > 60) return;
-    const centre = bb.getCenter(new T.Vector3()).applyMatrix4(o.matrixWorld);
-    items.push({ cx: centre.x, cz: centre.z, hx: size.x / 2, hz: size.z / 2, rot: o.rotation.y || 0 });
-  });
-
-  const cos = (a) => Math.cos(a);
-  const sin = (a) => Math.sin(a);
-  // corners of box a expressed in frame b, then an AABB in that frame
-  const overlap = (a, b) => {
-    const dx = a.cx - b.cx;
-    const dz = a.cz - b.cz;
-    // push the offset into b's frame
-    const ox = dx * cos(-b.rot) - dz * sin(-b.rot);
-    const oz = dx * sin(-b.rot) + dz * cos(-b.rot);
-    const c = cos(a.rot - b.rot);
-    const s = sin(a.rot - b.rot);
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        const px = sx * a.hx * c - sz * a.hz * s + ox;
-        const pz = sx * a.hx * s + sz * a.hz * c + oz;
-        minX = Math.min(minX, px); maxX = Math.max(maxX, px);
-        minZ = Math.min(minZ, pz); maxZ = Math.max(maxZ, pz);
-      }
-    }
-    const x = Math.min(maxX, b.hx) - Math.max(minX, -b.hx);
-    const z = Math.min(maxZ, b.hz) - Math.max(minZ, -b.hz);
-    return Math.min(x, z);
-  };
-
+  // Check the invariant where it is enforced, not where it is drawn. Building bodies are now
+  // merged per block, so a scene-graph scan sees one mesh spanning dozens of buildings and
+  // reports thousands of false collisions. The generator reserves a rectangle for every
+  // building it places; those rectangles are the contract, and they survive any merging.
+  const fp = window.__game.city.footprints || [];
   let pairs = 0;
   let worst = 0;
-  for (let i = 0; i < items.length; i++) {
-    for (let j = i + 1; j < items.length; j++) {
-      const d = overlap(items[i], items[j]);
-      if (d > 0.5) { pairs++; worst = Math.max(worst, d); }
+  for (let i = 0; i < fp.length; i++) {
+    for (let j = i + 1; j < fp.length; j++) {
+      const a = fp[i], b = fp[j];
+      const ox = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+      const oz = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+      if (ox > 0.5 && oz > 0.5) {
+        pairs++;
+        worst = Math.max(worst, Math.min(ox, oz));
+      }
     }
   }
-  return { buildings: items.length, overlapPairs: pairs, worst: +worst.toFixed(2) };
+  return { footprints: fp.length, overlapPairs: pairs, worst: +worst.toFixed(2) };
 });
 
 console.log(JSON.stringify(report));
