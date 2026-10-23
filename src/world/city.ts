@@ -3,6 +3,7 @@ import { buildHalte } from './halte';
 import { buildKakiLima, buildSppg, buildKoperasi, KakiLimaKind } from './kakilima';
 import { TransjakartaBus } from '../vehicles/transjakarta';
 import { buildLayang } from './layang';
+import { buildMrtLine, buildMrtStation } from './mrt';
 import { buildKrl } from './krl';
 import { buildMinimarket } from './minimarket';
 import { buildPosPolisi } from './pospolisi';
@@ -661,6 +662,7 @@ export class City {
     this.buildStreetLife();
     this.buildOjekBases();
     this.buildLayangRoad();
+    this.buildMrt();
     this.buildKrlLine();
 
     // road markings (instanced): dashed centre lines along the roads the map defines
@@ -1079,6 +1081,51 @@ export class City {
     );
   }
 
+
+  /**
+   * The MRT: the third elevated structure in the city, and the one that reads as modern —
+   * narrower guideway, slimmer piers, glass stations instead of concrete.
+   */
+  buildMrt() {
+    const spine = ARTERIALS[1]?.path as [number, number][] | undefined;
+    if (!spine || spine.length < 2) return;
+    // Run the line beside the artery, not over it: the toll already owns the centre, and a
+    // guideway dropped straight onto the artery centreline puts its piers in the traffic lanes.
+    const shifted: [number, number][] = spine.map(([x, z], i) => {
+      const [ax, az] = spine[Math.max(0, i - 1)];
+      const [bx, bz] = spine[Math.min(spine.length - 1, i + 1)];
+      const dx = bx - ax, dz = bz - az;
+      const len = Math.hypot(dx, dz) || 1;
+      return [x + (dz / len) * 24, z - (dx / len) * 24] as [number, number];
+    });
+    buildMrtLine(
+      {
+        group: this.group,
+        colliders: this.colliders,
+        audit: this.propAudit,
+        groundHeightAt: (x, z) => this.groundHeightAt(x, z),
+      },
+      shifted
+    );
+    this.mrtSpine = shifted;
+    // A station belongs on its own guideway, so it is not displaced for clearance: the first
+    // version asked for 20 m of empty ground beside a line whose own piers are colliders, and
+    // every candidate was rejected, which is why the MRT line had no station at all.
+    // nearest point on the line to the player's spawn, so the station is where people start
+    const sp = this.getSpawn();
+    let mid = shifted[0], bestD = Infinity;
+    for (const pt of shifted) {
+      const d = Math.hypot(pt[0] - sp.x, pt[1] - sp.z);
+      if (d < bestD) { bestD = d; mid = pt; }
+    }
+    buildMrtStation(
+      { group: this.group, colliders: this.colliders, audit: this.propAudit, groundHeightAt: (x, z) => this.groundHeightAt(x, z) },
+      mid[0], mid[1], 0
+    );
+  }
+
+  /** the MRT line this city built, so nothing else is placed underneath it */
+  mrtSpine: [number, number][] = [];
 
   /**
    * The commuter line: a viaduct crossing the city east to west, above the rooftops, with one
