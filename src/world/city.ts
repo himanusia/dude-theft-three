@@ -1075,6 +1075,36 @@ export class City {
         }
       }
     }
+    // Second pass: the districts are polygons, and the ground between them used to stay empty -
+    // which is the void you could walk into a hundred metres from the spawn. Fill the land
+    // inside the ring on the same lattice, taking the style of the nearest district.
+    const near = (x: number, z: number) =>
+      sites.some((s) => Math.hypot(s.x - x, s.z - z) < PITCH_BLOCK * 0.62);
+    const half = WORLD_HALF - 120;
+    for (let x = -half; x <= half; x += PITCH_BLOCK) {
+      for (let z = -half; z <= half; z += PITCH_BLOCK) {
+        const jx = x + rand(-3, 3);
+        const jz = z + rand(-3, 3);
+        if (near(jx, jz)) continue;
+        if (isWater(jx, jz)) continue;
+        if (Math.abs(jx) > half || Math.abs(jz) > half) continue;
+        let blocked = false;
+        for (const a of ARTERIALS) {
+          if (this.distToPath(jx, jz, a.path) < a.width / 2 + (SIZE / 2) * 1.42 + 2) { blocked = true; break; }
+        }
+        if (blocked) continue;
+        if (this.distToPath(jx, jz, RING_ROAD) < 12 + (SIZE / 2) * 1.42 + 2) continue;
+        for (const lm of LANDMARKS) {
+          if (Math.hypot(jx - lm.x, jz - lm.z) < SIZE / 2 + 34) { blocked = true; break; }
+        }
+        if (blocked) continue;
+        for (const r of RIVERS) {
+          if (this.distToPath(jx, jz, r.path) < r.width / 2 + SIZE * 0.42) { blocked = true; break; }
+        }
+        if (blocked) continue;
+        sites.push({ x: jx, z: jz, size: SIZE + rand(-6, 2) });
+      }
+    }
     return sites;
   }
 
