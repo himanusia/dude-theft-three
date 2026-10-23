@@ -475,7 +475,7 @@ export class City {
       const isLot = !isPark && Math.random() < 0.18;
 
       const plate = new THREE.Mesh(new THREE.BoxGeometry(size, 0.26, size), sidewalkMat);
-      plate.position.set(cx, 0.13, cz);
+      plate.position.set(cx, terrainHeight(cx, cz) + 0.13, cz);
       plate.receiveShadow = true;
       this.group.add(plate);
 
@@ -549,7 +549,7 @@ export class City {
           const x = x1 + (x2 - x1) * t;
           const z = z1 + (z2 - z1) * t;
           q.setFromAxisAngle(up, yaw);
-          this.dashMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0.02, z), q, new THREE.Vector3(1, 1, 1)));
+          this.dashMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.68, z), q, new THREE.Vector3(1, 1, 1)));
         }
       }
     }
@@ -1065,6 +1065,14 @@ export class City {
   }
 
   /** One flat ribbon per road and river: quad strips merged into a single geometry each. */
+  /**
+   * A road surface that follows the terrain.
+   *
+   * The heightfield is a coarse mesh, so a ribbon built one quad per path segment floats or sinks
+   * wherever the ground bulges between its corners. Every segment is therefore cut into ~8 m
+   * pieces and each piece samples the ground on both kerbs, which is what keeps the carriageway
+   * visible instead of buried under the terrain.
+   */
   ribbon(points: [number, number][], width: number, y: number): THREE.BufferGeometry {
     const pos: number[] = [];
     const idx: number[] = [];
@@ -1076,13 +1084,23 @@ export class City {
       const len = Math.hypot(dx, dz) || 1;
       const nx = (-dz / len) * (width / 2);
       const nz = (dx / len) * (width / 2);
-      const base = pos.length / 3;
-      const y1a = y + terrainHeight(x1 + nx, z1 + nz);
-      const y1b = y + terrainHeight(x1 - nx, z1 - nz);
-      const y2a = y + terrainHeight(x2 + nx, z2 + nz);
-      const y2b = y + terrainHeight(x2 - nx, z2 - nz);
-      pos.push(x1 + nx, y1a, z1 + nz, x1 - nx, y1b, z1 - nz, x2 + nx, y2a, z2 + nz, x2 - nx, y2b, z2 - nz);
-      idx.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+      const steps = Math.max(1, Math.ceil(len / 8));
+      for (let k = 0; k < steps; k++) {
+        const t0 = k / steps;
+        const t1 = (k + 1) / steps;
+        const ax = x1 + dx * t0;
+        const az = z1 + dz * t0;
+        const bx = x1 + dx * t1;
+        const bz = z1 + dz * t1;
+        const base = pos.length / 3;
+        pos.push(
+          ax + nx, y + terrainHeight(ax + nx, az + nz), az + nz,
+          ax - nx, y + terrainHeight(ax - nx, az - nz), az - nz,
+          bx + nx, y + terrainHeight(bx + nx, bz + nz), bz + nz,
+          bx - nx, y + terrainHeight(bx - nx, bz - nz), bz - nz
+        );
+        idx.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+      }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -1090,6 +1108,7 @@ export class City {
     g.computeVertexNormals();
     return g;
   }
+
 
   /** A path pushed sideways by `dist`: used for the pavements that flank every road. */
   offsetPath(path: [number, number][], dist: number): [number, number][] {
@@ -1114,20 +1133,20 @@ export class City {
       { name: 'Ring Road', width: 20, path: RING_ROAD as [number, number][] },
       ...LOCAL_STREETS.map((s, i) => ({ name: `Local Street ${i}`, width: s.width, path: s.path as [number, number][] })),
     ];
-    const asphalt = new THREE.MeshStandardMaterial({ color: 0x33383f, roughness: 0.95 });
-    const ring = new THREE.MeshStandardMaterial({ color: 0x2e333a, roughness: 0.95 });
+    const asphalt = new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.98 });
+    const ring = new THREE.MeshStandardMaterial({ color: 0x1e2228, roughness: 0.98 });
     const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });
     for (const st of LOCAL_STREETS) {
-      const m = new THREE.Mesh(this.ribbon(st.path as [number, number][], st.width, 0.03), asphalt);
+      const m = new THREE.Mesh(this.ribbon(st.path as [number, number][], st.width, 0.62), asphalt);
       m.receiveShadow = true;
       this.group.add(m);
     }
     for (const a of ARTERIALS) {
-      const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.035), asphalt);
+      const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.62), asphalt);
       m.receiveShadow = true;
       this.group.add(m);
     }
-    const r = new THREE.Mesh(this.ribbon(RING_ROAD, 20, 0.04), ring);
+    const r = new THREE.Mesh(this.ribbon(RING_ROAD, 20, 0.64), ring);
     r.receiveShadow = true;
     this.group.add(r);
 
@@ -1138,12 +1157,12 @@ export class City {
     for (const road of [...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })), { path: RING_ROAD as [number, number][], width: 20 }]) {
       for (const side of [-1, 1]) {
         const walk = this.offsetPath(road.path, side * (road.width / 2 + 1.9));
-        const m = new THREE.Mesh(this.ribbon(walk, 3.6, 0.24), trotoar);
+        const m = new THREE.Mesh(this.ribbon(walk, 3.6, 0.86), trotoar);
         m.receiveShadow = true;
         this.group.add(m);
         // the kerb face itself, 12 cm proud of the walk
         const edge = this.offsetPath(road.path, side * (road.width / 2 + 0.15));
-        const k = new THREE.Mesh(this.ribbon(edge, 0.3, 0.3), kerbMat);
+        const k = new THREE.Mesh(this.ribbon(edge, 0.3, 0.92), kerbMat);
         k.receiveShadow = true;
         this.group.add(k);
       }

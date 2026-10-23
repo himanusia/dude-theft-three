@@ -139,7 +139,7 @@ scene.add(character.group);
 
 const peds = new PedManager(scene, city, 40);
 const police = new Police(scene, city, audio);
-const traffic = new Traffic(scene, city, 14);
+const traffic = new Traffic(scene, city, 10);
 
 // headlight rig that follows whichever car the player is driving
 const headlight = new THREE.SpotLight(0xfff2cc, 0, 55, 0.55, 0.45, 1.6);
@@ -152,7 +152,7 @@ let headlightAttached: Car | null = null;
 const cityCars: Car[] = [];
 // Street parking scales with the map now: 15 cars, drawn in the cheap variant (no mirrors,
 // plate or exhaust pipes) so the extra bodies cost ~12 draws instead of ~40 each.
-for (let i = 0; i < 12; i++) {
+for (let i = 0; i < 8; i++) {
   const spot = city.randomParkingSpot();
   // cycle the roster instead of picking at random: every body type has to appear on the
   // street at least once, and a random pick used to leave the map without a muscle car
