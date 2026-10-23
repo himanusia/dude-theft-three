@@ -9,6 +9,7 @@ import { buildMinimarket } from './minimarket';
 import { buildPosPolisi } from './pospolisi';
 import { buildRumahPadang } from './rumahpadang';
 import { buildMasjid } from './masjid';
+import { buildPasar } from './pasar';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
@@ -1033,6 +1034,24 @@ export class City {
       this.placeOnGround(pg, cx, cz);
       break;
     }
+    // pasar daerah, on a wide clear lot a little further out than the mosque
+    for (const r of [46, 58, 72, 88, 104, 120]) {
+      let placed = false;
+      for (let a = 0; a < 18; a++) {
+        const t = (a / 18) * Math.PI * 2;
+        const cx = sp.x + Math.cos(t) * r, cz = sp.z + 22 + Math.sin(t) * r;
+        if (this.nearLayang(cx, cz, 26)) continue;
+        if (this.mrtSpine.some((pt) => Math.hypot(pt[0] - cx, pt[1] - cz) < 30)) continue;
+        // it is 28 x 20 m: it needs more room than the shops
+        if (this.colliders.some((c) => cx > c.minX - 17 && cx < c.maxX + 17 && cz > c.minZ - 17 && cz < c.maxZ + 17)) continue;
+        const pg = buildPasar(ctx, cx, cz, Math.atan2(sp.x - cx, sp.z - cz));
+        this.placeOnGround(pg, cx, cz);
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+
     // masjid kampung, on the widest clear slot near the spawn
     for (const r of [30, 40, 52, 64, 78, 92]) {
       let placed = false;

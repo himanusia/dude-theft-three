@@ -125,3 +125,8 @@ palette (and the brief) — the stations in the photographs are grey/blue.
   Commons, **CC BY 3.0**. Used to model `src/world/masjid.ts`: timber fascia bands, white balcony
   railing, tall dark glazing, pointed arch over the entrance, stone steps, green side gate.
   Comparison: `screenshots/proof/masjid-compare.png`.
+
+- `reference/assets/pasar-ref-0.jpg` — *Traditional market of Kalibaru Wetan, Banyuwangi*, Wikimedia
+  Commons, **CC BY-SA 4.0**. Used to model `src/world/pasar.ts`: exposed timber trusses under a zinc
+  roof, green directional board with red arrows, yellow banner, trestle stall tables, plastic stools.
+  Comparison: `screenshots/proof/pasar-compare.png`.
