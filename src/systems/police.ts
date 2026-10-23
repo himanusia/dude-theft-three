@@ -82,6 +82,45 @@ export class Police {
     return this.starCount > before;
   }
 
+  /**
+   * Hand a cruiser's controls to the player. From this frame on the AI must not write
+   * steering/throttle into the car: main.ts runs updateDriving() first and police.update()
+   * second, so a single AI write would overwrite the player's input before it is rendered.
+   * The chase state is dropped as well, otherwise a queued reverse or a stale path resumes
+   * the moment the cruiser is handed back.
+   */
+  takeControl(car: any) {
+    car.owner = 'player';
+    car.steer = 0;
+    car.brakeLight = false;
+    const entry = this.cars.find((e) => e.car === car);
+    if (entry) this.resetChase(entry);
+    return entry;
+  }
+
+  /** The player got out: the cruiser is a police car again, so its AI may drive it. */
+  releaseControl(car: any) {
+    car.owner = 'ai';
+    const entry = this.cars.find((e) => e.car === car);
+    if (entry) this.resetChase(entry);
+    return entry;
+  }
+
+  /** Drop every bit of driving state an AI frame left behind. */
+  private resetChase(entry: CopEntry) {
+    const car = entry.car;
+    entry.stuck = 0;
+    entry.reverse = 0;
+    entry.timer = 0;
+    entry.points = 0;
+    entry.idx = 0;
+    entry.path.length = 0;
+    entry.aimX = car.pos.x;
+    entry.aimZ = car.pos.z;
+    entry.goalX = car.pos.x;
+    entry.goalZ = car.pos.z;
+  }
+
   clearWanted() {
     this.wanted = 0;
     this.crimeCooldown = 0;
@@ -296,6 +335,10 @@ export class Police {
 
     for (const entry of this.cars) {
       const car = entry.car;
+      // The player is at the wheel: the AI must not read this cruiser as a chase unit and must
+      // not write steering/throttle into it. updateDriving() already ran this frame, so any AI
+      // write here would fight the player's input a frame later.
+      if (car.owner === 'player') continue;
       const dx = playerPos.x - car.pos.x;
       const dz = playerPos.z - car.pos.z;
       const dist = Math.hypot(dx, dz);

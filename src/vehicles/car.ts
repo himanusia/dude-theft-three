@@ -51,6 +51,8 @@ export class Car {
   declare width: any;
   declare radius: any;
   declare aiPaused: boolean;
+  /** who is allowed to write steering/throttle: 'ai' (any system driving it) or 'player' */
+  declare owner: 'ai' | 'player';
   declare wheels: any[];
   declare headMat: any;
   declare tailMat: any;
@@ -98,6 +100,7 @@ export class Car {
     this.width = this.type === 'van' ? 2.05 : this.type === 'angkot' ? 1.74 : 1.85;
     this.radius = Math.max(this.width, this.length) * 0.42;
     this.aiPaused = false;
+    this.owner = opts.owner === 'player' ? 'player' : 'ai';
 
     this.build();
   }

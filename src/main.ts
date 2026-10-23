@@ -777,9 +777,11 @@ function exitInterior() {
 function toggleVehicle() {
   if (player.inCar) {
     const car = player.inCar;
-    if (player.inCar) player.inCar.setDriverVisible(true);
-    if (player.inCar) player.inCar.setDriverVisible(true);
-  player.inCar = null;
+    car.setDriverVisible(true);
+    player.inCar = null;
+    // hand the car back: a stolen cruiser rejoins the police pool and its AI may drive it again
+    if (car.isPolice) police.releaseControl(car);
+    else car.owner = 'ai';
     const side = new THREE.Vector3(Math.cos(car.yaw), 0, -Math.sin(car.yaw));
     player.pos.set(car.pos.x + side.x * 2.1, 0, car.pos.z + side.z * 2.1);
     for (const b of city.colliders) {
@@ -800,6 +802,10 @@ function toggleVehicle() {
   if (!near) return;
   player.inCar = near.car;
   near.car.setDriverVisible(false);
+  // Hand the controls over before the next frame. police.update() runs after updateDriving(),
+  // so a cruiser whose AI is still attached would overwrite the player's steering every frame.
+  if (near.car.isPolice) police.takeControl(near.car);
+  else near.car.owner = 'player';
   character.group.visible = false;
   camYaw = near.car.yaw + Math.PI;
   autoAlignTimer = 0;
@@ -913,6 +919,8 @@ function updateDriving(dt: number) {
   // cop cars ram the player
   for (const entry of police.cars) {
     const cop = entry.car;
+    // the cruiser you are driving is not ramming itself
+    if (cop === car) continue;
     const d = Math.hypot(cop.pos.x - car.pos.x, cop.pos.z - car.pos.z);
     const now = performance.now();
     if (d < 3.4 && Math.abs(cop.speed) > 5 && now - (entry.lastRam ?? 0) > 700) {
@@ -1199,9 +1207,10 @@ function explode(car: any) {
     addSpark(p, pick([0xffa030, 0xff5a20, 0xffd070]));
   }
   if (car === player.inCar) {
-    if (player.inCar) player.inCar.setDriverVisible(true);
-    if (player.inCar) player.inCar.setDriverVisible(true);
-  player.inCar = null;
+    car.setDriverVisible(true);
+    player.inCar = null;
+    if (car.isPolice) police.releaseControl(car);
+    else car.owner = 'ai';
     character.group.visible = true;
     hurt(45);
     hud.toast('Your car blew up', 'bad');
@@ -1393,6 +1402,7 @@ function resetCar(car: any, spot?: { pos: THREE.Vector3; yaw: number }) {
   car.wrecked = false;
   car.honk = 0;
   car.aiPaused = false;
+  car.owner = 'ai';
   car.brakeLight = false;
   car.mesh.position.set(car.pos.x, 0, car.pos.z);
   car.mesh.rotation.y = car.yaw;
