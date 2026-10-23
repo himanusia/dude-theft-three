@@ -119,14 +119,20 @@ function windowTexture(wall: any, style = 'grid') {
     };
 
     if (style === 'bands') {
-      // one floor: a narrow ribbon window with a slab line under it
-      for (let row = 0; row < h; row += 32) {
-        glass(6, row + 8, w - 12, 11);
-        ctx.fillStyle = 'rgba(0,0,0,0.10)';
-        ctx.fillRect(0, row + 27, w, 5);
-        ctx.fillStyle = 'rgba(255,255,255,0.07)';
-        ctx.fillRect(0, row + 26, w, 1.5);
+      // ONE floor per tile. The tile used to hold four 32 px rows while the mesh mapped it to a
+      // single 3.2 m floor, so the facade came out as horizontal stripes every 80 cm instead of
+      // a window band per storey.
+      // four panes with mullions, not one 8 m strip: a single opening read as a painted band
+      const panes = 4;
+      const gap = 10;
+      const pw = (w - gap * (panes + 1)) / panes;
+      for (let i = 0; i < panes; i++) {
+        glass(gap + i * (pw + gap), h * 0.28, pw, h * 0.3);
       }
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(0, h - 6, w, 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(0, h - 8, w, 2);
       return;
     }
     if (style === 'strips') {
