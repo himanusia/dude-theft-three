@@ -72,17 +72,24 @@ export function buildLayang(ctx: LayangCtx, path: [number, number][], opts: Laya
       );
     }
 
-    // piers at a fixed spacing along the span
+    // Piers stand in two rows just inside the deck edges, not down the middle: a viaduct over a
+    // live carriageway cannot have columns in the traffic lanes, and the deck still needs
+    // support across its whole width.
     const piers = Math.max(1, Math.round(len / pierEvery));
     for (let k = 0; k < piers; k++) {
       const t = (k + 0.5) / piers;
       const px = x1 + dx * t;
       const pz = z1 + dz * t;
-      const g = ctx.groundHeightAt(px, pz);
       const h = deckY - 1.2;
-      pierM.push(new THREE.Matrix4().compose(new THREE.Vector3(px, g + h / 2, pz), q, new THREE.Vector3(1, h, 1)));
-      pierCapM.push(new THREE.Matrix4().compose(new THREE.Vector3(px, g + h + 0.3, pz), q, new THREE.Vector3(1, 1, 1)));
-      ctx.colliders.push({ minX: px - 1.1, maxX: px + 1.1, minZ: pz - 1.1, maxZ: pz + 1.1, h });
+      for (const side of [-1, 1]) {
+        const qx = px + nx * side * (width / 2 - 1.9);
+        const qz = pz + nz * side * (width / 2 - 1.9);
+        const g = ctx.groundHeightAt(qx, qz);
+        pierM.push(new THREE.Matrix4().compose(new THREE.Vector3(qx, g + h / 2, qz), q, new THREE.Vector3(1, h, 1)));
+        ctx.colliders.push({ minX: qx - 0.95, maxX: qx + 0.95, minZ: qz - 0.95, maxZ: qz + 0.95, h });
+      }
+      const gCap = ctx.groundHeightAt(px, pz);
+      pierCapM.push(new THREE.Matrix4().compose(new THREE.Vector3(px, gCap + h + 0.3, pz), q, new THREE.Vector3(1, 1, 1)));
     }
   }
 
@@ -101,5 +108,5 @@ export function buildLayang(ctx: LayangCtx, path: [number, number][], opts: Laya
   add(new THREE.BoxGeometry(width, 1.1, 1), deckMat, deckM, 'layang-deck');
   add(new THREE.BoxGeometry(0.35, 1.3, 1), railMat, railM, 'layang-rail');
   add(new THREE.BoxGeometry(1.9, 1, 1.9), concrete, pierM, 'layang-pier');
-  add(new THREE.BoxGeometry(width * 0.72, 0.6, 2.2), concrete, pierCapM, 'layang-cap');
+  add(new THREE.BoxGeometry(width * 0.92, 0.7, 2.4), concrete, pierCapM, 'layang-cap');
 }

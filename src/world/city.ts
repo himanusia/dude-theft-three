@@ -887,7 +887,8 @@ export class City {
    */
   buildLayangRoad() {
     const spine = ARTERIALS[0].path as [number, number][];
-    const shifted = spine.map(([x, z]) => [x + 30, z] as [number, number]);
+    // over the artery itself, which is where a Jakarta layang actually runs
+    const shifted = spine;
     buildLayang(
       {
         group: this.group,
@@ -896,7 +897,7 @@ export class City {
         groundHeightAt: (x, z) => this.groundHeightAt(x, z),
       },
       shifted,
-      { deckY: 9.5, width: 15, pierEvery: 30 }
+      { deckY: 9.5, width: 21, pierEvery: 26 }
     );
   }
 
