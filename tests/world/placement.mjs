@@ -28,8 +28,25 @@ await new Promise((r) => setTimeout(r, 5000));
 
 const report = await page.evaluate(() => {
   const g = window.__game;
-  const T = g.THREE || window.THREE;
   const city = g.city;
+const boxOf = (o) => {
+  const g = o.geometry;
+  if (!g) return null;
+  if (!g.boundingBox) g.computeBoundingBox();
+  const bb = g.boundingBox;
+  if (!bb) return null;
+  const m = o.matrixWorld.elements;
+  let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+  for (let i=0;i<8;i++){
+    const x=i&1?bb.max.x:bb.min.x, y=i&2?bb.max.y:bb.min.y, z=i&4?bb.max.z:bb.min.z;
+    const tx=m[0]*x+m[4]*y+m[8]*z+m[12], ty=m[1]*x+m[5]*y+m[9]*z+m[13], tz=m[2]*x+m[6]*y+m[10]*z+m[14];
+    if(tx<minX)minX=tx; if(tx>maxX)maxX=tx;
+    if(ty<minY)minY=ty; if(ty>maxY)maxY=ty;
+    if(tz<minZ)minZ=tz; if(tz>maxZ)maxZ=tz;
+  }
+  return {min:{x:minX,y:minY,z:minZ},max:{x:maxX,y:maxY,z:maxZ}};
+};
+
 
   // ---- 1. named, hand-placed assets must not stand on a carriageway ---------------------
   // Uses the same road list the generator builds from, so a wider road is caught too.
@@ -62,13 +79,14 @@ const report = await page.evaluate(() => {
   // ---- 2. every elevated pier must actually reach the ground ---------------------------
   // A pier whose base is above the terrain leaves the deck hanging in the air.
   const floatingPiers = [];
-  const box = new T.Box3();
+  let box = null;
   g.scene.traverse((o) => {
     if (!o.isMesh || o.isInstancedMesh) return;
     const m = o.material;
     if (!m || Array.isArray(m)) return;
-    box.setFromObject(o);
-    const size = box.getSize(new T.Vector3());
+    box = boxOf(o);
+    if (!box) return;
+    const size = { x: box.max.x-box.min.x, y: box.max.y-box.min.y, z: box.max.z-box.min.z };
     // A pier under the elevated deck: thin, and its top lands in the deck's height band.
     // Without the top constraint this also matched minarets and sign poles eighty metres up,
     // which are not piers and made the report read like forty broken bridges.
@@ -92,8 +110,9 @@ const report = await page.evaluate(() => {
       if (!o.isMesh || o.isInstancedMesh) return;
       const m = o.material;
       if (!m || Array.isArray(m) || !m.map) return;
-      box.setFromObject(o);
-      const size = box.getSize(new T.Vector3());
+      box = boxOf(o);
+      if (!box) return;
+      const size = { x: box.max.x-box.min.x, y: box.max.y-box.min.y, z: box.max.z-box.min.z };
       if (size.y < 6 || size.y > 130) return;
       const cx = (box.min.x + box.max.x) / 2;
       const cz = (box.min.z + box.max.z) / 2;
