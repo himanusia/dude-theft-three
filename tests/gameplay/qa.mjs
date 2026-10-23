@@ -65,9 +65,9 @@ function check(name, ok, detail) {
   for (let attempt = 0; attempt < 2; attempt++) {
     await page.evaluate(() => { const g = window.__game; g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.1); });
     await sleep(400);
-    await page.keyboard.down('Shift');
+    await page.keyboard.down('ShiftLeft');
     sprinted = Math.max(sprinted, await measureRun(1.6));
-    await page.keyboard.up('Shift');
+    await page.keyboard.up('ShiftLeft');
     if (sprinted > walked * 1.15) break;
   }
   check('sprint faster than walk', sprinted > walked * 1.15, { walked: +walked.toFixed(2), sprinted: +sprinted.toFixed(2) });

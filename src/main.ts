@@ -1747,7 +1747,10 @@ function updatePickups(dt: number) {
     p.mesh.rotation.y += dt * 2.2;
     p.mesh.position.y = 1.05 + Math.sin(performance.now() * 0.003 + p.pos.x) * 0.12;
     const d = Math.hypot(p.pos.x - player.pos.x, p.pos.z - player.pos.z);
-    if (d < 1.7 && player.y < 2) {
+    // you can pick cash up from the driver's seat too: a 1.7 m radius only works on foot, and a
+    // car is 4 m long, so driving over a pickup did nothing
+    const reach = player.inCar ? 3.8 : 1.7;
+    if (d < reach && player.y < 60) {
       p.active = false;
       p.mesh.visible = false;
       p.timer = 22;
