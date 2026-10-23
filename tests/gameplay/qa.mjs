@@ -46,7 +46,7 @@ function check(name, ok, detail) {
   };
 
   // walking
-  await page.evaluate(() => { const g = window.__game; g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.1); });
+  await page.evaluate(() => { const g = window.__game; const path = g.jakartaMap.ARTERIALS[0].path; const m = path[Math.floor(path.length / 2)]; g._test.teleport(m[0], m[1] - 30); g._test.setCam(0, 0.1); });
   await sleep(400);
   const p0 = await page.evaluate(() => window.__game.player.pos.toArray());
   await hold('w', 1.4);
@@ -63,7 +63,7 @@ function check(name, ok, detail) {
   };
   let sprinted = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
-    await page.evaluate(() => { const g = window.__game; g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.1); });
+    await page.evaluate(() => { const g = window.__game; const path = g.jakartaMap.ARTERIALS[0].path; const m = path[Math.floor(path.length / 2)]; g._test.teleport(m[0], m[1] - 30); g._test.setCam(0, 0.1); });
     await sleep(400);
     await page.keyboard.down('ShiftLeft');
     sprinted = Math.max(sprinted, await measureRun(1.6));
@@ -290,7 +290,12 @@ function check(name, ok, detail) {
     const p = g.pickups.find(p => p.active);
     if (!p) return { skipped: true };
     g._test.teleport(p.pos.x, p.pos.z);
-    await new Promise(r => setTimeout(r, 400));
+    // poll for the payout instead of a fixed wait: at 4-10 fps a 400 ms sleep is two frames,
+    // which is why this check failed intermittently
+    for (let i = 0; i < 40 && g.player.cash === before; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      g._test.teleport(p.pos.x, p.pos.z);
+    }
     return { before, after: g.player.cash, active: p.active };
   });
   await sleep(400);
