@@ -246,6 +246,7 @@ export class City {
   declare shopMats: THREE.MeshStandardMaterial[];
   declare focusTarget: THREE.Vector3;
   declare daylight: number;
+  declare rootGroup: THREE.Group;
   /** shopfront rings, merged into one mesh at the end of the block pass */
   declare shopfrontGeos: THREE.BufferGeometry[];
   declare propAudit: { name: string; x: number; z: number; bottom: number }[];
@@ -503,6 +504,7 @@ export class City {
     // river, in a road corridor or on top of a landmark.
     const sites = this.planBlockSites();
     const blockLayer = this.group;
+    this.rootGroup = this.group;
     for (const site of sites) {
       const { x: cx, z: cz, size } = site;
       const district = districtAtPoint(cx, cz);
@@ -566,7 +568,6 @@ export class City {
       this.blocks.push({ x: lm.x, z: lm.z, type: 'landmark', landmark: lm.id, size: 40 });
     }
 
-    this.flushShopfronts();
     this.buildFrontage();
     this.buildTerrainFeatures();
     this.buildRoadRibbons();
@@ -1506,12 +1507,15 @@ export class City {
     const roofMat = new THREE.MeshStandardMaterial({ color: style ? style.roof : 0x4a4a4c, roughness: 0.95 });
     const mats = [sideMat, sideMat, roofMat, roofMat, sideMat, sideMat];
 
-    // shopfront plinth: collected, not added, so every building's ground floor is one draw call
+    // Shopfront plinth, added directly to the block group. The merged path produced a mesh that
+    // existed in the scene and never drew, three attempts running; a plain mesh that hangs off
+    // the same group as the body cannot fail that way. Cost: one draw call per building.
     if (h > 4 && d > 5) {
-      if (!this.shopfrontGeos) this.shopfrontGeos = [];
-      const ring = new THREE.BoxGeometry(w + 0.34, 3.2, d + 0.34);
-      ring.translate(x, 1.9, z);
-      this.shopfrontGeos.push(ring);
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(w + 0.34, 3.2, d + 0.34), shopfrontMat());
+      plinth.position.set(x, 1.9 + 0.2, z);
+      plinth.castShadow = true;
+      plinth.receiveShadow = true;
+      this.group.add(plinth);
     }
 
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats);
@@ -2377,7 +2381,7 @@ export class City {
       const mesh = new THREE.Mesh(merged, shopfrontMat());
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      this.group.add(mesh);
+      (this.rootGroup ?? this.group).add(mesh);
     }
     this.shopfrontGeos.forEach((g) => g.dispose());
     this.shopfrontGeos = [];
