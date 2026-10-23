@@ -22,7 +22,7 @@ function check(name, ok, detail) {
   const IGNORE = /ERR_CONNECTION_RESET|ERR_SOCKET_NOT_CONNECTED|ERR_ABORTED|Failed to load resource: net::/;
   page.on('console', m => { if (m.type() === 'error' && !IGNORE.test(m.text())) errs.push('console: ' + m.text()); });
 
-  await page.goto((process.env.DTA_URL || 'http://localhost:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
+  await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
   await sleep(1200);
   const boot = await page.evaluate(() => ({ game: !!window.__game, peds: window.__game.peds.peds.length, cars: window.__game.cityCars.length, colliders: window.__game.city.colliders.length }));

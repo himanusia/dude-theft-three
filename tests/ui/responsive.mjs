@@ -1,7 +1,7 @@
 /**
  * Responsive HUD harness: seven viewports, bounding-box + readability proof.
  *
- *   node tests/responsive.mjs                          # against http://localhost:8765
+ *   node tests/responsive.mjs                          # against http://127.0.0.1:8765
  *   DTA_URL=http://localhost:8795 node tests/responsive.mjs
  *
  * For every viewport it sets a rich HUD state (cash, wanted stars, ammo, long
@@ -20,7 +20,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
-const BASE = process.env.DTA_URL || 'http://localhost:8765';
+const BASE = process.env.DTA_URL || 'http://127.0.0.1:8765';
 const OUT = new URL('../../screenshots', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

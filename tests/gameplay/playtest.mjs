@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 import fs from 'node:fs';
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
-const URL_ = process.env.DTA_URL || 'http://localhost:8765';
+const URL_ = process.env.DTA_URL || 'http://127.0.0.1:8765';
 const OUT = new URL('../../screenshots', import.meta.url).pathname;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const log = [];
