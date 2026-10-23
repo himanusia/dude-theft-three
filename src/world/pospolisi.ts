@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { canvasTexture } from '../core/utils';
+import { canvasTexture, mergeStaticChildren } from '../core/utils';
 
 /**
  * Pos polisi — the neighbourhood traffic police post, after
@@ -107,6 +107,7 @@ export function buildPosPolisi(ctx: PosCtx, x: number, z: number, yaw: number, l
     box(yellow, 0.17, 0.18, 0.17, bx, 0.72, 2.6);
   }
 
+  mergeStaticChildren(g);
   ctx.group.add(g);
   ctx.audit.push({ name: 'pos-polisi', x, z, bottom: 0 });
   const halfX = Math.abs(Math.cos(yaw)) * 4.9 + Math.abs(Math.sin(yaw)) * 3.4;

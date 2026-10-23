@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { canvasTexture } from '../core/utils';
+import { canvasTexture, mergeStaticChildren } from '../core/utils';
 import type { PosCtx } from './pospolisi';
 
 /**
@@ -125,6 +125,7 @@ export function buildRumahPadang(ctx: PosCtx, x: number, z: number, yaw: number,
   // a low kerb step so the shop meets the pavement without a gap
   box(new THREE.MeshStandardMaterial({ color: 0x9d988c, roughness: 1 }), W, 0.3, D, 0, 0.15, 0);
 
+  mergeStaticChildren(g);
   ctx.group.add(g);
   ctx.audit.push({ name: 'rumah-padang', x, z, bottom: 0 });
   const hx = Math.abs(Math.cos(yaw)) * (W / 2 + 0.4) + Math.abs(Math.sin(yaw)) * (D / 2 + 0.4);

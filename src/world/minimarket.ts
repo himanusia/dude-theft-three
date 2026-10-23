@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { canvasTexture } from '../core/utils';
+import { canvasTexture, mergeStaticChildren } from '../core/utils';
 
 /**
  * Minimarket, after the reference photo of an Indomaret on Panglima Polim
@@ -155,5 +155,6 @@ export function buildMinimarket(ctx: ShopCtx, x: number, z: number, yaw: number,
   const halfX = Math.abs(Math.cos(yaw)) * (W / 2) + Math.abs(Math.sin(yaw)) * (D / 2) + 1;
   const halfZ = Math.abs(Math.sin(yaw)) * (W / 2) + Math.abs(Math.cos(yaw)) * (D / 2) + 1;
   ctx.colliders.push({ minX: x - halfX, maxX: x + halfX, minZ: z - halfZ, maxZ: z + halfZ, h: H });
+  mergeStaticChildren(g);
   return g;
 }
