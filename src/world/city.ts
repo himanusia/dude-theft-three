@@ -1118,10 +1118,13 @@ export class City {
       const d = Math.hypot(pt[0] - sp.x, pt[1] - sp.z);
       if (d < bestD) { bestD = d; mid = pt; }
     }
-    buildMrtStation(
+    const sg = buildMrtStation(
       { group: this.group, colliders: this.colliders, audit: this.propAudit, groundHeightAt: (x, z) => this.groundHeightAt(x, z) },
       mid[0], mid[1], 0
     );
+    // the station was built against y = 0 while the ground under it sits 1.2 m lower, so the
+    // stair landing hung in the air until the audit caught it
+    this.placeOnGround(sg, mid[0], mid[1]);
   }
 
   /** the MRT line this city built, so nothing else is placed underneath it */
