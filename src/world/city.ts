@@ -549,7 +549,7 @@ export class City {
           const x = x1 + (x2 - x1) * t;
           const z = z1 + (z2 - z1) * t;
           q.setFromAxisAngle(up, yaw);
-          this.dashMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.68, z), q, new THREE.Vector3(1, 1, 1)));
+          this.dashMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.075, z), q, new THREE.Vector3(1, 1, 1)));
         }
       }
     }
@@ -1137,16 +1137,16 @@ export class City {
     const ring = new THREE.MeshStandardMaterial({ color: 0x1e2228, roughness: 0.98 });
     const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });
     for (const st of LOCAL_STREETS) {
-      const m = new THREE.Mesh(this.ribbon(st.path as [number, number][], st.width, 0.62), asphalt);
+      const m = new THREE.Mesh(this.ribbon(st.path as [number, number][], st.width, 0.05), asphalt);
       m.receiveShadow = true;
       this.group.add(m);
     }
     for (const a of ARTERIALS) {
-      const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.62), asphalt);
+      const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.05), asphalt);
       m.receiveShadow = true;
       this.group.add(m);
     }
-    const r = new THREE.Mesh(this.ribbon(RING_ROAD, 20, 0.64), ring);
+    const r = new THREE.Mesh(this.ribbon(RING_ROAD, 20, 0.06), ring);
     r.receiveShadow = true;
     this.group.add(r);
 
@@ -1157,12 +1157,12 @@ export class City {
     for (const road of [...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })), { path: RING_ROAD as [number, number][], width: 20 }]) {
       for (const side of [-1, 1]) {
         const walk = this.offsetPath(road.path, side * (road.width / 2 + 1.9));
-        const m = new THREE.Mesh(this.ribbon(walk, 3.6, 0.86), trotoar);
+        const m = new THREE.Mesh(this.ribbon(walk, 3.6, 0.26), trotoar);
         m.receiveShadow = true;
         this.group.add(m);
         // the kerb face itself, 12 cm proud of the walk
         const edge = this.offsetPath(road.path, side * (road.width / 2 + 0.15));
-        const k = new THREE.Mesh(this.ribbon(edge, 0.3, 0.92), kerbMat);
+        const k = new THREE.Mesh(this.ribbon(edge, 0.3, 0.28), kerbMat);
         k.receiveShadow = true;
         this.group.add(k);
       }
@@ -2146,6 +2146,8 @@ export class City {
     // parked ojek on the kerb is enough to pin the player, which is what "walked 1 m" was
     const clearOf = (x: number, z: number) =>
       this.colliders.every((c) => x < c.minX - 3 || x > c.maxX + 3 || z < c.minZ - 3 || z > c.maxZ + 3);
+    const verge = this.snapToVerge(baseX, baseZ);
+    if (verge) return new THREE.Vector3(verge.x, 0, verge.z);
     for (const d of [3, -3, 6, -6, 9, -9, 12, -12, 18, -18, 24, -24]) {
       for (const dz of [0, 6, -6, 12, -12, 20, -20]) {
         const x = baseX + d;

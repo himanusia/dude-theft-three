@@ -125,13 +125,15 @@ function check(name, ok, detail) {
     });
     // park on the spawn road, and only where the ground is road level: a car set down on a
     // kerb plate sits 26 cm high and cannot pull away
-    const spawn = g.city.getSpawn();
-    const onRoad = (x, z) => Math.abs(g.city.groundHeightAt(x, z) - (g.city.groundHeightAt(x + 500, z + 500))) < 0.2;
-    let spot = { x: spawn.x, z: spawn.z + 20 };
-    for (const dz of [20, 40, -20, 60, -40]) {
-      const x = spawn.x;
-      const z = spawn.z + dz;
-      if (clear(x, z) && onRoad(x, z)) { spot = { x, z }; break; }
+    // the spawn point is on the pavement now (that is where a person starts), so park on the
+    // artery itself: take the centreline of the first arterial, not the player's feet
+    const path = g.jakartaMap.ARTERIALS[0].path;
+    const mid = path[Math.floor(path.length / 2)];
+    let spot = { x: mid[0], z: mid[1] };
+    for (const dz of [0, 20, -20, 40, -40, 60]) {
+      const x = mid[0] + 2;
+      const z = mid[1] + dz;
+      if (clear(x, z)) { spot = { x, z }; break; }
     }
     const ground = g.city.groundHeightAt(spot.x, spot.z);
     c.pos.set(spot.x, ground, spot.z); c.y = ground; c.vy = 0; c.yaw = 0;
