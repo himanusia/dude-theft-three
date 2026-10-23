@@ -18,6 +18,27 @@ const GROUPS = {
 const picked = process.argv.slice(2).filter((a) => GROUPS[a]);
 const groups = picked.length ? picked : ['gameplay', 'world', 'ui'];
 
+// Preflight. Every suite navigates to the same dev server, and when that server is down -- or
+// when `vite build` is rewriting dist/ underneath a run -- every suite reports
+// "Navigation timeout of 30000 ms exceeded" and the board looks like fifteen broken features
+// instead of one broken prerequisite. Say which it is, and say it once.
+const BASE = process.env.DTA_URL || 'http://127.0.0.1:8765';
+try {
+  const res = await fetch(BASE + '/', { signal: AbortSignal.timeout(4000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const html = await res.text();
+  const asset = html.match(/src="(\/assets\/[^"]+\.js)"/)?.[1];
+  if (!asset) throw new Error('index.html has no built asset reference');
+  const assetRes = await fetch(BASE + asset, { signal: AbortSignal.timeout(4000) });
+  if (!assetRes.ok) {
+    throw new Error(`index.html points at ${asset} but that file is ${assetRes.status} -- a build is probably in progress`);
+  }
+} catch (err) {
+  console.error(`PREFLIGHT FAILED against ${BASE}: ${err.message}`);
+  console.error('Start the server (python3 serve.py 8765), and do not run `npm run build` while suites run.');
+  process.exit(2);
+}
+
 const run = (file) =>
   new Promise((resolve) => {
     const child = spawn(process.execPath, [file], { stdio: ['ignore', 'pipe', 'pipe'] });
