@@ -2,6 +2,7 @@ import { POIS } from './jakartamap';
 import { buildHalte } from './halte';
 import { buildKakiLima, buildSppg, buildKoperasi, KakiLimaKind } from './kakilima';
 import { TransjakartaBus } from '../vehicles/transjakarta';
+import { buildLayang } from './layang';
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
@@ -532,6 +533,7 @@ export class City {
     this.buildDistrictProps();
     this.buildStreetLife();
     this.buildOjekBases();
+    this.buildLayangRoad();
 
     // road markings (instanced): dashed centre lines along the roads the map defines
     const mtx = new THREE.Matrix4();
@@ -876,6 +878,26 @@ export class City {
         this.placeOnGround(g, spot.x, spot.z);
       }
     }
+  }
+
+
+  /**
+   * Jakarta's elevated toll: a deck running beside Thamrin on its own piers, so the skyline has a
+   * second road level. Piers stand on the block edge, never in a traffic lane.
+   */
+  buildLayangRoad() {
+    const spine = ARTERIALS[0].path as [number, number][];
+    const shifted = spine.map(([x, z]) => [x + 30, z] as [number, number]);
+    buildLayang(
+      {
+        group: this.group,
+        colliders: this.colliders,
+        audit: this.propAudit,
+        groundHeightAt: (x, z) => this.groundHeightAt(x, z),
+      },
+      shifted,
+      { deckY: 9.5, width: 15, pierEvery: 30 }
+    );
   }
 
   buildOjekBases() {
