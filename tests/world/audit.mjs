@@ -13,7 +13,9 @@ function check(name, ok, detail) {
   const page = await b.newPage();
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));
-  await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
+  // the scene builds the whole city before the module finishes evaluating, so a loaded machine
+  // needs well over Chrome's 30 s default just to reach DOMContentLoaded
+  await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
   await sleep(1500);
   await page.click('#start-btn');

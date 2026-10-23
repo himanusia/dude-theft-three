@@ -137,6 +137,11 @@ const character = new Character({ shirt: 0xd94f4f, pants: 0x2f3a52, skin: 0xd9a2
 character.group.position.copy(player.pos);
 scene.add(character.group);
 
+// The player's own look, handed to whatever seat he climbs into. The seated body is the car's
+// (see Car.addDriver): one seated model for the player and the crowd, wearing these colours.
+const PLAYER_HAIR = 0x241a14;
+const playerLook = (): [number, number, number] => [character.skin, character.shirt, PLAYER_HAIR];
+
 const peds = new PedManager(scene, city, 40);
 const police = new Police(scene, city, audio);
 const traffic = new Traffic(scene, city, 8);
@@ -778,12 +783,64 @@ function exitInterior() {
   hud.toast('Keluar toko', 'info', 1400);
 }
 
+// ------------------------------------------------------------ people leaving a car
+/** Bodies that have just climbed out of a car, walking away from its door. */
+const driveOuts: { char: any; from: THREE.Vector3; to: THREE.Vector3; life: number }[] = [];
+
+/**
+ * Somebody was sitting in this car: put him on the road through the driver's door instead of
+ * deleting him when the player takes the seat. The walk is a short, honest one (7 m away from the
+ * car) rather than a road-following pedestrian: he leaves the scene, he does not join the crowd.
+ */
+function driveOut(car: Car) {
+  const look = car.removeDriver();
+  if (!look) return;
+  const side = new THREE.Vector3(Math.cos(car.yaw), 0, -Math.sin(car.yaw));
+  const at = car.width * 0.5 + 0.55;
+  const doorX = car.pos.x + side.x * at;
+  const doorZ = car.pos.z + side.z * at;
+  const char = new Character({ skin: look[0], shirt: look[1], pants: 0x2b2b31 });
+  char.group.position.set(doorX, city.groundHeightAt(doorX, doorZ), doorZ);
+  char.group.rotation.y = Math.atan2(side.x, side.z); // facing the way he walks
+  scene.add(char.group);
+  const toX = doorX + side.x * 7;
+  const toZ = doorZ + side.z * 7;
+  driveOuts.push({
+    char,
+    from: new THREE.Vector3(doorX, 0, doorZ), // the door he came out of, for the record
+    to: new THREE.Vector3(toX, city.groundHeightAt(toX, toZ), toZ),
+    life: 9,
+  });
+}
+
+/** Walk them off, and drop the body once it is out of the way (or its time is up). */
+function updateDriveOuts(dt: number) {
+  for (let i = driveOuts.length - 1; i >= 0; i--) {
+    const d = driveOuts[i];
+    const dx = d.to.x - d.char.group.position.x;
+    const dz = d.to.z - d.char.group.position.z;
+    const dist = Math.hypot(dx, dz);
+    d.life -= dt;
+    if (dist < 0.5 || d.life <= 0) {
+      scene.remove(d.char.group);
+      driveOuts.splice(i, 1);
+      continue;
+    }
+    const step = Math.min(dist, 2.3 * dt);
+    const x = d.char.group.position.x + (dx / dist) * step;
+    const z = d.char.group.position.z + (dz / dist) * step;
+    d.char.group.position.set(x, city.groundHeightAt(x, z), z);
+    d.char.animate(dt, 0.45);
+    plantFeet(d.char, d.char.group.position.y);
+  }
+}
+
 function toggleVehicle() {
   if (player.inCar) {
     const car = player.inCar;
-    if (player.inCar) player.inCar.setDriverVisible(true);
-    if (player.inCar) player.inCar.setDriverVisible(true);
-  player.inCar = null;
+    // the seat empties: the player walks away from the car, he does not stay in it
+    car.removeDriver();
+    player.inCar = null;
     const side = new THREE.Vector3(Math.cos(car.yaw), 0, -Math.sin(car.yaw));
     player.pos.set(car.pos.x + side.x * 2.1, 0, car.pos.z + side.z * 2.1);
     for (const b of city.colliders) {
@@ -802,14 +859,19 @@ function toggleVehicle() {
   }
   const near = nearestCar();
   if (!near) return;
-  player.inCar = near.car;
-  near.car.setDriverVisible(false);
+  const car = near.car;
+  // Whoever was in that seat gets out through the driver's door and walks off; he does not blink
+  // out of existence when the car is taken. Then the player sits in the same seat, in his own
+  // clothes, so the body you see through the windscreen is you.
+  driveOut(car);
+  player.inCar = car;
+  car.addDriver(...playerLook());
   character.group.visible = false;
-  camYaw = near.car.yaw + Math.PI;
+  camYaw = car.yaw + Math.PI;
   autoAlignTimer = 0;
   audio.play('click', { vol: 0.4 });
-  hud.toast(near.car.isPolice ? 'Police cruiser stolen' : 'Vehicle entered', near.car.isPolice ? 'bad' : 'info');
-  if (near.car.isPolice) police.addWanted(1);
+  hud.toast(car.isPolice ? 'Police cruiser stolen' : 'Vehicle entered', car.isPolice ? 'bad' : 'info');
+  if (car.isPolice) police.addWanted(1);
   if (!flags.drove) {
     flags.drove = true;
     completeObjective('drove');
@@ -1205,9 +1267,8 @@ function explode(car: any) {
     addSpark(p, pick([0xffa030, 0xff5a20, 0xffd070]));
   }
   if (car === player.inCar) {
-    if (player.inCar) player.inCar.setDriverVisible(true);
-    if (player.inCar) player.inCar.setDriverVisible(true);
-  player.inCar = null;
+    car.removeDriver();
+    player.inCar = null;
     character.group.visible = true;
     hurt(45);
     hud.toast('Your car blew up', 'bad');
@@ -1236,7 +1297,7 @@ function wasted() {
   player.pos.copy(city.getSpawn());
   player.vel.set(0, 0, 0);
   player.y = 0;
-  if (player.inCar) player.inCar.setDriverVisible(true);
+  if (player.inCar) player.inCar.removeDriver();
   player.inCar = null;
   character.group.visible = true;
   police.clearWanted();
@@ -1248,7 +1309,7 @@ function wasted() {
 function busted() {
   const fine = Math.min(player.cash, 300);
   player.cash -= fine;
-  if (player.inCar) player.inCar.setDriverVisible(true);
+  if (player.inCar) player.inCar.removeDriver();
   player.inCar = null;
   character.group.visible = true;
   player.pos.copy(city.getSpawn());
@@ -1351,7 +1412,7 @@ function applySave(data: SaveData) {
   player.vel.set(0, 0, 0);
   player.grounded = true;
   player.yaw = data.player.yaw;
-  if (player.inCar) player.inCar.setDriverVisible(true);
+  if (player.inCar) player.inCar.removeDriver();
   player.inCar = null;
   player.inInterior = null;
   player.hp = clamp(data.hp, 1, 100);
@@ -1438,6 +1499,8 @@ function resetFx() {
   fx.length = 0;
   for (const r of ragdolls) r.dispose();
   ragdolls.length = 0;
+  for (const d of driveOuts) scene.remove(d.char.group);
+  driveOuts.length = 0;
 }
 
 /**
@@ -1463,7 +1526,7 @@ function newGame() {
   player.rhythm = 0;
   player.grounded = true;
   player.lastHit = 0;
-  if (player.inCar) player.inCar.setDriverVisible(true);
+  if (player.inCar) player.inCar.removeDriver();
   player.inCar = null;
   player.inInterior = null;
   player.savedPos = undefined;
@@ -1900,6 +1963,7 @@ function update(dt: number) {
 
   updatePickups(dt);
   updateFx(dt);
+  updateDriveOuts(dt);
 
   // sun shadow + street lights follow the action
   const focus = player.inCar ? player.inCar.pos : player.pos;
@@ -2133,6 +2197,46 @@ window.__game = {
       return [...keys];
     },
     pedContext,
+    /** the look the player hands to a car seat, so a test can prove whose body is in there */
+    playerLook,
+    /** bodies that have just got out of a car: where they are, the door they came from, and how
+     *  far the lower sole is from the road under it (the same measure the world audit uses) */
+    stepOuts() {
+      const v = new THREE.Vector3();
+      return driveOuts.map((d) => {
+        let sole = null as number | null;
+        for (const leg of [d.char.legL, d.char.legR]) {
+          const shoe = leg?.children?.[1];
+          if (!shoe) continue;
+          shoe.getWorldPosition(v);
+          const low = v.y - 0.075 * (d.char.scale ?? 1);
+          sole = sole === null ? low : Math.min(sole, low);
+        }
+        return {
+          x: d.char.group.position.x,
+          y: d.char.group.position.y,
+          z: d.char.group.position.z,
+          fromX: d.from.x,
+          fromZ: d.from.z,
+          sole: sole === null ? null : +sole.toFixed(3),
+          life: +d.life.toFixed(2),
+        };
+      });
+    },
+    /** step the people leaving a car at a fixed rate, so a headless check does not measure the
+     *  tab's frame rate */
+    tickDriveOuts(frames = 60, dt = 1 / 60) {
+      for (let i = 0; i < frames; i++) updateDriveOuts(dt);
+      return driveOuts.length;
+    },
+    /** drop the people who have just left a car: a proof frame of one subject does not need a
+     *  second body walking through it */
+    clearDriveOuts() {
+      const n = driveOuts.length;
+      for (const d of driveOuts) scene.remove(d.char.group);
+      driveOuts.length = 0;
+      return n;
+    },
 
     // ---- floating geometry audit: every actor and prop must touch the ground ----
     audit() {

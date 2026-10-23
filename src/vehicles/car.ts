@@ -42,6 +42,8 @@ export class Car {
   declare driver: any;
   declare modelSize: any;
   declare driverAnchor: any;
+  /** where the wheel the driver holds sits, in the car body's own metres */
+  declare wheelAnchor: THREE.Vector3 | null;
   declare driverLook: [number, number, number] | null;
   declare roll: number;
   declare pitch: number;
@@ -87,6 +89,7 @@ export class Car {
     this.driver = null;
     this.modelSize = null;
     this.driverAnchor = null;
+    this.wheelAnchor = null;
     this.driverLook = null;
     this.y = 0;
     this.groundAt = null as null | ((x: number, z: number) => number);
@@ -106,6 +109,9 @@ export class Car {
   }
 
   build() {
+    // the wheel point belongs to the body: a rebuilt body (procedural -> loaded model) has a new
+    // shell, so the seat and the wheel are measured again from it
+    this.wheelAnchor = null;
     // A real model from the Kenney kit, when that type has one (angkot does not: it keeps the
     // reference-built body). Falls through to the procedural body if the model did not load.
     const modelId = TYPE_TO_MODEL[this.type];
@@ -365,6 +371,8 @@ export class Car {
         wheel.position.set(-0.4, 1.16, 0.02);
         wheel.rotation.x = -1.15;
         g.add(wheel);
+        // the modelled wheel is the one the driver's hands hold
+        this.wheelAnchor = wheel.position.clone();
         const column = new THREE.Mesh(rb(0.05, 0.05, 0.22, 0.01, 1), frameMat);
         column.position.set(-0.4, 1.07, L * 0.04);
         g.add(column);
@@ -570,14 +578,26 @@ export class Car {
     return clamp((gear + inGear) / gears, 0, 1);
   }
 
-  /** A driver you can see through the windscreen: head, shoulders, hair, hands on the wheel.
-   *  Cheap on purpose — three boxes and two arms, not a full character rig. */
+  /**
+   * A body you can see through the windscreen: torso, head, hair, and two arms whose hands sit on
+   * the wheel. Cheap on purpose — a handful of boxes, because every parked car in the city
+   * carries one — but it is the *only* seated body this game has, for the player as much as for
+   * the crowd, so "somebody drives that car" and "you sitting in your own car" are one model.
+   *
+   * The roof is the contract: whatever body the car got, the shell that exists is measured and the
+   * seated figure is scaled and dropped so the crown of the hair lands just under it.
+   */
   addDriver(skin = 0xe0b28d, shirt = 0x3346a8, hair = 0x241a14) {
-    this.driverLook = [skin, shirt, hair];
     if (this.driver) {
-      this.driver.visible = true;
-      return this.driver;
+      const same = !!this.driverLook && this.driverLook[0] === skin && this.driverLook[1] === shirt && this.driverLook[2] === hair;
+      if (same) {
+        this.driver.visible = true;
+        return this.driver;
+      }
+      // a different person in the same seat: rebuild, or the old clothes stay on him
+      this.removeDriver();
     }
+    this.driverLook = [skin, shirt, hair];
     const g = new THREE.Group();
     const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.85, flatShading: true });
     const shirtMat = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.9, flatShading: true });
@@ -589,7 +609,7 @@ export class Car {
       g.add(m);
       return m;
     };
-    bx(shirtMat, 0.42, 0.52, 0.28, 0, 0.26, 0);   // torso and arms as one block
+    bx(shirtMat, 0.42, 0.52, 0.28, 0, 0.26, 0);   // torso and shoulders as one block
     bx(skinMat, 0.3, 0.3, 0.3, 0, 0.62, 0.02);     // head
     bx(hairMat, 0.32, 0.09, 0.31, 0, 0.78, 0.02);  // hair cap
     // left-hand drive, sitting where the steering wheel is; a modelled body knows its own size
@@ -604,12 +624,12 @@ export class Car {
       if (child === g) continue;
       shell.expandByObject(child);
     }
+    const HAIR_TOP = 0.83;
     if (isFinite(shell.max.y)) {
       const roofLocal = shell.max.y - this.mesh.position.y;
       // Scaling the driver alone does not move his seat: the anchor is a position, not part of
       // the scaled geometry, so the head still floated 0.17 m above a sedan roof. Solve for the
       // scale, then place the anchor so the crown of the hair lands just under the shell.
-      const HAIR_TOP = 0.83;
       const want = roofLocal - 0.05;
       if (g.position.y + HAIR_TOP > want) {
         const k = Math.max(0.55, (want - 0.12) / HAIR_TOP);
@@ -617,14 +637,66 @@ export class Car {
         g.position.y = want - HAIR_TOP * k;
       }
     }
+    // Hands on the wheel. The wheel is the modelled one where the car has one (the muscle car),
+    // otherwise a point in front of the seated chest, inside the cabin: both are car-local metres,
+    // so the arms are converted into the body's own (scaled) space and reach exactly that far.
+    const k = g.scale.x;
+    const crown = g.position.y + HAIR_TOP * k;
+    if (!this.wheelAnchor) {
+      // A wheel sits under the windscreen, so the rim is placed high on the seated body (70 % of
+      // the way up to the crown) and just inside the cabin: hands at chest height disappeared
+      // behind the car's own waistline, and a wheel nobody can see is not "hands on the wheel".
+      this.wheelAnchor = new THREE.Vector3(
+        g.position.x,
+        g.position.y + (crown - g.position.y) * 0.7,
+        Math.min(g.position.z + 0.5, this.length * 0.06 + 0.1)
+      );
+    }
+    const toLocal = (v: THREE.Vector3) =>
+      new THREE.Vector3((v.x - g.position.x) / k, (v.y - g.position.y) / k, (v.z - g.position.z) / k);
+    const up = new THREE.Vector3(0, 1, 0);
+    for (const side of [-1, 1]) {
+      // each hand grips the rim a hand's width either side of the column
+      const rim = toLocal(new THREE.Vector3(this.wheelAnchor.x + side * 0.11, this.wheelAnchor.y, this.wheelAnchor.z));
+      const shoulder = new THREE.Vector3(side * 0.19, 0.46, 0.04);
+      const reach = rim.clone().sub(shoulder);
+      const dir = reach.clone().normalize();
+      const armLen = clamp(reach.length(), 0.12, 0.62);
+      const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, armLen, 0.13), shirtMat);
+      sleeve.position.copy(shoulder).addScaledVector(dir, armLen * 0.5);
+      sleeve.quaternion.setFromUnitVectors(up, dir);
+      sleeve.castShadow = true;
+      g.add(sleeve);
+      const hand = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.13, 0.11), skinMat);
+      hand.position.copy(shoulder).addScaledVector(dir, armLen);
+      hand.castShadow = true;
+      hand.userData.hand = true;
+      g.add(hand);
+    }
     g.userData.isDriver = true;
     this.mesh.add(g);
     this.driver = g;
     return g;
   }
 
-  setDriverVisible(v: boolean) {
-    if (this.driver) this.driver.visible = v;
+  /**
+   * Take the body out of the seat and hand its look back to the caller, so the same person can be
+   * put on the street (stepping out of the car) instead of blinking out of existence. Null when
+   * the seat was already empty.
+   */
+  removeDriver(): [number, number, number] | null {
+    const look = this.driverLook;
+    if (this.driver) {
+      this.mesh.remove(this.driver);
+      this.driver.traverse((o: any) => {
+        if (!o.isMesh) return;
+        o.geometry?.dispose?.();
+        o.material?.dispose?.();
+      });
+      this.driver = null;
+    }
+    this.driverLook = null;
+    return look;
   }
 
   applyDamage(n: number) {

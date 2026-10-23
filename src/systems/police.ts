@@ -11,6 +11,8 @@ import { Character } from '../actors/character';
 const NAVY = 0x22304f;
 const NAVY_DARK = 0x14161c;
 const COP_SKIN = 0xd8a273;
+/** the uniform as the seated body wears it: the same navy shirt the officer on foot has */
+const COP_LOOK: [number, number, number] = [COP_SKIN, NAVY, 0x1f3a6e];
 // built once for the whole force: two cruisers per star, two officers per cruiser
 const CAP_BAND_GEO = roundedBox(0.49, 0.14, 0.49, 0.03, 1);
 const CAP_PEAK_GEO = roundedBox(0.42, 0.05, 0.17, 0.02, 1);
@@ -162,7 +164,7 @@ export class Police {
 
     const p = new THREE.Vector3(snap.x - dz * LANE, 0, snap.z + dx * LANE);
     const car = new Car(this.scene, { type: 'police', police: true, position: p, yaw: Math.atan2(dx, dz) });
-    car.addDriver(0xd8a273, 0x1f3a6e);
+    car.addDriver(...COP_LOOK);
     const entry: CopEntry = {
       car,
       stuck: 0,
@@ -299,6 +301,32 @@ export class Police {
     return officer;
   }
 
+  /**
+   * One officer steps out through a door of this cruiser and stands on the road beside it. The
+   * body is created at the door it came out of, on the ground under it: an officer that appears at
+   * the world origin is a body nobody positioned, and an officer that is not created at all is the
+   * vanish this replaces.
+   */
+  exitOfficerFromDoor(car: any, side: number): Officer {
+    const rx = Math.cos(car.yaw);
+    const rz = -Math.sin(car.yaw);
+    const out = car.width * 0.5 + 0.55; // the width of the door, plus a pace of road
+    const x = car.pos.x + rx * side * out;
+    const z = car.pos.z + rz * side * out;
+    // facing away from the car, the way he is about to walk
+    return this.makeOfficer(x, z, Math.atan2(rx * side, rz * side));
+  }
+
+  /**
+   * The crew gets out. The body behind the wheel leaves the seat with them (the seat is empty
+   * afterwards, and the two officers who walk away are the two who were riding in it), so a
+   * stopped cruiser no longer has a driver sitting in it while its crew fights on foot.
+   */
+  exitCrew(car: any): Officer[] {
+    car.removeDriver();
+    return [-1, 1].map((side) => this.exitOfficerFromDoor(car, side));
+  }
+
   /** Nearest officer along a shot ray, so the player can actually hit them. */
   raycastOfficer(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number): { officer: Officer; dist: number } | null {
     let best: { officer: Officer; dist: number } | null = null;
@@ -371,11 +399,7 @@ export class Police {
       const canDeploy = this.wanted >= 2 && onFoot && stopped && !entry.crew && (dist < 28 || routeDone);
       if (canDeploy) {
         entry.crew = true;
-        const rx = Math.cos(car.yaw);
-        const rz = -Math.sin(car.yaw);
-        for (const side of [-1, 1]) {
-          this.makeOfficer(car.pos.x + rx * side * 1.7, car.pos.z + rz * side * 1.7, car.yaw);
-        }
+        this.exitCrew(car);
       } else if (entry.crew && (!onFoot || dist > 80 || this.wanted === 0)) {
         // the chase moved on: officers jog back and the cruiser takes over again
         entry.crew = false;
@@ -384,6 +408,8 @@ export class Police {
         for (const o of [...this.officers]) {
           if (Math.hypot(o.pos.x - car.pos.x, o.pos.z - car.pos.z) < 4.5) this.killOfficer(o);
         }
+        // ... and the crew is back in the car it belongs to, not an empty cruiser
+        if (!car.driver) car.addDriver(...COP_LOOK);
       }
 
       // straight chase when the target is close or in plain sight, otherwise follow
