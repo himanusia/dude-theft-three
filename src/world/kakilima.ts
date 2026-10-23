@@ -17,10 +17,16 @@ export interface CartCtx {
 
 const STEEL = 0xc9ced4;
 const STEEL_DARK = 0x8b939c;
+const STEEL_LIGHT = 0xe4e8ec;
+const PANEL = 0xb5bcc4;
 const HARDBOARD = 0xe0d6c2;
 const WOOD = 0x8a5f3a;
 const RED = 0xc0392b;
 const YELLOW = 0xf2c14e;
+/** wheels sit at this height off the ground; the body and the legs are measured from it */
+const WHEEL_R = 0.24;
+const WHEEL_X = 0.46;
+const LEG_X = -0.62;
 
 /** a sign plate with text, drawn on a canvas so no font file is needed */
 function signPlate(text: string, w: number, h: number, bg: string, fg = '#ffffff'): THREE.Mesh {
@@ -68,6 +74,8 @@ export function buildKakiLima(ctx: CartCtx, kind: KakiLimaKind, x: number, z: nu
 
   const steel = new THREE.MeshStandardMaterial({ color: STEEL, metalness: 0.65, roughness: 0.35 });
   const dark = new THREE.MeshStandardMaterial({ color: STEEL_DARK, metalness: 0.4, roughness: 0.6 });
+  const light = new THREE.MeshStandardMaterial({ color: STEEL_LIGHT, metalness: 0.55, roughness: 0.32 });
+  const panel = new THREE.MeshStandardMaterial({ color: PANEL, metalness: 0.35, roughness: 0.55 });
   const wood = new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.9 });
   const tarp = new THREE.MeshStandardMaterial({ color: kind === 'bakso' ? RED : kind === 'nasgor' ? YELLOW : 0x2e7d32, roughness: 0.85 });
 
@@ -79,18 +87,69 @@ export function buildKakiLima(ctx: CartCtx, kind: KakiLimaKind, x: number, z: nu
     g.add(m);
     return m;
   };
+  /** a rod between two local points: handle bars, canopy ribs, axle stays */
+  const rod = (mat: THREE.Material, a: [number, number, number], b: [number, number, number], r: number) => {
+    const pa = new THREE.Vector3(...a);
+    const pb = new THREE.Vector3(...b);
+    const len = pa.distanceTo(pb);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), mat);
+    m.position.copy(pa).add(pb).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pb.clone().sub(pa).normalize());
+    m.castShadow = true;
+    g.add(m);
+    return m;
+  };
 
-  // cart body on two wheels, chest height
-  box(steel, 1.5, 0.72, 0.86, 0, 0.62, 0);
-  box(dark, 1.54, 0.06, 0.9, 0, 1.0, 0);           // worktop
-  box(wood, 0.06, 0.5, 0.9, -0.78, 0.72, 0);       // push handle side
+  // ---- body: a panelled stainless box, not one slab --------------------------------------
+  // The tub is recessed 3 cm behind its own frame so the cart has a lit edge and a shadowed
+  // panel from any angle; a single 1.5 m box read as a fridge on wheels.
+  box(panel, 1.44, 0.66, 0.8, 0, 0.62, 0);            // inner tub
+  for (const sx of [-1, 1]) box(steel, 0.05, 0.7, 0.86, sx * 0.735, 0.62, 0);   // end posts/sides
+  for (const sz of [-1, 1]) box(steel, 1.5, 0.7, 0.04, 0, 0.62, sz * 0.43);    // long side skins
+  box(dark, 1.54, 0.06, 0.9, 0, 1.0, 0);              // worktop
+  box(light, 1.46, 0.03, 0.84, 0, 1.045, 0);          // worktop sheen
+  box(dark, 1.5, 0.05, 0.88, 0, 0.31, 0);             // bottom rail
+  // the four corner posts that make the frame read as a frame
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(dark, 0.055, 0.72, 0.055, sx * 0.735, 0.62, sz * 0.43);
+
+  // ---- wheels: the axle runs ACROSS the cart --------------------------------------------
+  // CylinderGeometry's axis is +Y. rotation.x = 90 deg turns it onto Z, which is the cart's
+  // width axis, so the wheel stands upright and rolls along the cart's length. rotation.z put
+  // the axis along X instead and every wheel faced the camera edge-on like a coin.
   for (const wz of [-0.42, 0.42]) {
-    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.1, 12), dark);
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(0.46, 0.24, wz);
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.1, 14), dark);
+    wheel.rotation.x = Math.PI / 2;
+    wheel.position.set(WHEEL_X, WHEEL_R, wz);
     wheel.castShadow = true;
     g.add(wheel);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.108, 10), light);
+    hub.rotation.x = Math.PI / 2;
+    hub.position.set(WHEEL_X, WHEEL_R, wz);
+    g.add(hub);
   }
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.92, 8), dark);
+  axle.rotation.x = Math.PI / 2;
+  axle.position.set(WHEEL_X, WHEEL_R, 0);
+  g.add(axle);
+  // axle stays back to the frame, so the wheels are attached to something
+  for (const wz of [-1, 1]) rod(dark, [WHEEL_X, WHEEL_R, wz * 0.3], [WHEEL_X - 0.12, 0.34, wz * 0.3], 0.022);
+
+  // ---- legs at the handle end: a gerobak stands on two wheels and two feet --------------
+  for (const lz of [-0.3, 0.3]) {
+    box(dark, 0.055, 0.3, 0.055, LEG_X, 0.15, lz);
+    box(panel, 0.11, 0.035, 0.11, LEG_X, 0.017, lz);   // rubber foot, flat on the ground
+  }
+
+  // ---- push handle: two raked bars and a grip you could actually hold --------------------
+  for (const hz of [-0.32, 0.32]) {
+    rod(wood, [-0.7, 0.82, hz], [-1.12, 1.06, hz * 0.82], 0.028);   // starts inside the body skin
+    rod(dark, [-0.7, 0.52, hz], [-0.98, 0.9, hz], 0.02);           // brace, so the bar is not floating
+  }
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.62, 10), dark);
+  grip.rotation.x = Math.PI / 2;
+  grip.position.set(-1.12, 1.06, 0);
+  grip.castShadow = true;
+  g.add(grip);
 
   // what is cooking, per kind
   if (kind === 'bakso') {
@@ -125,15 +184,35 @@ export function buildKakiLima(ctx: CartCtx, kind: KakiLimaKind, x: number, z: nu
     }
   }
 
-  // umbrella / tarp on a pole, the thing you actually see down the street
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.3, 8), dark);
-  pole.position.set(-0.45, 1.15, -0.5);
+  // ---- umbrella: pole, four ribs under the canopy, and stays that tie it to the cart -----
+  // The canopy used to be a cone on one pole with nothing under it, which reads as a hat
+  // hovering over the cart. An umbrella has visible ribs from the pole hub out to the rim, and
+  // the pole is strapped to the cart frame so it is not standing in the air.
+  const poleX = -0.45;
+  const poleZ = -0.5;
+  // the cone's base sits at 2.03; ribs run just UNDER that edge so they are visible, not buried
+  const rimY = 2.01;
+  const hubY = 1.9;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.34, 8), dark);
+  pole.position.set(poleX, 1.17, poleZ);
   pole.castShadow = true;
   g.add(pole);
+  box(dark, 0.09, 0.16, 0.09, poleX, 1.02, poleZ);         // clamp where the pole meets the worktop
   const canopy = new THREE.Mesh(new THREE.ConeGeometry(1.15, 0.42, 8), tarp);
-  canopy.position.set(-0.45, 2.28, -0.5);
+  canopy.position.set(poleX, 2.24, poleZ);
   canopy.castShadow = true;
   g.add(canopy);
+  // rim: an octagonal band the ribs actually end on
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(1.13, 1.15, 0.05, 8, 1, true), tarp);
+  rim.position.set(poleX, rimY, poleZ);
+  g.add(rim);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    rod(dark, [poleX, hubY, poleZ], [poleX + Math.cos(a) * 1.1, rimY + 0.02, poleZ + Math.sin(a) * 1.1], 0.016);
+  }
+  // two stays down to the cart body: the canopy is carried by the cart, not by air
+  rod(dark, [poleX, 1.5, poleZ], [poleX + 0.34, 1.02, poleZ + 0.34], 0.018);
+  rod(dark, [poleX, 1.5, poleZ], [poleX + 0.34, 1.02, poleZ - 0.34], 0.018);
 
   // sign across the front of the cart
   const sign = signPlate(NAMES[kind], 1.25, 0.28, kind === 'bakso' ? '#a5281c' : kind === 'nasgor' ? '#b98513' : '#1f5d27');
