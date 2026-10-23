@@ -1444,10 +1444,37 @@ export class City {
     ].slice(0, count);
   }
 
+  /**
+   * Facade profile per district. A ruko in Glodok is a narrow shophouse with small windows and a
+   * shutter; a tower in Thamrin is glass; Kota Tua is white plaster under clay tiles; a kampung
+   * house is plaster with a couple of small openings. One recipe for the whole city is what made
+   * every street look alike.
+   */
+  facadeProfile(district: string | null, h: number): { walls: number[]; style: 'grid' | 'strips' | 'bands'; shopfront: boolean } {
+    switch (district) {
+      case 'kotatua':
+        return { walls: [0xe9e3d3, 0xf1ece0, 0xded6c4], style: 'grid', shopfront: true };
+      case 'glodok':
+      case 'blokm':
+      case 'tanahabang':
+        return { walls: [0xd9cfb8, 0xc8b99c, 0xb8c4c9, 0xd6c2a8, 0xc9a98f], style: 'grid', shopfront: true };
+      case 'kampung':
+        return { walls: [0xdcd2bd, 0xc9c3ae, 0xe4d9c2, 0xbfae95], style: 'grid', shopfront: false };
+      case 'kemang':
+        return { walls: [0xe3d9c4, 0xd3c6ad, 0xcbbfa6], style: 'grid', shopfront: true };
+      case 'thamrin':
+      case 'monas':
+        return { walls: [0xb9c4cf, 0xa9b7c4, 0xc4cdd6], style: h > 30 ? 'bands' : 'strips', shopfront: false };
+      default:
+        return { walls: [0xd9cdb4, 0xc9d8c4, 0xe4c9c2], style: 'grid', shopfront: true };
+    }
+  }
+
   makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z, style: any = null) {
     const chromeLike = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
-    const wall = style ? pick(style.walls) : pick(WALLS);
-    const facade = style ? pick(['grid', 'bands', 'strips']) : pick(['grid', 'bands', 'strips']);
+    const prof = this.facadeProfile(districtAtPoint(x, z), h);
+    const wall = pick(prof.walls);
+    const facade = prof.style;
     const tex = windowTexture(wall, facade);
     const emis = emissiveTexture();
     const rx = Math.max(1, Math.round(w / 6.5));
