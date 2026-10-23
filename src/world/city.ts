@@ -925,6 +925,7 @@ export class City {
     // police post beside the minimarket, on the first slot that clears every collider
     for (const [dx, dz] of [[13, 0], [17, 0], [21, 0], [-13, 0], [-17, 0], [13, 12], [13, -12], [0, 16]]) {
       const cx = sp.x + dx, cz = sp.z + 22 + dz;
+      if (this.nearLayang(cx, cz, 14)) continue;
       if (this.colliders.some((c) => cx > c.minX - 8 && cx < c.maxX + 8 && cz > c.minZ - 8 && cz < c.maxZ + 8)) continue;
       const pg = buildPosPolisi(ctx, cx, cz, 0);
       this.placeOnGround(pg, cx, cz);
@@ -940,6 +941,7 @@ export class City {
     }
     for (const [dx, dz] of ring) {
       const cx = sp.x + dx, cz = sp.z + 22 + dz;
+      if (this.nearLayang(cx, cz, 16)) continue;
       if (this.colliders.some((c) => cx > c.minX - 9 && cx < c.maxX + 9 && cz > c.minZ - 9 && cz < c.maxZ + 9)) continue;
       const rg = buildRumahPadang(ctx, cx, cz, 0);
       this.placeOnGround(rg, cx, cz);
@@ -961,8 +963,26 @@ export class City {
    * Jakarta's elevated toll: a deck running beside Thamrin on its own piers, so the skyline has a
    * second road level. Piers stand on the block edge, never in a traffic lane.
    */
+  /** the deck the layang was built on, so a shop never ends up underneath it */
+  layangSpine: [number, number][] = [];
+
+  /** true when (x, z) is within `pad` metres of the elevated deck's centreline */
+  nearLayang(x: number, z: number, pad: number): boolean {
+    for (let i = 1; i < this.layangSpine.length; i++) {
+      const [x1, z1] = this.layangSpine[i - 1];
+      const [x2, z2] = this.layangSpine[i];
+      const dx = x2 - x1, dz = z2 - z1;
+      const len2 = dx * dx + dz * dz || 1;
+      let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      if (Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)) < pad) return true;
+    }
+    return false;
+  }
+
   buildLayangRoad() {
     const spine = ARTERIALS[0].path as [number, number][];
+    this.layangSpine = spine;
     // over the artery itself, which is where a Jakarta layang actually runs
     const shifted = spine;
     buildLayang(
