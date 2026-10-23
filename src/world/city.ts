@@ -2120,7 +2120,7 @@ export class City {
    * Show only the blocks near the player. The city is 2.5 km across, so drawing all of it
    * costs ~2k draw calls; at street level the player sees a 400 m bubble anyway.
    */
-  updateCulling(x: number, z: number, radius = 430) {
+  updateCulling(x: number, z: number, radius = 300) {
     const r2 = radius * radius;
     for (const b of this.blockGroups) {
       const dx = b.x - x;
