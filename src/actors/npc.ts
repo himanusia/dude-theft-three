@@ -30,8 +30,35 @@ const CROSS_CHANCE = 0.45;
 const CROSS_SPEED = 2.35; // brisk, but still a walk
 const STREET_REACH = 10; // a car this close along the crossing line holds me at the kerb
 
+// ---------------------------------------------------------------- vendors and customers
+// A gerobak is nothing without the person behind it. One vendor per cart stands on the serving
+// side, on the ground, facing the street; walkers on that pavement stop for 3-6 s beside it and
+// walk on. The numbers are budgeted: two carts can serve a customer at once, and a pedestrian
+// needs a cooldown before it queues again, so the crowd keeps moving.
+const VENDOR_RINGS = [1.5, 1.7, 1.9, 2.1, 2.3, 2.5]; // distances off the cart centre to try
+const VENDOR_ANGLES = 24; // spots sampled around each ring
+const VENDOR_HOME = 0.45; // a vendor inside this radius of its post does not walk back
+const VENDOR_RETURN_SNAP = 12; // further away than this and it is put back, not walked back
+const CUSTOMER_RANGE = 3.2; // a walker this close to a staffed cart stops for food
+const CUSTOMER_STOP_MIN = 3; // seconds at the counter
+const CUSTOMER_STOP_MAX = 6;
+const CUSTOMER_CAP = 2; // carts serving a customer at once: a queue, not a crowd
+const CUSTOMER_COOLDOWN_MIN = 25; // seconds before the same pedestrian eats again
+const CUSTOMER_COOLDOWN_MAX = 70;
+
 const _footV = new THREE.Vector3();
 const _scratch: any[] = [];
+
+/** Where a cart's vendor stands: on the ground, beside the cart, facing the street. */
+interface VendorPost {
+  i: number;
+  cart: string;
+  cx: number;
+  cz: number;
+  x: number;
+  z: number;
+  yaw: number;
+}
 
 /**
  * Sit a pedestrian so its lowest sole touches `groundY` exactly. Same reason as
@@ -221,6 +248,18 @@ export class Ped {
   declare talkPhase: number;
   declare step: number;
 
+  // a vendor belongs to a cart; a customer is a walker stopped at one
+  declare vendor: boolean;
+  declare postIndex: number;
+  declare postX: number;
+  declare postZ: number;
+  declare postYaw: number;
+  declare shopTimer: number;
+  declare shopCd: number;
+  declare shopPost: number;
+  declare shopX: number;
+  declare shopZ: number;
+
   constructor(scene: THREE.Scene, city: any, position: any, opts: any = {}) {
     this.scene = scene;
     this.city = city;
@@ -268,7 +307,7 @@ export class Ped {
     this.cowerX = 0;
     this.cowerZ = 0;
     // ~8% of the crowd has a life of its own: phone, cigarette or just looking around
-    this.idler = opts.idler ?? Math.random() < 0.08;
+    this.idler = opts.idler ?? (!opts.vendor && Math.random() < 0.08);
     this.idleKind = ['phone', 'smoke', 'look'][Math.floor(rand(0, 3))];
     this.idleTimer = this.idler ? rand(4, 9) : 0;
     this.idleCd = 0;
@@ -285,6 +324,24 @@ export class Ped {
     this.partner = null;
     this.leader = null;
     this.talkPhase = rand(0, 10);
+
+    // a vendor is placed by its cart and stays there: the post is the cart, not a pavement lane
+    this.vendor = !!opts.vendor;
+    this.postIndex = opts.vendor?.i ?? -1;
+    this.postX = opts.vendor?.x ?? this.pos.x;
+    this.postZ = opts.vendor?.z ?? this.pos.z;
+    this.postYaw = opts.vendor?.yaw ?? this.yaw;
+    this.shopTimer = 0;
+    this.shopCd = 0;
+    this.shopPost = -1;
+    this.shopX = 0;
+    this.shopZ = 0;
+    if (this.vendor) {
+      this.pos.set(this.postX, city.groundHeightAt(this.postX, this.postZ), this.postZ);
+      this.yaw = this.postYaw;
+      this.state = 'vendor';
+      this.speed = 0;
+    }
 
     this.repath();
     if (this.mgr) this.pushOut(this.mgr.grid);
@@ -418,6 +475,8 @@ export class Ped {
     this.wpCross = false;
     this.state = 'flee';
     this.stateT = 0;
+    this.shopTimer = 0; // nobody queues for bakso with a gun out
+    this.shopPost = -1;
     void mgr;
   }
 
@@ -431,6 +490,8 @@ export class Ped {
     this.state = 'witness';
     this.stateT = 0;
     this.speed = this.runSpeed;
+    this.shopTimer = 0;
+    this.shopPost = -1;
     // seeing a murder is worth a star: the nearest bystander runs for the cops
     this.witnessFired = true;
     mgr.stats.witnessEvents += 1;
@@ -545,6 +606,48 @@ export class Ped {
     this.moveBy(dx, dz, Math.min(speed, d / Math.max(dt, 1e-4)), dt);
   }
 
+  /** Turn toward a point without moving. */
+  private faceToward(x: number, z: number, dt: number) {
+    const dx = x - this.pos.x;
+    const dz = z - this.pos.z;
+    if (dx * dx + dz * dz < 1e-4) return;
+    const desired = Math.atan2(dx, dz);
+    this.yaw += angleDelta(this.yaw, desired) * clamp(dt * 5, 0, 1);
+  }
+
+  /**
+   * A walker passing a staffed cart stops for food for 3-6 s and then walks on. The stop never
+   * moves the pedestrian: it stands where the pavement already put it, so queueing can never walk
+   * a body into a wall. The manager caps how many carts serve at once, which is what keeps the
+   * pavement flowing instead of turning every cart into a crowd.
+   */
+  private tryShop(ctx: any, mgr: any) {
+    void ctx;
+    const posts: VendorPost[] | undefined = mgr?.cartPosts;
+    if (!posts || !posts.length) return;
+    for (let i = 0; i < posts.length; i++) {
+      const post = posts[i];
+      const dx = post.cx - this.pos.x;
+      const dz = post.cz - this.pos.z;
+      if (dx * dx + dz * dz > CUSTOMER_RANGE * CUSTOMER_RANGE) continue;
+      if (!mgr.cartServed(post.i)) continue; // no vendor behind the counter, no customer
+      // stand beside the vendor, not inside him: the serving spot is often the same pavement lane
+      const vx = this.pos.x - post.x;
+      const vz = this.pos.z - post.z;
+      if (vx * vx + vz * vz < 1.1 * 1.1) continue;
+      if (mgr.cartBusy(post.i)) continue; // one customer per cart
+      if (mgr.shoppers() >= CUSTOMER_CAP) return; // the street keeps moving
+      this.shopTimer = rand(CUSTOMER_STOP_MIN, CUSTOMER_STOP_MAX);
+      this.shopPost = post.i;
+      this.shopX = post.cx;
+      this.shopZ = post.cz;
+      this.speed = 0;
+      this.stuckT = 0;
+      mgr.stats.customers += 1;
+      return;
+    }
+  }
+
   /** Push the body out of building footprints; never let the centre enter one. */
   private pushOut(grid: ColliderGrid) {
     // Shop rows are rotated boxes binned as axis-aligned ones, so their colliders overlap:
@@ -595,6 +698,21 @@ export class Ped {
 
   // ------------------------------------------------------------ state updates
   private updateWalk(dt: number, ctx: any, mgr: any) {
+    // a customer at the counter: stand still beside the cart, facing it, then walk on. This runs
+    // before the pinned-harness guard because a customer's own speed is zero while it shops.
+    if (this.shopTimer > 0) {
+      this.shopTimer = Math.max(0, this.shopTimer - dt);
+      this.speed = 0;
+      this.lookT += dt;
+      this.faceToward(this.shopX, this.shopZ, dt);
+      if (this.shopTimer === 0) {
+        this.shopCd = rand(CUSTOMER_COOLDOWN_MIN, CUSTOMER_COOLDOWN_MAX);
+        this.shopPost = -1;
+        this.speed = this.walkSpeed; // the stop zeroed it; without this the walk never resumes
+        this.plan(); // carry on from where the stop interrupted the walk
+      }
+      return;
+    }
     if (this.speed < 0.05) return; // pinned by a test harness: stand still
     this.speed = this.walkSpeed;
 
@@ -607,6 +725,8 @@ export class Ped {
       this.moveToward(this.tx, this.tz, this.speed, dt);
       return;
     }
+
+    if (this.mode === 'walk' && !this.waiting && this.shopCd <= 0) this.tryShop(ctx, mgr);
 
     if (this.waiting) {
       this.waitT += dt;
@@ -803,6 +923,37 @@ export class Ped {
     this.lookT += dt;
   }
 
+  /**
+   * The vendor stays at its cart. It is not a walker with a target: the post is the cart, so the
+   * only movement allowed is walking back after something shoved or teleported it. The height is
+   * not decided here -- the caller sets pos.y from city.groundHeightAt every frame, which is what
+   * keeps a vendor on the hilly side of the map standing on the slope instead of floating.
+   */
+  private updateVendor(dt: number, mgr: any) {
+    void mgr;
+    const dx = this.postX - this.pos.x;
+    const dz = this.postZ - this.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > VENDOR_HOME) {
+      // a restart or a test harness re-seeds the crowd somewhere else: put the vendor back at the
+      // cart instead of letting it walk across half the map to get home
+      if (d > VENDOR_RETURN_SNAP) {
+        this.placeAt(this.postX, this.postZ);
+        this.yaw = this.postYaw;
+        this.speed = 0;
+        return;
+      }
+      this.speed = Math.min(this.walkSpeed, d * 1.4);
+      this.moveToward(this.postX, this.postZ, this.speed, dt);
+      return;
+    }
+    this.speed = 0;
+    this.lookT += dt;
+    // face the street, with the small sway of someone watching the road for customers
+    const desired = this.postYaw + Math.sin(this.lookT * 0.5) * 0.3;
+    this.yaw += angleDelta(this.yaw, desired) * clamp(dt * 3, 0, 1);
+  }
+
   // ------------------------------------------------------------ pose
   private pose(dt: number) {
     const ch = this.char;
@@ -829,6 +980,17 @@ export class Ped {
       legX = 0.85;
       headPitch = 0.42;
       tilt = Math.sin(this.stateT * 26) * 0.05;
+    } else if (this.state === 'vendor') {
+      // both hands over the cart: one on the ladle, watching the street
+      armX = -1.15;
+      armZ = -0.26;
+      headPitch = -0.02;
+      headYaw = Math.sin(this.lookT * 0.9) * 0.45;
+    } else if (this.shopTimer > 0) {
+      // a customer ordering: half-raised hand, eyes on the menu board
+      armX = -0.62;
+      armZ = -0.14;
+      headPitch = 0.06;
     } else if (this.state === 'idle') {
       if (this.idleKind === 'phone') {
         armX = -1.5;
@@ -893,6 +1055,7 @@ export class Ped {
     if (this.cowerTimer > 0) this.cowerTimer = Math.max(0, this.cowerTimer - dt);
     if (this.cowerCd > 0) this.cowerCd = Math.max(0, this.cowerCd - dt);
     if (this.idleTimer > 0) this.idleTimer = Math.max(0, this.idleTimer - dt);
+    if (this.shopCd > 0) this.shopCd = Math.max(0, this.shopCd - dt);
     if (this.idleCd > 0) this.idleCd = Math.max(0, this.idleCd - dt);
     else if (this.idler && this.idleTimer <= 0 && this.fleeTimer <= 0 && this.witnessTimer <= 0 && this.cowerTimer <= 0 && Math.random() < dt * 0.18) {
       this.idleTimer = rand(4, 9);
@@ -906,7 +1069,7 @@ export class Ped {
     }
     if (this.fleeTimer <= 0 && this.witnessTimer <= 0) this.checkHorror(ctx, mgr);
 
-    const next = this.fleeTimer > 0 ? 'flee' : this.witnessTimer > 0 ? 'witness' : this.cowerTimer > 0 ? 'cower' : this.idleTimer > 0 ? 'idle' : 'walk';
+    const next = this.fleeTimer > 0 ? 'flee' : this.witnessTimer > 0 ? 'witness' : this.cowerTimer > 0 ? 'cower' : this.vendor ? 'vendor' : this.idleTimer > 0 && this.shopTimer <= 0 ? 'idle' : 'walk';
     if (next !== this.state) {
       this.state = next;
       this.stateT = 0;
@@ -914,6 +1077,7 @@ export class Ped {
         this.waiting = false;
         this.mode = 'walk';
       }
+      if (next !== 'walk' && next !== 'vendor') this.shopTimer = 0;
     }
 
     const x0 = this.pos.x;
@@ -921,6 +1085,7 @@ export class Ped {
     if (this.state === 'flee') this.updateFlee(dt, ctx, mgr);
     else if (this.state === 'witness') this.updateWitness(dt, ctx, mgr);
     else if (this.state === 'cower') this.updateCower(dt);
+    else if (this.state === 'vendor') this.updateVendor(dt, mgr);
     else if (this.state === 'idle') this.updateIdle(dt);
     else this.updateWalk(dt, ctx, mgr);
 
@@ -1005,6 +1170,8 @@ export class PedManager {
   declare simTime: number;
   declare spreadTimer: number;
   declare pairs: number;
+  /** one post per food cart, in the order the city audited them */
+  declare cartPosts: VendorPost[];
 
   constructor(scene: THREE.Scene, city: any, count = 34) {
     this.scene = scene;
@@ -1025,7 +1192,8 @@ export class PedManager {
     this.grid = new ColliderGrid(city.colliders || []);
     this.strips = this.buildCrosswalkStrips();
     this.legs = this.buildPavements();
-    this.stats = { fleeEvents: 0, fleeSpreads: 0, witnessEvents: 0, witnessWanted: 0, cowerEvents: 0, crossings: 0, crossingsOnStrip: 0, crossAborts: 0 };
+    this.cartPosts = this.buildCartPosts();
+    this.stats = { fleeEvents: 0, fleeSpreads: 0, witnessEvents: 0, witnessWanted: 0, cowerEvents: 0, crossings: 0, crossingsOnStrip: 0, crossAborts: 0, customers: 0, vendors: 0 };
     this.crossingLog = [];
     this.simTime = 0;
     this.spreadTimer = 0;
@@ -1035,7 +1203,7 @@ export class PedManager {
       const spot = this.pavementPointNear(0, 0, 6, 110) || this.randomPavementPoint();
       this.peds.push(new Ped(scene, city, spot, { id: i, idler: i % 12 === 0, mgr: this }));
     }
-    // roughly a third of the crowd walks in pairs
+    // roughly a third of the crowd walks in pairs (walkers only: the vendors are not added yet)
     for (let i = 0; i + 1 < this.peds.length; i += 3) {
       const a = this.peds[i];
       const b = this.peds[i + 1];
@@ -1045,6 +1213,11 @@ export class PedManager {
       b.leader = a;
       this.pairs += 1;
     }
+    // A vendor for every cart, on top of the walking crowd. The 46-pedestrian budget the world
+    // gate enforces is the walking crowd plus these, so the street gets its shops without the
+    // count check having to grow. Added after the pairing pass: a vendor is not one half of a
+    // couple walking down the road.
+    this.restaffVendors();
     this.respawnTimer = 0;
     this.flowTimer = 0;
   }
@@ -1310,6 +1483,129 @@ export class PedManager {
     return true;
   }
 
+  /** Is this point clear of every solid collider (kerb-height clutter is stepped over)? */
+  private clearSpot(x: number, z: number) {
+    const list = this.grid.near(x, z);
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      const dx = Math.max(b.minX - x, 0, x - b.maxX);
+      const dz = Math.max(b.minZ - z, 0, z - b.maxZ);
+      if (Math.hypot(dx, dz) < RADIUS + 0.05) return false;
+    }
+    return true;
+  }
+
+  /** One post per food cart the city audited (propAudit `kaki5-*`), in audit order. */
+  buildCartPosts() {
+    const audit = this.city.propAudit || [];
+    const posts: VendorPost[] = [];
+    for (let i = 0; i < audit.length; i++) {
+      const a = audit[i];
+      if (!a || typeof a.name !== 'string' || !a.name.startsWith('kaki5-')) continue;
+      const spot = this.vendorSpot(a.x, a.z);
+      if (!spot) continue;
+      posts.push({ i: posts.length, cart: a.name, cx: a.x, cz: a.z, x: spot.x, z: spot.z, yaw: spot.yaw });
+    }
+    return posts;
+  }
+
+  /**
+   * Where the vendor stands for the cart at (cx,cz). A ring of spots is sampled around the cart and
+   * the one kept is on the ground, off the carriageway when the cart leaves any room, clear of
+   * every solid collider, and as close to the pavement lane as the cart allows: that lane is the
+   * serving side, where customers walk. The vendor faces the road they come in from.
+   *
+   * The search is geometric on purpose. The audit entry is a placement coordinate, not the cart's
+   * yaw, so "the serve side" has to be measured against the pavement and the kerb rather than read
+   * off a rotation the city never publishes.
+   */
+  vendorSpot(cx: number, cz: number) {
+    let best: any = null;
+    let fallback: any = null;
+    for (let r = 0; r < VENDOR_RINGS.length; r++) {
+      const R = VENDOR_RINGS[r];
+      for (let i = 0; i < VENDOR_ANGLES; i++) {
+        const a = (i / VENDOR_ANGLES) * Math.PI * 2;
+        const x = cx + Math.sin(a) * R;
+        const z = cz + Math.cos(a) * R;
+        if (!this.clearSpot(x, z)) continue;
+        const lane = this.nearestLeg(x, z).d;
+        const road = this.onCarriageway(x, z);
+        if (!road && (!best || lane < best.lane)) best = { x, z, lane };
+        // a cart can be parked so tight against the kerb that every ring point is asphalt: the
+        // vendor then stands in the parking lane rather than not existing at all
+        if (!fallback || lane < fallback.lane) fallback = { x, z, lane };
+      }
+    }
+    const pick = best || fallback;
+    if (!pick) return null;
+    // face the street: the lane this spot belongs to sits between the cart and the road
+    const L = this.legs[this.nearestLeg(pick.x, pick.z).leg];
+    const sx = L.uz * L.side;
+    const sz = -L.ux * L.side;
+    return { x: pick.x, z: pick.z, yaw: Math.atan2(sx, sz) };
+  }
+
+  /** Is a live, calm vendor standing behind this cart's counter? */
+  cartServed(i: number) {
+    for (let k = 0; k < this.peds.length; k++) {
+      const p = this.peds[k];
+      if (p.dead || !p.vendor || p.postIndex !== i) continue;
+      if (p.fleeTimer > 0 || p.witnessTimer > 0 || p.cowerTimer > 0) continue; // the counter is empty
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Does this cart have a vendor at all? Restocking keys off this, not off `cartServed`: a vendor
+   * that is running from a gunshot is still the cart's vendor, and hiring a second one while it
+   * comes back would leave two people behind the counter.
+   */
+  cartStaffed(i: number) {
+    for (let k = 0; k < this.peds.length; k++) {
+      const p = this.peds[k];
+      if (!p.dead && p.vendor && p.postIndex === i) return true;
+    }
+    return false;
+  }
+
+  /** Is somebody already being served there? One customer per cart, or the queue never ends. */
+  cartBusy(i: number) {
+    for (let k = 0; k < this.peds.length; k++) {
+      const p = this.peds[k];
+      if (!p.dead && p.shopTimer > 0 && p.shopPost === i) return true;
+    }
+    return false;
+  }
+
+  /** How many carts are serving a customer right now. */
+  shoppers() {
+    let n = 0;
+    for (let k = 0; k < this.peds.length; k++) {
+      const p = this.peds[k];
+      if (!p.dead && p.shopTimer > 0) n++;
+    }
+    return n;
+  }
+
+  /** Put a vendor back on every post that has none (killed, or never staffed). */
+  restaffVendors() {
+    for (let i = 0; i < this.cartPosts.length; i++) {
+      const post = this.cartPosts[i];
+      if (this.cartStaffed(post.i)) continue;
+      const y = this.city.groundHeightAt(post.x, post.z);
+      const ped = new Ped(this.scene, this.city, new THREE.Vector3(post.x, y, post.z), {
+        id: this.peds.length,
+        idler: false,
+        mgr: this,
+        vendor: post,
+      });
+      this.peds.push(ped);
+      this.stats.vendors += 1;
+    }
+  }
+
   /**
    * A spot on a pavement lane between minR and maxR from (cx,cz). This is how the crowd is
    * spawned and recycled: never a random block ring, so nobody is ever dropped inside a wall.
@@ -1452,6 +1748,8 @@ export class PedManager {
       for (let i = 0; i < this.peds.length; i++) {
         const p = this.peds[i];
         if (p.dead) continue;
+        // a vendor belongs to its cart, not to the player: recycling it would teleport the shop
+        if (p.vendor) continue;
         // never yank a body off a crossing: a teleport on the zebra both loses the crossing
         // and looks broken. The lane walk is what gets recycled.
         if (p.mode === 'cross') continue;
@@ -1469,10 +1767,16 @@ export class PedManager {
     if (this.respawnTimer > 4) {
       this.respawnTimer = 0;
       this.peds = this.peds.filter((p) => !p.dead);
-      while (this.peds.length < this.count) {
+      // the walking crowd is topped up to `count`; vendors stand outside that budget, so adding
+      // shopkeepers cannot quietly thin the pedestrians out
+      let walkers = 0;
+      for (let i = 0; i < this.peds.length; i++) if (!this.peds[i].vendor) walkers += 1;
+      while (walkers < this.count) {
         const spot = this.pavementPointNear(ctx.playerPos?.x ?? 0, ctx.playerPos?.z ?? 0, 8, 110) || this.randomPavementPoint();
         this.peds.push(new Ped(this.scene, this.city, spot, { id: this.peds.length, idler: this.peds.length % 12 === 0, mgr: this }));
+        walkers += 1;
       }
+      this.restaffVendors();
     }
   }
 
