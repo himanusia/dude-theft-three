@@ -23,7 +23,7 @@ const RADIUS = 0.4; // pedestrian body radius
 const FLEE_RADIUS = 18; // a gunshot scares everyone this close
 const SPREAD_RADIUS = 12; // a fleeing pedestrian passes panic on
 const AIM_RADIUS = 14; // someone pointing a gun at you is enough
-const DETAIL_LOD = 30; // full character detail inside this range
+const DETAIL_LOD = 40; // nose/cuff/hand detail inside this range; face and hair never drop
 const ANIM_LOD = 55; // stop animating limbs beyond this range
 const HIDE_LOD = 110;
 const CROSS_CHANCE = 0.45;
@@ -265,7 +265,10 @@ export class Ped {
     this.city = city;
     this.mgr = opts.mgr;
     this.id = opts.id ?? 0;
-    this.char = new Character({ scale: rand(0.92, 1.05) });
+    // One body in this city: the crowd is the player's own character asset, at the player's own
+    // height. The old rand(0.92, 1.05) scale made the pedestrians a family of differently-built
+    // creatures standing next to him, and only skin/shirt/hair was ever meant to vary.
+    this.char = new Character();
     this.pos = position.clone();
     this.pos.y = city.groundHeightAt(this.pos.x, this.pos.z);
     this.yaw = rand(0, Math.PI * 2);
@@ -961,6 +964,12 @@ export class Ped {
     let headPitch = 0;
     let armX: number | null = null;
     let armZ = 0;
+    // per-side overrides: the vendor works with two different arms, not a mirrored pair
+    let armLX: number | null = null;
+    let armRX: number | null = null;
+    let armZL: number | null = null;
+    let armZR: number | null = null;
+    let torsoPitch: number | null = null;
     let legX: number | null = null;
     let tilt = 0;
 
@@ -981,11 +990,19 @@ export class Ped {
       headPitch = 0.42;
       tilt = Math.sin(this.stateT * 26) * 0.05;
     } else if (this.state === 'vendor') {
-      // both hands over the cart: one on the ladle, watching the street
-      armX = -1.15;
-      armZ = -0.26;
-      headPitch = -0.02;
-      headYaw = Math.sin(this.lookT * 0.9) * 0.45;
+      // Working the cart: both arms down and forward over the counter, the right hand stirring.
+      // The old pose was armX -1.15 with the arms splayed outwards (-0.26), which is 24 degrees off
+      // horizontal — the T-pose in screenshots/proof/pedagang.png. The body also leans in now, so
+      // the reach reads as someone tending a wok rather than a mannequin beside an umbrella.
+      const stir = Math.sin(this.stateT * 2.1);
+      armX = -0.66;
+      armLX = -0.58 + stir * 0.08;
+      armRX = -0.78 - stir * 0.06;
+      armZL = 0.14;
+      armZR = -0.10;
+      torsoPitch = 0.15;
+      headPitch = 0.3;
+      headYaw = Math.sin(this.lookT * 0.8) * 0.16;
     } else if (this.shopTimer > 0) {
       // a customer ordering: half-raised hand, eyes on the menu board
       armX = -0.62;
@@ -1019,10 +1036,10 @@ export class Ped {
     }
 
     if (armX !== null) {
-      ch.armL.rotation.x = armX;
-      ch.armR.rotation.x = armX;
-      ch.armL.rotation.z = armZ;
-      ch.armR.rotation.z = -armZ;
+      ch.armL.rotation.x = armLX ?? armX;
+      ch.armR.rotation.x = armRX ?? armX;
+      ch.armL.rotation.z = armZL ?? armZ;
+      ch.armR.rotation.z = armZR ?? -armZ;
     }
     if (legX !== null) {
       ch.legL.rotation.x = legX;
@@ -1030,6 +1047,7 @@ export class Ped {
     }
     ch.head.rotation.y = headYaw;
     ch.head.rotation.x = headPitch;
+    if (torsoPitch !== null) ch.torso.rotation.x = torsoPitch;
     if (tilt !== 0) ch.torso.rotation.z = tilt;
     void dt;
   }
@@ -1539,11 +1557,10 @@ export class PedManager {
     }
     const pick = best || fallback;
     if (!pick) return null;
-    // face the street: the lane this spot belongs to sits between the cart and the road
-    const L = this.legs[this.nearestLeg(pick.x, pick.z).leg];
-    const sx = L.uz * L.side;
-    const sz = -L.ux * L.side;
-    return { x: pick.x, z: pick.z, yaw: Math.atan2(sx, sz) };
+    // Face the cart, not the street. The person serving is turned into his own gerobak, working
+    // over the pot; the previous yaw faced the lane he stands on, so the screenshots showed a man
+    // staring at the road with the back of his head to the cart he is supposed to be serving from.
+    return { x: pick.x, z: pick.z, yaw: Math.atan2(cx - pick.x, cz - pick.z) };
   }
 
   /** Is a live, calm vendor standing behind this cart's counter? */
