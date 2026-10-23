@@ -1,24 +1,68 @@
 import * as THREE from 'three';
 import { clamp } from '../core/utils';
+import { Character } from './character';
 
-const UP = new THREE.Vector3(0, 1, 0);
-const tmpQ = new THREE.Quaternion();
-const tmpV = new THREE.Vector3();
+// Place() has its own scratch vectors: the caller passes live verlet points (and its own ties
+// such as the lateral axis), so sharing a temporary between the two would overwrite an anchor
+// after it was read and put a limb somewhere else entirely.
+const pDir = new THREE.Vector3();
+const pUp = new THREE.Vector3();
+const pX = new THREE.Vector3();
+const pZ = new THREE.Vector3();
+const pM = new THREE.Matrix4();
+const tmpSpine = new THREE.Vector3();
+const tmpLateral = new THREE.Vector3();
+const tmpAnchor = new THREE.Vector3();
+const tmpHipL = new THREE.Vector3();
+const tmpHipR = new THREE.Vector3();
 
-/** Place a limb mesh between two point masses, scaled to the gap. */
-function orient(mesh: any, a: THREE.Vector3, b: THREE.Vector3, sx: number, sz: number) {
-  tmpV.subVectors(b, a);
-  const len = Math.max(0.02, tmpV.length());
-  mesh.position.addVectors(a, b).multiplyScalar(0.5);
-  tmpQ.setFromUnitVectors(UP, tmpV.normalize());
-  mesh.quaternion.copy(tmpQ);
-  mesh.scale.set(sx, len, sz);
+/**
+ * Anchors measured inside the shared character asset (`character.ts`): its trunk group sits
+ * 0.62 m below the head joint, an arm hangs 0.65 m from the shoulder to the middle of the hand and
+ * a leg reaches 0.725 m from the hip to the middle of the shoe.
+ *
+ * The verlet skeleton below is its own (0.52 m from shoulder to hand mass, 0.84 m from hips to
+ * foot mass), so each part is fitted along its own axis to the segment it rides. Fitting is what
+ * keeps a hand on the road instead of hanging through it: a limb drawn at the asset's length on a
+ * shorter segment leaves the far end 0.2 m below the mass that is supposed to rest on the ground.
+ */
+const PART = { trunkToHead: 0.62, shoulderToHand: 0.65, hipToShoe: 0.725, hipHalfWidth: 0.14 };
+
+/**
+ * Put one of the asset's own part groups on a verlet segment.
+ *
+ * The roll around the segment matters as much as its direction: `setFromUnitVectors` alone picks
+ * an arbitrary twist, which would turn the face away from the shoulders (and the officer's cap
+ * with it). The basis is built from the body's own lateral axis, so local +Z keeps pointing the
+ * way the person was facing.
+ */
+function place(part: THREE.Object3D, from: THREE.Vector3, to: THREE.Vector3, up: boolean, fit: number | null, scale: number, lateral: THREE.Vector3) {
+  pDir.subVectors(to, from);
+  const len = Math.max(0.02, pDir.length());
+  pDir.multiplyScalar(1 / len);
+  // local +Y is the way the part's own children grow: up for the trunk and the head, down (-Y)
+  // for an arm or a leg
+  pUp.copy(pDir);
+  if (!up) pUp.negate();
+  pX.copy(lateral).addScaledVector(pUp, -lateral.dot(pUp));
+  if (pX.lengthSq() < 1e-6) pX.set(1, 0, 0); // a limb lying along the lateral axis
+  pX.normalize();
+  pZ.crossVectors(pX, pUp);
+  pM.makeBasis(pX, pUp, pZ);
+  part.quaternion.setFromRotationMatrix(pM);
+  part.position.copy(from);
+  part.scale.set(scale, fit ? len / fit : scale, scale);
 }
 
 /**
  * Verlet ragdoll with a real skeleton: head, neck, chest, hips, shoulders, elbows, hands,
  * knees and feet (14 masses). Stiffening links keep the silhouette; limit links stop the
  * elbows and knees from hyper-extending, so a body folds like a body instead of a rope.
+ *
+ * The skeleton is unchanged. The meshes used to be fresh boxes coloured with skin/shirt/pants;
+ * now they are the character asset's own part groups, so the person who gets shot and the body on
+ * the road are one model: same head with its face and hair, same shirt and collar, same hands and
+ * shoes.
  *
  * Integration runs in fixed sub-steps (a 12 fps host no longer explodes the body) with
  * 8 relaxation passes per step, ground friction and building pushes.
@@ -32,23 +76,15 @@ export class Ragdoll {
   declare group: THREE.Group;
   declare points: Record<string, { p: THREE.Vector3; prev: THREE.Vector3; r: number; name: string }>;
   declare constraints: { a: any; b: any; len: number; k: number }[];
-  declare materials: any[];
-  declare headMesh: any;
-  declare neckMesh: any;
-  declare torsoMesh: any;
-  declare pelvisMesh: any;
-  declare upperArmL: any;
-  declare upperArmR: any;
-  declare foreArmL: any;
-  declare foreArmR: any;
-  declare handL: any;
-  declare handR: any;
-  declare thighL: any;
-  declare thighR: any;
-  declare shinL: any;
-  declare shinR: any;
-  declare footL: any;
-  declare footR: any;
+  /** the asset's own part groups, driven by the masses */
+  declare head: THREE.Object3D;
+  declare trunk: THREE.Object3D;
+  declare armL: THREE.Object3D;
+  declare armR: THREE.Object3D;
+  declare legL: THREE.Object3D;
+  declare legR: THREE.Object3D;
+  /** per-corpse material copies, because the asset's materials are shared city-wide */
+  declare fadeMaterials: any[];
   declare colliders: any;
   declare scale: number;
 
@@ -140,42 +176,51 @@ export class Ragdoll {
       pair('chest', 'footR', 0.6, 0.95),
     ];
 
-    const skinMat = new THREE.MeshStandardMaterial({ color: opts.skin ?? 0xe0b28d, roughness: 0.88, flatShading: true });
-    const shirtMat = new THREE.MeshStandardMaterial({ color: opts.shirt ?? 0x3346a8, roughness: 0.9, flatShading: true });
-    const pantsMat = new THREE.MeshStandardMaterial({ color: opts.pants ?? 0x2f3a52, roughness: 0.92, flatShading: true });
-    this.materials = [skinMat, shirtMat, pantsMat];
+    // The body is the city's character asset, not a second model: the same head, trunk, arms and
+    // legs the pedestrian walked in with, only re-parented onto the masses above.
+    const char = new Character({
+      skin: opts.skin ?? 0xe0b28d,
+      shirt: opts.shirt ?? 0x3346a8,
+      pants: opts.pants ?? 0x2f3a52,
+      hair: opts.hair ?? 'cap',
+      face: opts.face ?? 'calm',
+      scale,
+    });
+    // a corpse holds nothing
+    char.armR.remove(char.gun);
+    this.head = char.head;
+    this.trunk = char.torso;
+    this.armL = char.armL;
+    this.armR = char.armR;
+    this.legL = char.legL;
+    this.legR = char.legR;
+    const parts = [char.head, char.torso, char.armL, char.armR, char.legL, char.legR];
+    // add() detaches each part from its parent, so the head and the arms stop riding the trunk
+    for (const part of parts) this.group.add(part);
 
-    // unit-radius cylinder: orient() supplies the real radius through the scale
-    const cyl = (mat: any, _r: number) => new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8), mat);
-    const box = (mat: any, x: number, y: number, z: number) => new THREE.Mesh(new THREE.BoxGeometry(x, y, z), mat);
-    const addMesh = (m: any) => {
-      m.castShadow = true;
-      m.receiveShadow = true;
-      m.frustumCulled = false;
-      this.group.add(m);
-      return m;
-    };
-
-    const rs = 0.115 * scale; // arms were pencils at 0.095; the dudes are chunky
-    this.headMesh = addMesh(box(skinMat, 0.42 * scale, 0.42 * scale, 0.42 * scale));
-    this.neckMesh = addMesh(cyl(skinMat, 0.09 * scale));
-    this.torsoMesh = addMesh(box(shirtMat, 1, 1, 1));
-    this.pelvisMesh = addMesh(box(pantsMat, 1, 1, 1));
-    this.upperArmL = addMesh(cyl(shirtMat, rs));
-    this.upperArmR = addMesh(cyl(shirtMat, rs));
-    this.foreArmL = addMesh(cyl(skinMat, rs * 0.92));
-    this.foreArmR = addMesh(cyl(skinMat, rs * 0.92));
-    this.handL = addMesh(box(skinMat, 0.16 * scale, 0.16 * scale, 0.16 * scale));
-    this.handR = addMesh(box(skinMat, 0.16 * scale, 0.16 * scale, 0.16 * scale));
-    this.thighL = addMesh(cyl(pantsMat, rs * 1.3));
-    this.thighR = addMesh(cyl(pantsMat, rs * 1.3));
-    this.shinL = addMesh(cyl(pantsMat, rs * 1.1));
-    this.shinR = addMesh(cyl(pantsMat, rs * 1.1));
-    this.footL = addMesh(box(pantsMat, 0.17 * scale, 0.11 * scale, 0.28 * scale));
-    this.footR = addMesh(box(pantsMat, 0.17 * scale, 0.11 * scale, 0.28 * scale));
+    // The asset's geometries and materials are shared by the player and every pedestrian, so this
+    // body must not write to them: the fade at the end of its life gets its own material copies
+    // (same texture, same colour) and the shared geometry is never disposed.
+    const copies = new Map<any, any>();
+    for (const part of parts) {
+      part.traverse((o: any) => {
+        if (!o.isMesh) return;
+        let m = copies.get(o.material);
+        if (!m) {
+          m = o.material.clone();
+          copies.set(o.material, m);
+        }
+        o.material = m;
+        o.frustumCulled = false; // the masses move it every step, so its bounds are always stale
+        o.castShadow = true;
+        o.receiveShadow = true;
+      });
+    }
+    this.fadeMaterials = [...copies.values()];
 
     if (opts.velocity) this.applyVelocity(opts.velocity);
     this.colliders = opts.colliders ?? [];
+    this.syncMeshes();
   }
 
   applyVelocity(v: THREE.Vector3) {
@@ -268,20 +313,19 @@ export class Ragdoll {
     this.liftOutOfGround();
     if (this.life > this.maxLife - 2) {
       const f = clamp((this.maxLife - this.life) / 2, 0, 1);
-      this.group.traverse((o) => {
-        const mesh = o as THREE.Mesh;
-        if (mesh.isMesh) {
-          const mat = mesh.material as THREE.Material & { opacity: number };
+      for (const mat of this.fadeMaterials) {
+        if (!mat.transparent) {
           mat.transparent = true;
-          mat.opacity = f;
+          mat.needsUpdate = true;
         }
-      });
+        mat.opacity = f;
+      }
     }
     return this.life < this.maxLife;
   }
 
   /**
-   * A mass rests at its radius, but a limb is a cylinder: lying at an angle its flank digs
+   * A mass rests at its radius, but a limb is not a sphere: lying at an angle its flank digs
    * below that radius, which is the "sunk into the road" look. Measure the real meshes and
    * lift the whole body by the deepest penetration instead of guessing per-point offsets.
    */
@@ -295,11 +339,11 @@ export class Ragdoll {
     const ground = this.groundAt ? this.groundAt(cx, cz) : 0;
     let lowest = ground;
     const box = Ragdoll.box || (Ragdoll.box = new THREE.Box3());
-    for (const child of this.group.children) {
-      const mesh = child as THREE.Mesh;
-      if (!mesh.isMesh) continue;
-      mesh.updateMatrixWorld();
-      box.setFromObject(mesh);
+    for (const part of this.group.children) {
+      if (!(part as THREE.Object3D).visible) continue;
+      part.updateMatrixWorld(true);
+      box.setFromObject(part);
+      if (box.isEmpty()) continue;
       if (box.min.y < lowest) lowest = box.min.y;
     }
     if (lowest < ground - 0.001) {
@@ -317,37 +361,38 @@ export class Ragdoll {
   syncMeshes() {
     const P = this.points;
     const s = this.scale;
-    this.headMesh.position.copy(P.head.p);
-    orient(this.neckMesh, P.neck.p, P.head.p, 0.09 * s, 0.09 * s);
-    orient(this.torsoMesh, P.hips.p, P.chest.p, 0.46 * s, 0.29 * s);
-    this.pelvisMesh.position.copy(P.hips.p);
-    this.pelvisMesh.scale.set(0.42 * s, 0.2 * s, 0.3 * s);
 
-    orient(this.upperArmL, P.shoulderL.p, P.elbowL.p, 0.13 * s, 0.13 * s);
-    orient(this.upperArmR, P.shoulderR.p, P.elbowR.p, 0.13 * s, 0.13 * s);
-    orient(this.foreArmL, P.elbowL.p, P.handL.p, 0.115 * s, 0.115 * s);
-    orient(this.foreArmR, P.elbowR.p, P.handR.p, 0.115 * s, 0.115 * s);
-    this.handL.position.copy(P.handL.p);
-    this.handR.position.copy(P.handR.p);
+    // the body's own lateral axis, which every part's roll is aligned to
+    tmpLateral.subVectors(P.shoulderR.p, P.shoulderL.p);
+    if (tmpLateral.lengthSq() < 1e-6) tmpLateral.set(1, 0, 0);
+    tmpLateral.normalize();
 
-    orient(this.thighL, P.hips.p, P.kneeL.p, 0.19 * s, 0.19 * s);
-    orient(this.thighR, P.hips.p, P.kneeR.p, 0.19 * s, 0.19 * s);
-    orient(this.shinL, P.kneeL.p, P.footL.p, 0.155 * s, 0.155 * s);
-    orient(this.shinR, P.kneeR.p, P.footR.p, 0.155 * s, 0.155 * s);
-    this.footL.position.copy(P.footL.p);
-    this.footR.position.copy(P.footR.p);
-    this.footL.position.y += 0.02 * s;
-    this.footR.position.y += 0.02 * s;
+    // The trunk is rigid in the asset, so it hangs off the neck joint - where the asset puts its
+    // head - and points down the spine. That keeps the asset's own shoulders (0.52 m below its
+    // head joint) on the shoulder masses instead of somewhere inside the chest.
+    tmpSpine.subVectors(P.neck.p, P.hips.p);
+    if (tmpSpine.lengthSq() < 1e-6) tmpSpine.subVectors(P.chest.p, P.hips.p);
+    tmpSpine.normalize();
+    tmpAnchor.copy(P.neck.p).addScaledVector(tmpSpine, -PART.trunkToHead * s);
+    place(this.trunk, tmpAnchor, P.neck.p, true, null, s, tmpLateral);
+
+    // the skull sits 0.22 m up the head joint, which is the neck-to-head mass distance
+    place(this.head, P.neck.p, P.head.p, true, null, s, tmpLateral);
+    // the asset hangs its arms and legs down its own -Y, and both are fitted to their segment
+    place(this.armL, P.shoulderL.p, P.handL.p, false, PART.shoulderToHand, s, tmpLateral);
+    place(this.armR, P.shoulderR.p, P.handR.p, false, PART.shoulderToHand, s, tmpLateral);
+    // the legs leave the pelvis at the asset's own hip width, not from the centre line, or the
+    // two thighs overlap into one blob
+    tmpHipL.copy(P.hips.p).addScaledVector(tmpLateral, -PART.hipHalfWidth * s);
+    tmpHipR.copy(P.hips.p).addScaledVector(tmpLateral, PART.hipHalfWidth * s);
+    place(this.legL, tmpHipL, P.footL.p, false, PART.hipToShoe, s, tmpLateral);
+    place(this.legR, tmpHipR, P.footR.p, false, PART.hipToShoe, s, tmpLateral);
   }
 
   dispose() {
-    this.group.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (mesh.isMesh) {
-        mesh.geometry?.dispose();
-        (mesh.material as THREE.Material)?.dispose?.();
-      }
-    });
+    // The geometries and the texture maps belong to the shared character asset; only the material
+    // copies made for this corpse are this body's own.
+    for (const mat of this.fadeMaterials) mat.dispose?.();
     this.scene.remove(this.group);
   }
 }
