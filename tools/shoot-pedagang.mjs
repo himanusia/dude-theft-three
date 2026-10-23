@@ -185,11 +185,13 @@ try {
     const perp = { x: sz, z: -sx };
     const target = new V3(mid.x, 1.05, mid.z);
 
+    // Both sides of the pair: since the vendor is turned into his cart, the street side shows his
+    // back. The cart side shows the working pose, which is the thing this shot has to prove.
     const rows = [];
-    for (const dist of [3.8, 4.4, 5.0, 5.6]) {
+    for (const facing of [1, -1]) for (const dist of [3.8, 4.4, 5.0, 5.6]) {
       for (const side of [-1.4, 0, 1.4]) {
-        const cx = mid.x + sx * dist + perp.x * side;
-        const cz = mid.z + sz * dist + perp.z * side;
+        const cx = mid.x + sx * dist * facing + perp.x * side;
+        const cz = mid.z + sz * dist * facing + perp.z * side;
         const ground = g.city.groundHeightAt(cx, cz);
         for (const eye of [1.6, 2.0, 2.4]) {
           const cy = ground + eye;
@@ -213,13 +215,18 @@ try {
             customer: { x: +cr.x.toFixed(1), y: +cr.y.toFixed(1), w: +cr.w.toFixed(1), h: +cr.h.toFixed(1) },
             cart: { x: +kr.x.toFixed(1), y: +kr.y.toFixed(1), w: +kr.w.toFixed(1), h: +kr.h.toFixed(1) },
             // the bodies have to be big enough to read before measuring them is worth anything
+            // both bodies have to be big enough on screen to judge a pose, not just to measure
             size: Math.min(vr.h, cr.h),
+            big: Math.min(vr.h, cr.h) >= 240,
           });
         }
       }
     }
-    rows.sort((a, b) => b.size - a.size);
-    const shortlist = rows.slice(0, 8);
+    // A pose cannot be judged from a 150 px figure, so prefer framings where both bodies are at
+    // least 240 px tall; fall back to the largest available only when nothing that big fits.
+    const bigRows = rows.filter((r) => r.big);
+    bigRows.sort((a, b) => b.size - a.size);
+    const shortlist = (bigRows.length ? bigRows : rows.sort((a, b) => b.size - a.size)).slice(0, 8);
     for (const row of shortlist) {
       cam.position.set(row.cam[0], row.cam[1], row.cam[2]);
       cam.lookAt(new V3(row.target[0], row.target[1], row.target[2]));
@@ -274,6 +281,19 @@ try {
       shopTimer: +shopper.shopTimer.toFixed(2),
       customerSpeed: shopper.speed,
       vendorState: vendor.state,
+      // how far the vendor is turned away from his own cart: 0 deg means he faces it square on
+      vendorFacesCartDeg: +(
+        (Math.acos(
+          Math.max(-1, Math.min(1,
+            (Math.sin(vendor.yaw) * (post.cx - vendor.pos.x) + Math.cos(vendor.yaw) * (post.cz - vendor.pos.z)) /
+              (Math.hypot(post.cx - vendor.pos.x, post.cz - vendor.pos.z) || 1)
+          ))
+        ) * 180) / Math.PI
+      ).toFixed(1),
+      vendorArms: {
+        left: [+vendor.char.armL.rotation.x.toFixed(2), +vendor.char.armL.rotation.z.toFixed(2)],
+        right: [+vendor.char.armR.rotation.x.toFixed(2), +vendor.char.armR.rotation.z.toFixed(2)],
+      },
       vendorPostGap: +Math.hypot(vendor.pos.x - vendor.postX, vendor.pos.z - vendor.postZ).toFixed(2),
       player: [+g.player.pos.x.toFixed(1), +g.player.pos.z.toFixed(1)],
       candidates: rows.length,
