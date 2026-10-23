@@ -139,7 +139,7 @@ scene.add(character.group);
 
 const peds = new PedManager(scene, city, 40);
 const police = new Police(scene, city, audio);
-const traffic = new Traffic(scene, city, 10);
+const traffic = new Traffic(scene, city, 8);
 
 // headlight rig that follows whichever car the player is driving
 const headlight = new THREE.SpotLight(0xfff2cc, 0, 55, 0.55, 0.45, 1.6);

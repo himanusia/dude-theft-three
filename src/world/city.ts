@@ -1214,11 +1214,25 @@ export class City {
       return;
     }
     const area = size - 9;
-    // a 140 m block is four or five city lots, not one: scale the lot count with the block so
-    // the street wall stays dense instead of turning into a few warehouses
-    const wanted = Math.round(area / 24);
-    const count = clamp(wanted, style.lots[0], style.lots[1] + 12);
-    const cells = count === 1 ? [[0, 0, area, area]] : this.splitLots(area, count, cx, cz);
+    // A block is a grid of lots with alleys between them, not three boxes on an empty plate.
+    // The plate used to read as a plaza because the lots were 25 m wide; 17-19 m lots with a
+    // 3.4 m gang give the fabric a street wall and still leave the block walkable.
+    const n = Math.max(2, Math.round(area / 18));
+    const alley = 3.4;
+    const cell = (area - alley * (n - 1)) / n;
+    const cells: [number, number, number, number][] = [];
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        // one lot in eight is left empty: a courtyard, a parking bay, a warung yard
+        if (Math.random() < 0.12) continue;
+        cells.push([
+          -area / 2 + cell / 2 + i * (cell + alley),
+          -area / 2 + cell / 2 + j * (cell + alley),
+          cell,
+          cell,
+        ]);
+      }
+    }
     for (const [ox, oz, w, d] of cells) {
       const [lo, hi] = style.heights;
       const h = rand(lo, hi);
@@ -2146,7 +2160,7 @@ export class City {
    * Show only the blocks near the player. The city is 2.5 km across, so drawing all of it
    * costs ~2k draw calls; at street level the player sees a 400 m bubble anyway.
    */
-  updateCulling(x: number, z: number, radius = 300) {
+  updateCulling(x: number, z: number, radius = 220) {
     const r2 = radius * radius;
     for (const b of this.blockGroups) {
       const dx = b.x - x;
