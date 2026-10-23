@@ -6,6 +6,7 @@ import { buildLayang } from './layang';
 import { buildKrl } from './krl';
 import { buildMinimarket } from './minimarket';
 import { buildPosPolisi } from './pospolisi';
+import { buildRumahPadang } from './rumahpadang';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
@@ -927,6 +928,21 @@ export class City {
       if (this.colliders.some((c) => cx > c.minX - 8 && cx < c.maxX + 8 && cz > c.minZ - 8 && cz < c.maxZ + 8)) continue;
       const pg = buildPosPolisi(ctx, cx, cz, 0);
       this.placeOnGround(pg, cx, cz);
+      break;
+    }
+    // rumah makan Padang, same street, first slot that clears every collider
+    const ring: [number, number][] = [];
+    for (const r of [26, 34, 42, 50, 60, 72]) {
+      for (let a = 0; a < 12; a++) {
+        const t = (a / 12) * Math.PI * 2;
+        ring.push([Math.round(Math.cos(t) * r), Math.round(Math.sin(t) * r)]);
+      }
+    }
+    for (const [dx, dz] of ring) {
+      const cx = sp.x + dx, cz = sp.z + 22 + dz;
+      if (this.colliders.some((c) => cx > c.minX - 9 && cx < c.maxX + 9 && cz > c.minZ - 9 && cz < c.maxZ + 9)) continue;
+      const rg = buildRumahPadang(ctx, cx, cz, 0);
+      this.placeOnGround(rg, cx, cz);
       break;
     }
 
@@ -2487,12 +2503,14 @@ export class City {
     const edge = WORLD_HALF;
     for (let i = 0; i < 9; i++) {
       const x = -edge + 200 + i * (edge * 2 - 400) / 8 + rand(-70, 70);
-      const z = edge - rand(40, 260);
-      const r = rand(220, 420);
-      const h = rand(55, 130);
+      const r = rand(150, 260);
+      const h = rand(50, 100);
+      // outside the last block, not on top of it: a 400 m cone centred at the edge
+      // reaches 400 m into town and reads as a green slab hanging over the street
+      const z = edge + r * rand(0.55, 0.95);
       const geo = new THREE.ConeGeometry(r, h, 7, 1);
       const hill = new THREE.Mesh(geo, i % 3 === 0 ? hillMatFar : hillMat);
-      hill.position.set(x, terrainHeight(x, z) + h / 2 - 8, z);
+      hill.position.set(x, terrainHeight(x, Math.min(z, edge - 1)) + h / 2 - 10, z);
       hill.rotation.y = rand(0, Math.PI);
       hill.scale.set(1, 1, rand(0.6, 1.1));
       this.group.add(hill);
