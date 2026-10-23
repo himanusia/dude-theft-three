@@ -8,6 +8,7 @@ import { buildKrl } from './krl';
 import { buildMinimarket } from './minimarket';
 import { buildPosPolisi } from './pospolisi';
 import { buildRumahPadang } from './rumahpadang';
+import { buildMasjid } from './masjid';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
@@ -1032,6 +1033,23 @@ export class City {
       this.placeOnGround(pg, cx, cz);
       break;
     }
+    // masjid kampung, on the widest clear slot near the spawn
+    for (const r of [30, 40, 52, 64, 78, 92]) {
+      let placed = false;
+      for (let a = 0; a < 16; a++) {
+        const t = (a / 16) * Math.PI * 2;
+        const cx = sp.x + Math.cos(t) * r, cz = sp.z + 22 + Math.sin(t) * r;
+        if (this.nearLayang(cx, cz, 24)) continue;
+        if (this.mrtSpine.some((pt) => Math.hypot(pt[0] - cx, pt[1] - cz) < 26)) continue;
+        if (this.colliders.some((c) => cx > c.minX - 11 && cx < c.maxX + 11 && cz > c.minZ - 11 && cz < c.maxZ + 11)) continue;
+        const mg = buildMasjid(ctx, cx, cz, Math.atan2(sp.x - cx, sp.z - cz));
+        this.placeOnGround(mg, cx, cz);
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+
     // rumah makan Padang, same street, first slot that clears every collider
     const ring: [number, number][] = [];
     for (const r of [26, 34, 42, 50, 60, 72]) {

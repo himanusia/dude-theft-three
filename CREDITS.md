@@ -120,3 +120,8 @@ palette (and the brief) — the stations in the photographs are grey/blue.
   Commons, **CC BY-SA 4.0**. Used for the ground-floor shop-row texture in `src/world/city.ts`
   (banner fascias, striped awnings, mixed shutters and lit glazing, air-con units, kerb grime).
   Comparison: `screenshots/proof/ruko-compare.png`.
+
+- `reference/assets/masjid-ref-0.jpg` — *Masjid Al-Istiqomah, Kampung Melayu*, panoramio/Wikimedia
+  Commons, **CC BY 3.0**. Used to model `src/world/masjid.ts`: timber fascia bands, white balcony
+  railing, tall dark glazing, pointed arch over the entrance, stone steps, green side gate.
+  Comparison: `screenshots/proof/masjid-compare.png`.
