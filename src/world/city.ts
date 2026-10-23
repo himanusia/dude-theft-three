@@ -3,6 +3,7 @@ import { buildHalte } from './halte';
 import { buildKakiLima, buildSppg, buildKoperasi, KakiLimaKind } from './kakilima';
 import { TransjakartaBus } from '../vehicles/transjakarta';
 import { buildLayang } from './layang';
+import { buildKrl } from './krl';
 import * as THREE from 'three';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
@@ -564,6 +565,7 @@ export class City {
     this.buildStreetLife();
     this.buildOjekBases();
     this.buildLayangRoad();
+    this.buildKrlLine();
 
     // road markings (instanced): dashed centre lines along the roads the map defines
     const mtx = new THREE.Matrix4();
@@ -928,6 +930,28 @@ export class City {
       },
       shifted,
       { deckY: 9.5, width: 21, pierEvery: 26 }
+    );
+  }
+
+
+  /**
+   * The commuter line: a viaduct crossing the city east to west, above the rooftops, with one
+   * station where the deck meets the kampung. This is the structure that makes the skyline read
+   * as Jakarta rather than as a set of boxes.
+   */
+  buildKrlLine() {
+    const z = -300;
+    const path: [number, number][] = [];
+    for (let x = -820; x <= 820; x += 105) path.push([x, z + Math.sin(x / 260) * 26]);
+    buildKrl(
+      {
+        group: this.group,
+        colliders: this.colliders,
+        audit: this.propAudit,
+        groundHeightAt: (x, zz) => this.groundHeightAt(x, zz),
+      },
+      path,
+      { y: 12.5, station: true, stationName: 'STASIUN MANGGIS' }
     );
   }
 
