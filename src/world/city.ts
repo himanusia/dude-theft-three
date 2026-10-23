@@ -914,13 +914,12 @@ export class City {
         this.placeOnGround(g, spot.x, spot.z);
       }
     }
-    for (const poi of POIS) {
-      if (poi.kind !== 'minimarket') continue;
-      const spot = this.snapToVerge(poi.x, poi.z - 26);
-      if (!spot) continue;
-      const g = buildMinimarket(ctx, spot.x, spot.z, spot.yaw + Math.PI, poi.name);
-      this.placeOnGround(g, spot.x, spot.z);
-    }
+    // One minimarket on a fixed, verifiable site: 22 m up the spawn street, facing back at the
+    // player. Automatic placement put this asset in the wrong place five times, so the first one
+    // is placed by hand and photographed before anything else uses snapToVerge.
+    const sp = this.getSpawn();
+    const mg = buildMinimarket(ctx, sp.x, sp.z + 22, Math.PI, 'INDOMERET');
+    this.placeOnGround(mg, sp.x, sp.z + 22);
 
     const kemang = POIS.find((p) => p.kind === 'minimarket');
     if (kemang) {
