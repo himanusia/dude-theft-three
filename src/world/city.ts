@@ -1252,15 +1252,59 @@ export class City {
    * Hero assets were placed relative to getSpawn(), and the spawn sits on the arterial
    * centreline, so six of them ended up standing in the road. This projects the point onto the
    * nearest road and moves it to the far side of the kerb, which is where a building belongs.
+   *
+   * `pushOffRoadOnce` resolves one road per pass, so at a junction it can hand the point from one
+   * carriageway to the other and back: after six passes the masjid still stood 4.9 m from the
+   * centreline of Gatot Subroto, i.e. in the inside lane, and `tests/world/placement.mjs` caught
+   * it only on the loads where the random city put it there. So the pass loop now ends with a
+   * proof instead of a hope: if the point is still on tarmac, search outward for the nearest slot
+   * that clears every road in the map's list, and only then hand it back.
    */
   pushOffRoad(x: number, z: number, extra: number): { x: number; z: number } {
     let px = x, pz = z;
     for (let pass = 0; pass < 6; pass++) {
       const moved = this.pushOffRoadOnce(px, pz, extra);
-      if (moved.x === px && moved.z === pz) return { x: px, z: pz };
+      if (moved.x === px && moved.z === pz) break;
       px = moved.x; pz = moved.z;
     }
+    if (!this.onAnyRoad(px, pz, extra)) return { x: px, z: pz };
+    // still on tarmac: the slot is the nearest point that is not (the caller asked for `extra`
+    // metres of clearance, so the rings start at that radius and walk outward)
+    for (const r of [extra + 4, extra + 10, extra + 18, extra + 28, extra + 40]) {
+      let best: { x: number; z: number; d: number } | null = null;
+      for (let a = 0; a < 24; a++) {
+        const t = (a / 24) * Math.PI * 2;
+        const qx = px + Math.cos(t) * r;
+        const qz = pz + Math.sin(t) * r;
+        if (this.onAnyRoad(qx, qz, extra)) continue;
+        const d = Math.hypot(qx - px, qz - pz);
+        if (!best || d < best.d) best = { x: qx, z: qz, d };
+      }
+      if (best) return { x: best.x, z: best.z };
+    }
     return { x: px, z: pz };
+  }
+
+  /** is (x,z) on any carriageway, with `margin` metres of kerb clearance? */
+  onAnyRoad(x: number, z: number, margin = 0): boolean {
+    const roads: { path: [number, number][]; half: number }[] = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], half: a.width / 2 })),
+      { path: RING_ROAD as [number, number][], half: 10 },
+      ...LOCAL_STREETS.map((l) => ({ path: l.path as [number, number][], half: l.width / 2 })),
+    ];
+    for (const { path, half } of roads) {
+      const need = half + margin;
+      for (let i = 1; i < path.length; i++) {
+        const [x1, z1] = path[i - 1];
+        const [x2, z2] = path[i];
+        const dx = x2 - x1, dz = z2 - z1;
+        const l2 = dx * dx + dz * dz || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / l2;
+        t = Math.max(0, Math.min(1, t));
+        if (Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)) < need) return true;
+      }
+    }
+    return false;
   }
 
   private pushOffRoadOnce(x: number, z: number, extra: number): { x: number; z: number } {
@@ -1678,10 +1722,14 @@ export class City {
     const sp = this.getSpawn();
     const stairClear = (x: number, z: number) =>
       this.colliders.every((c) => x < c.minX - 6 || x > c.maxX + 6 || z + 20 < c.minZ - 6 || z + 26 > c.maxZ + 6);
+    // and it must not stand in a carriageway: the line runs 5.5 m past the arterial edge, which at
+    // a crossing with another arterial puts the hall in its inside lane (the placement audit found
+    // it 1 m into Grogol-Pluit on a third of the random loads)
+    const candidates = shifted.filter((pt) => stairClear(pt[0], pt[1]) && !this.onAnyRoad(pt[0], pt[1], 1.5));
     let mid = shifted[0], bestD = Infinity;
-    for (const pt of shifted) {
+    for (const pt of candidates.length ? candidates : shifted) {
       const d = Math.hypot(pt[0] - sp.x, pt[1] - sp.z);
-      if (d < bestD && stairClear(pt[0], pt[1])) { bestD = d; mid = pt; }
+      if (d < bestD) { bestD = d; mid = pt; }
     }
     const sg = buildMrtStation(
       { group: this.group, colliders: this.colliders, audit: this.propAudit, groundHeightAt: (x, z) => this.groundHeightAt(x, z) },
