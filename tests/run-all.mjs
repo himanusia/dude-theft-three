@@ -10,7 +10,7 @@ import { readdirSync } from 'node:fs';
 
 const GROUPS = {
   gameplay: ['qa', 'playtest', 'weapons-smoke', 'fps'],
-  world: ['audit', 'floats', 'drivers', 'drift', 'police-path', 'npc-behavior', 'roadnav'],
+  world: ['audit', 'floats', 'drivers', 'drift', 'police-path', 'npc-behavior', 'roadnav', 'overlap'],
   ui: ['interior', 'touch', 'responsive', 'persistence'],
   visual: ['proof-shots', 'ragdoll-shots', 'bgm'],
 };
@@ -27,11 +27,15 @@ try {
   const res = await fetch(BASE + '/', { signal: AbortSignal.timeout(4000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
-  const asset = html.match(/src="(\/assets\/[^"]+\.js)"/)?.[1];
+  // Vite emits <script type="module" crossorigin src="/assets/index-xxxx.js">, so the src
+  // attribute is not immediately inside the tag: match the attribute, not the tag prefix
+  const asset = html.match(/src="([^"]*\/assets\/[^"]+\.js)"/)?.[1];
   if (!asset) throw new Error('index.html has no built asset reference');
-  const assetRes = await fetch(BASE + asset, { signal: AbortSignal.timeout(4000) });
+  // the reference may be absolute, root-relative or './assets/...': resolve it properly
+  const assetUrl = new URL(asset, BASE + '/').toString();
+  const assetRes = await fetch(assetUrl, { signal: AbortSignal.timeout(4000) });
   if (!assetRes.ok) {
-    throw new Error(`index.html points at ${asset} but that file is ${assetRes.status} -- a build is probably in progress`);
+    throw new Error(`index.html points at ${assetUrl} but that file is ${assetRes.status} -- a build is probably in progress`);
   }
 } catch (err) {
   console.error(`PREFLIGHT FAILED against ${BASE}: ${err.message}`);
