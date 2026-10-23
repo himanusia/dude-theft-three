@@ -24,6 +24,8 @@ const WHEELBASE = 2.6;
 const REVERSE_CAP = 0.42;
 
 export class Car {
+  /** where the ground is under a given point; set by main from city.groundHeightAt */
+  groundAt: ((x: number, z: number) => number) | null = null;
   declare scene: any;
   declare type: any;
   declare color: any;
@@ -87,6 +89,7 @@ export class Car {
     this.driverAnchor = null;
     this.driverLook = null;
     this.y = 0;
+    this.groundAt = null as null | ((x: number, z: number) => number);
     this.vy = 0;
     this.roll = 0;
     this.pitch = 0;
@@ -592,6 +595,29 @@ export class Car {
     // left-hand drive, sitting where the steering wheel is; a modelled body knows its own size
     if (this.driverAnchor) g.position.copy(this.driverAnchor);
     else g.position.set(-0.4, 0.98, -0.22);
+    // The driver is 1.80 m of blocks seated at 0.98 m, so his head sat above a 1.45 m sedan
+    // roof and above a 1.65 m van roof: a head sticking out of the cab, on every car in the
+    // city. Measure the shell that exists and scale the body to fit under it.
+    this.mesh.updateMatrixWorld(true);
+    const shell = new THREE.Box3();
+    for (const child of this.mesh.children) {
+      if (child === g) continue;
+      shell.expandByObject(child);
+    }
+    if (isFinite(shell.max.y)) {
+      const roofLocal = shell.max.y - this.mesh.position.y;
+      // Scaling the driver alone does not move his seat: the anchor is a position, not part of
+      // the scaled geometry, so the head still floated 0.17 m above a sedan roof. Solve for the
+      // scale, then place the anchor so the crown of the hair lands just under the shell.
+      const HAIR_TOP = 0.83;
+      const want = roofLocal - 0.05;
+      if (g.position.y + HAIR_TOP > want) {
+        const k = Math.max(0.55, (want - 0.12) / HAIR_TOP);
+        g.scale.setScalar(k);
+        g.position.y = want - HAIR_TOP * k;
+      }
+    }
+    g.userData.isDriver = true;
     this.mesh.add(g);
     this.driver = g;
     return g;
@@ -723,19 +749,33 @@ export class Car {
     this.pos.x = clamp(this.pos.x, -worldHalf, worldHalf);
     this.pos.z = clamp(this.pos.z, -worldHalf, worldHalf);
 
-    // airborne
-    if (this.y > 0 || this.vy > 0) {
+    // airborne, relative to the ground under the car (the city has terrain now)
+    const floor = this.groundAt ? this.groundAt(this.pos.x, this.pos.z) : 0;
+    // uphill: a car that ends up below the ground has to be lifted, not left buried. Only the
+    // falling branch used to exist, so driving onto a slope planted the car inside the hill.
+    if (this.y < floor - 0.001 && this.vy <= 0) {
+      this.y = floor;
+      this.vy = 0;
+    }
+    if (this.y > floor + 0.001 || this.vy > 0) {
       this.vy -= 26 * dt;
       this.y += this.vy * dt;
-      if (this.y <= 0) {
+      if (this.y <= floor) {
         const landImpact = Math.abs(this.vy);
-        this.y = 0;
+        this.y = floor;
         this.vy = 0;
         if (landImpact > 6) {
           this.applyDamage(landImpact * 1.5);
           hit = { impact: landImpact, x: this.pos.x, z: this.pos.z, land: true };
         }
       }
+    }
+
+    // driving uphill: the ground rises under the car, so lift it instead of letting it sink
+    // into the slope (the airborne branch above only ever handled falling)
+    if (this.y < floor) {
+      this.y = floor;
+      this.vy = 0;
     }
 
     // visuals

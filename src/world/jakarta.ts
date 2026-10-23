@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from './city';
+import { terrainHeight } from './terrain';
 import { canvasTexture, rand, pick } from '../core/utils';
 
 /** shrink a label until it fits the drawn width */
@@ -175,7 +176,7 @@ export function buildMonas(ctx: Ctx, cx: number, cz: number) {
   const gold = new THREE.MeshStandardMaterial({ color: 0xffcf4a, emissive: 0x7a5a12, emissiveIntensity: 0.5, metalness: 0.85, roughness: 0.28 });
 
   // paved square
-  const plaza = new THREE.Mesh(new THREE.BoxGeometry(34, 0.14, 34), new THREE.MeshStandardMaterial({ color: 0xcfc9bc, roughness: 0.95 }));
+  const plaza = new THREE.Mesh(new THREE.BoxGeometry(26, 0.14, 26), new THREE.MeshStandardMaterial({ color: 0xcfc9bc, roughness: 0.95 }));
   plaza.position.set(cx, 0.29, cz);
   plaza.receiveShadow = true;
   ctx.group.add(plaza);
@@ -221,7 +222,7 @@ export function buildBundaran(ctx: Ctx, cx: number, cz: number) {
   const water = new THREE.MeshStandardMaterial({ color: 0x3fa9d8, roughness: 0.18, metalness: 0.25, transparent: true, opacity: 0.85 });
   const gold = new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0x6b4d0d, emissiveIntensity: 0.45, metalness: 0.8, roughness: 0.3 });
 
-  const grass = new THREE.Mesh(new THREE.CylinderGeometry(19, 19, 0.16, 32), new THREE.MeshStandardMaterial({ color: 0x4e8a44, roughness: 0.95 }));
+  const grass = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 0.16, 32), new THREE.MeshStandardMaterial({ color: 0x4e8a44, roughness: 0.95 }));
   grass.position.set(cx, 0.28, cz);
   grass.receiveShadow = true;
   ctx.group.add(grass);
@@ -466,8 +467,14 @@ export function buildAncolShore(ctx: Ctx, cx: number, cz: number, half = 38) {
       ctx.group.add(pile);
     }
   }
+  // The flag mast is 12 m tall, so a fixed y of 6.4 put its foot 2.4 m above the sand at Ancol.
+  // Ground the base against the terrain under it, the same contract every other prop follows.
+  // Landmarks live in a group already lifted to their terrain height, so the mast has to be
+  // grounded against the same measure the rest of the city uses, not against local zero.
+  const mastGround = (ctx as { groundHeightAt?: (x: number, z: number) => number }).groundHeightAt?.(cx + 8, cz - 30) ?? terrainHeight(cx + 8, cz - 30);
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 12, 6), new THREE.MeshStandardMaterial({ color: 0xb9b6ae, roughness: 0.6, metalness: 0.4 }));
-  mast.position.set(cx + 8, 6.4, cz - 30);
+  const lmBase = (ctx as { group: THREE.Group }).group.position.y;
+  mast.position.set(cx + 8, mastGround - lmBase + 6, cz - 30);
   ctx.group.add(mast);
 
   // feather flags: yellow and blue, the strongest colour anchor on the real beach

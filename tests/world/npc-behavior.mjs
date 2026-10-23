@@ -26,22 +26,81 @@ let URL_BASE = `http://127.0.0.1:${PORT}`;
 const OUT = path.join(ROOT, 'screenshots');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// City spec constants: crosswalk membership is measured with the test's own maths,
-// not with the pedestrian code's helper, so the result does not depend on the fix.
-const PITCH = 52;
-const BLOCK = 38;
-const HALF_ROAD = (PITCH - BLOCK) / 2; // 7
-const STRIP_DEPTH = 3.4;
-const bands = [];
-for (let i = -3; i < 3; i++) {
-  for (let j = -3; j < 3; j++) {
-    const x0 = (i + 0.5) * PITCH;
-    const z0 = (j + 0.5) * PITCH;
-    bands.push({ minX: x0 - HALF_ROAD, maxX: x0 + HALF_ROAD, minZ: z0 + HALF_ROAD, maxZ: z0 + HALF_ROAD + STRIP_DEPTH });
-    bands.push({ minX: x0 - HALF_ROAD, maxX: x0 + HALF_ROAD, minZ: z0 - HALF_ROAD - STRIP_DEPTH, maxZ: z0 - HALF_ROAD });
-    bands.push({ minX: x0 + HALF_ROAD, maxX: x0 + HALF_ROAD + STRIP_DEPTH, minZ: z0 - HALF_ROAD, maxZ: z0 + HALF_ROAD });
-    bands.push({ minX: x0 - HALF_ROAD - STRIP_DEPTH, maxX: x0 - HALF_ROAD, minZ: z0 - HALF_ROAD, maxZ: z0 + HALF_ROAD });
+// Crosswalk bands are measured with the test's own maths, but from the map's own road data
+// (window.__game.city.roads): the 380 m lattice these constants used to describe (PITCH 52,
+// BLOCK 38) stopped existing when the city moved to a 2.5 km map whose roads are polylines.
+// A band is the zebra *across* one road at a junction: it spans that road's carriageway and
+// sits just outside the junction box of the road it meets.
+const PAVE = 1.5;
+const STRIP_HALF = 1.7;
+const STRIP_PAD = 1.4;
+
+function segCross(p1, p2, p3, p4) {
+  const d1x = p2[0] - p1[0];
+  const d1z = p2[1] - p1[1];
+  const d2x = p4[0] - p3[0];
+  const d2z = p4[1] - p3[1];
+  const den = d1x * d2z - d1z * d2x;
+  if (Math.abs(den) < 1e-6) return null;
+  const t = ((p3[0] - p1[0]) * d2z - (p3[1] - p1[1]) * d2x) / den;
+  const u = ((p3[0] - p1[0]) * d1z - (p3[1] - p1[1]) * d1x) / den;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return [p1[0] + d1x * t, p1[1] + d1z * t];
+}
+
+/** Painted crossings derived from the road polylines, independent of the pedestrian code. */
+function crosswalkBands(roads) {
+  const segs = [];
+  roads.forEach((r, ri) => {
+    for (let i = 0; i < r.path.length - 1; i++) {
+      const p1 = r.path[i];
+      const p2 = r.path[i + 1];
+      segs.push({ ri, p1, p2, minX: Math.min(p1[0], p2[0]), maxX: Math.max(p1[0], p2[0]), minZ: Math.min(p1[1], p2[1]), maxZ: Math.max(p1[1], p2[1]) });
+    }
+  });
+  const bands = [];
+  const add = (hit, walk, cross) => {
+    const wWalk = roads[walk.ri].width;
+    const wCross = roads[cross.ri].width;
+    const dx = walk.p2[0] - walk.p1[0];
+    const dz = walk.p2[1] - walk.p1[1];
+    const len = Math.hypot(dx, dz) || 1;
+    const ux = dx / len;
+    const uz = dz / len;
+    const cxr = cross.p2[0] - cross.p1[0];
+    const czr = cross.p2[1] - cross.p1[1];
+    const lenc = Math.hypot(cxr, czr) || 1;
+    const nx = cxr / lenc;
+    const nz = czr / lenc;
+    const off = wWalk / 2 + PAVE;
+    for (const side of [-1, 1]) {
+      bands.push({ cx: hit[0] + nx * off * side, cz: hit[1] + nz * off * side, ux, uz, hl: wCross / 2 + STRIP_PAD, hw: STRIP_HALF });
+    }
+  };
+  for (let a = 0; a < segs.length; a++) {
+    for (let b = a + 1; b < segs.length; b++) {
+      const A = segs[a];
+      const B = segs[b];
+      if (A.ri === B.ri) continue;
+      if (A.maxX < B.minX || A.minX > B.maxX || A.maxZ < B.minZ || A.minZ > B.maxZ) continue;
+      const hit = segCross(A.p1, A.p2, B.p1, B.p2);
+      if (!hit) continue;
+      add(hit, A, B);
+      add(hit, B, A);
+    }
   }
+  return bands;
+}
+
+function inBand(bands, x, z) {
+  for (const b of bands) {
+    const px = x - b.cx;
+    const pz = z - b.cz;
+    if (Math.abs(px * b.ux + pz * b.uz) > b.hl) continue;
+    if (Math.abs(px * -b.uz + pz * b.ux) > b.hw) continue;
+    return true;
+  }
+  return false;
 }
 
 const results = [];
@@ -238,11 +297,22 @@ function stopServer() {
   });
 
   // ---------------------------------------------------------------- (c) crosswalk share
+  // Bands are derived here from the map's road polylines, not from the pedestrian code.
+  const roadData = await page.evaluate(() => window.__game.city.roads.map((r) => ({ width: r.width, path: r.path })));
+  const bands = crosswalkBands(roadData);
+  console.log('CROSSWALK ' + JSON.stringify({ roads: roadData.length, bands: bands.length }));
+
   const crossings = await page.evaluate((bandsJson) => {
     const g = window.__game;
     const bands = JSON.parse(bandsJson);
-    const inBand = (x, z) => {
-      for (const b of bands) if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ) return true;
+    const onStrip = (x, z) => {
+      for (const b of bands) {
+        const px = x - b.cx;
+        const pz = z - b.cz;
+        if (Math.abs(px * b.ux + pz * b.uz) > b.hl) continue;
+        if (Math.abs(px * -b.uz + pz * b.ux) > b.hw) continue;
+        return true;
+      }
       return false;
     };
     const log = g.peds.crossingLog;
@@ -254,7 +324,7 @@ function stopServer() {
       observed++;
       let on = 0;
       const total = e.samples.length / 2;
-      for (let i = 0; i < e.samples.length; i += 2) if (inBand(e.samples[i], e.samples[i + 1])) on++;
+      for (let i = 0; i < e.samples.length; i += 2) if (onStrip(e.samples[i], e.samples[i + 1])) on++;
       const share = on / total;
       if (share >= 0.9) clean++;
       if (samples.length < 4) samples.push({ t: e.t, share: +share.toFixed(2), pts: e.samples.slice(0, 4) });
@@ -351,7 +421,26 @@ function stopServer() {
       }
       g.police.clearWanted();
       g._test.cinematic(false);
-      g._test.teleport(26, 0);
+      // Stand where the citizen actually is. The old hardcoded (26, 0) was a point on the
+      // pre-Jakarta grid; once blocks followed the street network it fell inside a building and
+      // every shot hit a wall, so the pedestrians never had a reason to run.
+      const _o = (() => {
+        const sp = g.city.getSpawn();
+        const clear = (px, pz) => !g.city.colliders.some(
+          (c) => px > c.minX - 3.5 && px < c.maxX + 3.5 && pz > c.minZ - 3.5 && pz < c.maxZ + 3.5
+        );
+        for (let r = 0; r <= 70; r += 4) {
+          for (let a = 0; a < 16; a++) {
+            const x = sp.x + Math.cos((a / 16) * 6.2832) * r;
+            const z = sp.z + Math.sin((a / 16) * 6.2832) * r;
+            if (clear(x, z) && clear(x, z - 8) && clear(x, z - 17) && clear(x - 6, z - 10) && clear(x + 6, z - 10)) {
+              return { x, z };
+            }
+          }
+        }
+        return sp;
+      })();
+      g._test.teleport(_o.x, _o.z);
       g._test.setCam(0, 0.02); // camera behind the player, looking down -z
       g.player.mag = g.player.magSize;
       g.player.shootCd = 0;
@@ -375,7 +464,7 @@ function stopServer() {
 
       const alive = g.peds.peds.filter((p) => !p.dead);
       for (let i = 0; i < fixture.length && i < alive.length; i++) {
-        reset(alive[i], fixture[i][0], fixture[i][1], alive[i].walkSpeed);
+        reset(alive[i], _o.x - 26 + fixture[i][0], _o.z + fixture[i][1], alive[i].walkSpeed);
       }
       await new Promise((r) => setTimeout(r, 400)); // let the camera settle behind the player
 
@@ -440,7 +529,26 @@ function stopServer() {
     const g = window.__game;
     g.police.clearWanted();
     g._test.cinematic(false);
-    g._test.teleport(26, 0);
+      // Stand where the citizen actually is. The old hardcoded (26, 0) was a point on the
+      // pre-Jakarta grid; once blocks followed the street network it fell inside a building and
+      // every shot hit a wall, so the pedestrians never had a reason to run.
+      const _o = (() => {
+        const sp = g.city.getSpawn();
+        const clear = (px, pz) => !g.city.colliders.some(
+          (c) => px > c.minX - 3.5 && px < c.maxX + 3.5 && pz > c.minZ - 3.5 && pz < c.maxZ + 3.5
+        );
+        for (let r = 0; r <= 70; r += 4) {
+          for (let a = 0; a < 16; a++) {
+            const x = sp.x + Math.cos((a / 16) * 6.2832) * r;
+            const z = sp.z + Math.sin((a / 16) * 6.2832) * r;
+            if (clear(x, z) && clear(x, z - 8) && clear(x, z - 17) && clear(x - 6, z - 10) && clear(x + 6, z - 10)) {
+              return { x, z };
+            }
+          }
+        }
+        return sp;
+      })();
+      g._test.teleport(_o.x, _o.z);
     g._test.setCam(0, 0.9); // muzzle up: the shot scares the block, it does not hit anyone
     g.player.mag = g.player.magSize;
     g.player.shootCd = 0;
@@ -455,7 +563,7 @@ function stopServer() {
     const alive = g.peds.peds.filter((p) => !p.dead);
     for (let i = 0; i < spots.length && i < alive.length; i++) {
       const p = alive[i];
-      const [x, z] = spots[i];
+      const x = _o.x - 26 + spots[i][0], z = _o.z + spots[i][1];
       p.pos.set(x, g.city.groundHeightAt(x, z), z);
       p.char.group.position.copy(p.pos);
       p.fleeTimer = 0;
@@ -520,7 +628,26 @@ function stopServer() {
     const g = window.__game;
     g._test.cinematic(false);
     g.police.clearWanted();
-    g._test.teleport(26, 0);
+      // Stand where the citizen actually is. The old hardcoded (26, 0) was a point on the
+      // pre-Jakarta grid; once blocks followed the street network it fell inside a building and
+      // every shot hit a wall, so the pedestrians never had a reason to run.
+      const _o = (() => {
+        const sp = g.city.getSpawn();
+        const clear = (px, pz) => !g.city.colliders.some(
+          (c) => px > c.minX - 3.5 && px < c.maxX + 3.5 && pz > c.minZ - 3.5 && pz < c.maxZ + 3.5
+        );
+        for (let r = 0; r <= 70; r += 4) {
+          for (let a = 0; a < 16; a++) {
+            const x = sp.x + Math.cos((a / 16) * 6.2832) * r;
+            const z = sp.z + Math.sin((a / 16) * 6.2832) * r;
+            if (clear(x, z) && clear(x, z - 8) && clear(x, z - 17) && clear(x - 6, z - 10) && clear(x + 6, z - 10)) {
+              return { x, z };
+            }
+          }
+        }
+        return sp;
+      })();
+      g._test.teleport(_o.x, _o.z);
     g._test.setCam(0, 0.02);
     g.player.mag = g.player.magSize;
     g.player.shootCd = 0;
@@ -558,7 +685,7 @@ function stopServer() {
     ];
     const alive = g.peds.peds.filter((p) => !p.dead);
     for (let i = 0; i < fixture.length && i < alive.length; i++) {
-      reset(alive[i], fixture[i][0], fixture[i][1], alive[i].walkSpeed);
+      reset(alive[i], _o.x - 26 + fixture[i][0], _o.z + fixture[i][1], alive[i].walkSpeed);
     }
     await new Promise((r) => setTimeout(r, 400));
     const camPos = g.camera.position;

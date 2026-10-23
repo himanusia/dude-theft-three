@@ -38,7 +38,19 @@ Run one suite, one group, or everything:
 npm test               # gameplay + world + ui
 npm run test:world     # the city: geometry, traffic, pedestrians, police
 node tests/world/audit.mjs
+node tools/shoot-ojek.mjs          # headless: aims a camera at a live ojek and writes
+                                   # screenshots/proof/kurir.png, or fails if the cargo box
+                                   # is not actually in the frame
+node tools/shoot-facades.mjs       # headless: searches the city's own facade audit for the street
+                                   # frame that shows the most DISTINCT building archetypes, saves
+                                   # screenshots/proof/facade-archetypes.png, raycast-confirms each
+                                   # type it counts, and fails if fewer than five are legible or if
+                                   # the frame costs 1600+ draw calls
 ```
+
+`city.ojeks` lists every live bike with its real group position and the cargo box's local
+bounds, so a capture (or a game system) aims at the mesh instead of at the `propAudit` placement
+slot: the slot is a map coordinate, not where the group ended up.
 
 ## Stack
 

@@ -104,7 +104,10 @@ try {
   // walk so the saved position is somewhere other than the spawn point
   await page.evaluate(() => {
     const g = window.__game;
-    g._test.teleport(26, -40);
+    // stand somewhere the city guarantees is walkable: (26,-40) was a point on the old grid,
+    // and once blocks moved it landed inside a building, so the resolver pushed the player 2.5 m
+    // sideways on load and the round-trip looked broken
+    { const _s = g.city.getSpawn(); g._test.teleport(_s.x, _s.z); }
     g._test.setCam(Math.PI, 0.1);
   });
   await sleep(400);
@@ -145,7 +148,7 @@ try {
   check(
     'pause writes a versioned dta.save.v1',
     !!parsed &&
-      parsed.version === 1 &&
+      parsed.version === 2 &&
       typeof parsed.player?.x === 'number' &&
       typeof parsed.player?.camYaw === 'number' &&
       typeof parsed.cash === 'number' &&
@@ -411,7 +414,10 @@ try {
   errs.length = 0;
   await page.evaluate(() => {
     const g = window.__game;
-    g._test.teleport(26, -40);
+    // stand somewhere the city guarantees is walkable: (26,-40) was a point on the old grid,
+    // and once blocks moved it landed inside a building, so the resolver pushed the player 2.5 m
+    // sideways on load and the round-trip looked broken
+    { const _s = g.city.getSpawn(); g._test.teleport(_s.x, _s.z); }
     g.police.addWanted(1);
   });
   await sleep(700);

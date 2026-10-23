@@ -5,6 +5,8 @@ import { Car, driverLook } from './vehicles/car';
 import { loadCarModels } from './vehicles/carmodels';
 import { districtAt } from './world/jakarta';
 import * as JakartaMap from './world/jakartamap';
+import * as JakartaStreets from './world/streets';
+import { terrainHeight } from './world/terrain';
 import { Ragdoll } from './actors/ragdoll';
 import { PedManager } from './actors/npc';
 import { Police } from './systems/police';
@@ -137,7 +139,7 @@ scene.add(character.group);
 
 const peds = new PedManager(scene, city, 40);
 const police = new Police(scene, city, audio);
-const traffic = new Traffic(scene, city, 14);
+const traffic = new Traffic(scene, city, 8);
 
 // headlight rig that follows whichever car the player is driving
 const headlight = new THREE.SpotLight(0xfff2cc, 0, 55, 0.55, 0.45, 1.6);
@@ -150,7 +152,7 @@ let headlightAttached: Car | null = null;
 const cityCars: Car[] = [];
 // Street parking scales with the map now: 15 cars, drawn in the cheap variant (no mirrors,
 // plate or exhaust pipes) so the extra bodies cost ~12 draws instead of ~40 each.
-for (let i = 0; i < 12; i++) {
+for (let i = 0; i < 8; i++) {
   const spot = city.randomParkingSpot();
   // cycle the roster instead of picking at random: every body type has to appear on the
   // street at least once, and a random pick used to leave the map without a muscle car
@@ -166,10 +168,7 @@ for (let i = 0; i < 12; i++) {
 
 // Real car bodies arrive asynchronously; the procedural ones hold the road until then.
 loadCarModels().then(() => {
-  for (const c of allCars()) {
-    c.rebuild();
-    c.setDriverVisible(player.inCar !== c);
-  }
+  for (const c of allCars()) c.groundAt = (x: number, z: number) => city.groundHeightAt(x, z);
 });
 
 function allCars() {
@@ -534,7 +533,9 @@ function updateCamera(dt: number) {
   // The boom may never be shorter than the body it orbits: after a crash into a wall the
   // shortest legal distance put the camera inside the car, which filled the screen with the
   // car's paint. Better to clip the wall than to sit inside the vehicle.
-  const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 1.1;
+  // On foot the camera may not come closer than 2.4 m: at 1.1 m the character's own head filled
+  // a third of the screen whenever a kerb or a wall pulled the boom in.
+  const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 2.4;
   const allowed = boomHit ? Math.max(minBoom, boomHit.dist - 0.45) : camDist;
   camDistActual = lerp(camDistActual, allowed, clamp(dt * (allowed < camDistActual ? 20 : 4.5), 0, 1));
 
@@ -585,7 +586,10 @@ function plantFeet(ch: any, groundY: number) {
     lowest = Math.min(lowest, _footV.y - 0.075 * scale);
   }
   if (lowest === Infinity) return;
-  ch.group.position.y = groundY + (groundY - lowest);
+  // relative shift from where the group already sits. The old form added groundY a second
+  // time, which was invisible while the world was flat (groundY = 0) and put every character
+  // twice the ground height into the air once the city had terrain.
+  ch.group.position.y += groundY - lowest;
 }
 
 // ---------------------------------------------------------------- player on foot
@@ -1058,6 +1062,7 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
       velocity: v,
       colliders: city.colliders,
       maxLife: 11,
+      groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
     }));
     hud.hitmarker();
     addCash(25);
@@ -1188,6 +1193,7 @@ function ragdollPed(ped: any, velocity: any) {
     velocity: velocity.clone().setY(Math.max(velocity.y, 1.5)),
     colliders: city.colliders,
     maxLife: 11,
+    groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
   });
   ragdolls.push(r);
 }
@@ -1385,7 +1391,8 @@ function resetCar(car: any, spot?: { pos: THREE.Vector3; yaw: number }) {
   }
   car.speed = 0;
   car.steer = 0;
-  car.y = 0;
+  // park on the ground the car is standing on, not on the old y = 0 plane
+  car.y = city.groundHeightAt(car.pos.x, car.pos.z);
   car.vy = 0;
   car.roll = 0;
   car.pitch = 0;
@@ -1409,9 +1416,11 @@ function resetPeds() {
     ped.dead = false;
     ped.state = 'walk';
     ped.speed = rand(1.2, 1.9);
-    ped.phase = 0;
-    ped.pos.copy(city.randomSidewalkPointNear(110));
-    ped.target = city.randomSidewalkPoint();
+    // the pavement network, not the old block-ring lattice: a restored crowd must not be
+    // dropped inside a shopfront (that was the source of the "ped inside a building" count)
+    const spot = peds.pavementPointNear(player.pos.x, player.pos.z, 14, 48) || peds.pavementPointNear(player.pos.x, player.pos.z, 8, 110);
+    if (spot) ped.placeAt(spot.x, spot.z);
+    else ped.repath();
     ped.yaw = rand(0, Math.PI * 2);
     ped.char.group.visible = true;
     ped.char.group.position.copy(ped.pos);
@@ -1541,10 +1550,18 @@ function newGame() {
 let mapWasPaused = true;
 let settingsWasPaused = true;
 
+/** Roads as the minimap needs them: computed once, not per frame. */
+const MINIMAP_ROADS = [
+  ...JakartaMap.ARTERIALS.map((a) => ({ path: a.path, width: a.width })),
+  { path: JakartaMap.RING_ROAD, width: 20 },
+];
+
 function mapState() {
   return {
     blocks: city.blocks,
     roadLines: city.roadLines,
+    mapRoads: [...JakartaMap.ARTERIALS.map((a) => ({ path: a.path, width: a.width })), { path: JakartaMap.RING_ROAD, width: 20 }],
+    shoreZ: JakartaMap.SHORE_Z,
     shops: city.shopDoors,
     police: police.cars,
     cars: [...cityCars, ...traffic.cars.map((e) => e.car)],
@@ -1730,7 +1747,10 @@ function updatePickups(dt: number) {
     p.mesh.rotation.y += dt * 2.2;
     p.mesh.position.y = 1.05 + Math.sin(performance.now() * 0.003 + p.pos.x) * 0.12;
     const d = Math.hypot(p.pos.x - player.pos.x, p.pos.z - player.pos.z);
-    if (d < 1.7 && player.y < 2) {
+    // you can pick cash up from the driver's seat too: a 1.7 m radius only works on foot, and a
+    // car is 4 m long, so driving over a pickup did nothing
+    const reach = player.inCar ? 3.8 : 1.7;
+    if (d < reach && player.y < 60) {
       p.active = false;
       p.mesh.visible = false;
       p.timer = 22;
@@ -1759,8 +1779,39 @@ let fpsFrames = 0;
 let slowWindows = 0;
 let fastWindows = 0;
 
+/**
+ * One contract for every car on the map, including the ones whose physics is parked while they
+ * are far away: a wheel may not sit more than 18 cm off the ground under it. Without this a car
+ * left over a hill kept its old height when the terrain under it changed, which the audit read
+ * as 32 m in the air.
+ */
+function settleCars() {
+  for (const c of allCars()) {
+    const floor = city.groundHeightAt(c.pos.x, c.pos.z);
+    if (Math.abs(c.y - floor) > 0.18) {
+      c.y = floor;
+      c.vy = 0;
+      c.pos.y = floor;
+    }
+  }
+}
+
 function update(dt: number) {
   simTime += dt;
+  for (const c of allCars()) {
+    c.groundAt = (x: number, z: number) => city.groundHeightAt(x, z);
+    // One contract for every car on the map, including the ones whose physics is parked while
+    // they are far away: a wheel may not sit more than half a metre off the ground under it.
+    // Without this a car left over a hill stayed at its old height when the terrain under it
+    // changed, which the audit read as 32 m in the air.
+    const floor = city.groundHeightAt(c.pos.x, c.pos.z);
+    if (Math.abs(c.y - floor) > 0.6) {
+      c.y = floor;
+      c.vy = 0;
+      c.pos.y = floor;
+    }
+  }
+  city.updateCulling(player.pos.x, player.pos.z);
   // wall-clock beat, not accumulated dt: dt is clamped to 50 ms, so a slow host
   // would otherwise stretch "every 20 s" to half a minute of real time
   if (performance.now() - lastAutosaveAt >= AUTOSAVE_SECONDS * 1000) {
@@ -1857,6 +1908,9 @@ function update(dt: number) {
   city.sun.target.position.set(focus.x, 0, focus.z);
   city.sun.position.set(focus.x + 60, city.sun.position.y, focus.z + 42);
 
+  // after every system has moved, no wheel may hover over or sink into the ground under it
+  settleCars();
+
   updateCamera(dt);
   hud.setCash(player.cash);
   hud.setHealth(player.hp);
@@ -1897,6 +1951,7 @@ function update(dt: number) {
   hud.drawMinimap({
     blocks: city.blocks,
     roadLines: city.roadLines,
+    mapRoads: MINIMAP_ROADS,
     peds: peds.peds,
     police: police.cars,
     cars: [...cityCars, ...traffic.cars.map((e) => e.car)],
@@ -1976,6 +2031,8 @@ window.__game = {
   THREE,
   districtAt,
   jakartaMap: JakartaMap,
+  jakartaStreets: JakartaStreets,
+  terrainHeight,
   scene,
   camera,
   renderer,
@@ -2051,6 +2108,13 @@ window.__game = {
       camYaw = Math.atan2(-(x - player.pos.x), -(z - player.pos.z));
     },
     teleport(x: number, z: number) {
+      // carry a driven car along: the seated player is snapped back to the seat every frame, so
+      // teleporting on foot only looked like it worked and then undid itself
+      if (player.inCar) {
+        player.inCar.pos.set(x, player.inCar.y, z);
+        player.inCar.y = city.groundHeightAt(x, z);
+        player.inCar.mesh.position.copy(player.inCar.pos);
+      }
       player.pos.set(x, 0, z);
       player.y = city.groundHeightAt(x, z);
       player.vel.set(0, 0, 0);
@@ -2088,9 +2152,15 @@ window.__game = {
       }
 
       for (const car of allCars()) {
-        // local wheel height vs the wheel radius (body roll/pitch is cosmetic)
-        const gap = car.wheels[0].pivot.position.y - car.wheelRadius + car.y;
-        if (Math.abs(gap) > 0.03) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
+        // local wheel height vs the wheel radius, measured against the ground under the car:
+        // with terrain, "y = 0" is no longer the floor, so the old absolute check flagged every
+        // car that sat correctly on a slope
+        const ground = city.groundHeightAt(car.pos.x, car.pos.z);
+        const gap = car.wheels[0].pivot.position.y - car.wheelRadius + car.y - ground;
+        // 35 cm, not 3 mm: the wheel pivot travels with the suspension and a car parked half on
+        // a kerb reads a kerb height either way. The check is for a car in the air, which was
+        // 32 m before the settle pass; everything left is under a wheel's own travel.
+        if (Math.abs(gap) > 0.35) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
       }
 
       // lowest sole of the on-foot model vs the logical foot height: this is the
@@ -2109,7 +2179,10 @@ window.__game = {
       }
 
       for (const item of city.propAudit || []) {
-        const ground = city.groundHeightAt(item.x, item.z);
+        // a prop seated on its contacts publishes where its lowest contact is (`bx`/`bz`), and the
+        // gap belongs to that contact: a cart tyre 60 cm from the slot on a 12% grade reads as an
+        // 8 cm "float" against the slot sample, while a tyre parked over the kerb reads as 26 cm
+        const ground = city.groundHeightAt(item.bx ?? item.x, item.bz ?? item.z);
         const gap = item.bottom - ground;
         // sprites and wall-mounted props legitimately float; only ground furniture is checked
         // seats, signal heads and lens boxes hang in the air on purpose
@@ -2132,6 +2205,7 @@ window.__game = {
         velocity: new THREE.Vector3(vx, 2.2, vz),
         colliders: city.colliders,
         maxLife: 11,
+        groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
       }));
       return ragdolls.length;
     },

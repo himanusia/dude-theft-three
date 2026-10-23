@@ -16,6 +16,17 @@ import * as THREE from 'three';
 import { Car } from '../src/vehicles/car.ts';
 import { Character } from '../src/actors/character.ts';
 import { Ragdoll } from '../src/actors/ragdoll.ts';
+import {
+  buildRoadSegment,
+  buildKerbWalk,
+  buildSignalIntersection,
+  buildTrafficLight,
+  buildUtilityPole,
+  buildStreetNameSign,
+  buildManhole,
+  buildDrainGrate,
+  buildBollard,
+} from '../src/world/streetkit.ts';
 
 // Studio viewer: one subject per page, fixed 3/4 camera, neutral lighting.
 // Used to diff our generated assets against the reference screenshots.
@@ -59,10 +70,19 @@ const ground = new THREE.Mesh(
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
-// simple sidewalk strip for scale
-const kerb = new THREE.Mesh(new THREE.BoxGeometry(14, 0.18, 3.4), new THREE.MeshStandardMaterial({ color: 0xb4b4be }));
-kerb.position.set(0, 0.09, -3.6);
-scene.add(kerb);
+// simple sidewalk strip for scale - not for the street kit, whose own trotoar is the subject
+if (kind !== 'street') {
+  const kerb = new THREE.Mesh(new THREE.BoxGeometry(14, 0.18, 3.4), new THREE.MeshStandardMaterial({ color: 0xb4b4be }));
+  kerb.position.set(0, 0.09, -3.6);
+  scene.add(kerb);
+} else {
+  // a junction is 34 m across; the studio shadow box has to cover it or the corners lose shadows
+  sun.shadow.camera.left = -26;
+  sun.shadow.camera.right = 26;
+  sun.shadow.camera.top = 26;
+  sun.shadow.camera.bottom = -26;
+  sun.shadow.camera.updateProjectionMatrix();
+}
 
 let subject;
 
@@ -73,6 +93,51 @@ if (kind === 'car') {
   camera.position.set(5.0, 1.75, 6.0);
   camera.lookAt(0, 0.75, 0);
   document.getElementById('label').textContent = `car · ${type} · ${(color ?? 0).toString(16)}`;
+} else if (kind === 'street') {
+  // Street kit: one subject per part, so each builder can be judged on its own at close range.
+  // `?kind=street&part=road|kerb|junction|signal|furniture|all`
+  const part = params.get('part') ?? 'all';
+  const ctx = { group: scene, colliders: [], audit: [] };
+  const setCam = (p, t) => {
+    camera.position.set(...p);
+    camera.lookAt(...t);
+  };
+  if (part === 'road') {
+    buildRoadSegment(ctx, 0, 0, 0, { roadClass: 'arterial', lengthM: 46 });
+    setCam([3.5, 4.6, 18], [0, 0.4, -4]);
+  } else if (part === 'kerb') {
+    buildKerbWalk(ctx, 0, 0, 0, { lengthM: 16, crossingAt: 0 });
+    setCam([-3.2, 1.6, 7.5], [1.9, 0.35, -0.6]);
+  } else if (part === 'junction') {
+    buildSignalIntersection(ctx, 0, 0, 0, { roadClass: 'local', armsM: 12, cornerRadiusM: 7 });
+    setCam([13, 13, 17], [0, 0.6, 0]);
+  } else if (part === 'signal') {
+    buildTrafficLight(ctx, 0, 0, 0, { lit: 'green' });
+    setCam([-2.6, 3.4, 9.5], [2.8, 3.4, 0]);
+  } else if (part === 'furniture') {
+    buildUtilityPole(ctx, -3.4, 0, 0, { spanM: 12 });
+    buildStreetNameSign(ctx, 0.4, 0, 0);
+    buildBollard(ctx, 2.6, 1.4, 0);
+    buildBollard(ctx, 2.6, 3.2, 0);
+    buildManhole(ctx, 4.6, -2.2, 0);
+    buildDrainGrate(ctx, 1.4, -3.4, 0);
+    setCam([7.2, 3.2, 8.2], [0.4, 1.8, 0.4]);
+  } else {
+    // the whole kit as the city would meet it: a junction, its pavements, and the furniture line
+    buildSignalIntersection(ctx, 0, 0, 0, { roadClass: 'local', armsM: 13, cornerRadiusM: 7 });
+    buildKerbWalk(ctx, -4.3, 0, Math.PI, { lengthM: 9, crossingAt: 0, tactile: false, drain: true });
+    buildKerbWalk(ctx, 4.3, 0, 0, { lengthM: 9, crossingAt: 0, tactile: false, drain: true });
+    buildUtilityPole(ctx, 5.6, 6.0, 0, { spanM: 12 });
+    buildUtilityPole(ctx, 17.6, 6.0, 0, { spanM: 12, cables: false });
+    buildStreetNameSign(ctx, 5.7, 5.2, Math.PI / 2);
+    buildBollard(ctx, 4.5, 5.6, 0);
+    buildBollard(ctx, 4.5, 7.0, 0);
+    buildManhole(ctx, 1.2, 14.0, 0);
+    buildDrainGrate(ctx, -2.4, 15.0, 0);
+    setCam([16, 12, 19], [1, 0.8, -1]);
+  }
+  subject = ctx.group;
+  document.getElementById('label').textContent = `street kit · ${part}`;
 } else if (kind === 'ragdoll') {
   const r = new Ragdoll(scene, { position: new THREE.Vector3(0, 1.4, 0), yaw: 0.6, velocity: new THREE.Vector3(2, 1, 0) });
   for (let i = 0; i < 90; i++) r.update(1 / 60, []);

@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         viewer: 'tools/asset-viewer.html',
+        tjviewer: 'tools/tj-viewer.html',
       },
     },
   },

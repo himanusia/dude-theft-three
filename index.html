@@ -391,7 +391,7 @@
     --s: var(--hud-scale);
     --hud-pad: calc(14px * var(--s));
     --hud-gap: calc(8px * var(--s));
-    --hud-radius: calc(10px * var(--s));
+    --hud-radius: calc(2px * var(--s));
     --hud-top: calc(var(--hud-safe-t) + var(--hud-pad));
     --hud-right: calc(var(--hud-safe-r) + var(--hud-pad));
     --hud-left: calc(var(--hud-safe-l) + var(--hud-pad));
@@ -420,7 +420,7 @@
     font-size: max(12px, calc(13.5px * var(--s))); letter-spacing: .01em; line-height: 1.35;
     padding: calc(9px * var(--s)) calc(14px * var(--s)) calc(10px * var(--s));
     border-left: 3px solid var(--accent);
-    background: var(--panel); backdrop-filter: blur(12px); border-radius: var(--hud-radius);
+    background: rgba(6, 8, 10, .74); backdrop-filter: none; border: none; border-radius: var(--hud-radius);
     border-top: 1px solid var(--stroke); border-right: 1px solid var(--stroke); border-bottom: 1px solid var(--stroke);
     text-transform: uppercase; font-weight: 700; color: var(--ink);
     box-shadow: 0 10px 30px rgba(0,0,0,.35);
@@ -429,10 +429,12 @@
     content: "OBJECTIVE"; display: block; font-size: max(12px, calc(9.5px * var(--s)));
     letter-spacing: .22em; color: var(--accent); margin-bottom: calc(4px * var(--s)); font-weight: 800;
   }
+  /* no pill: GTA V has no rounded chip in the corner. A bare number is a debug readout, which
+     is what an FPS counter is. */
   #fps {
-    font-size: 12px; color: var(--ink-dim); letter-spacing: .12em; line-height: 1;
-    padding: calc(4px * var(--s)) calc(8px * var(--s)); border-radius: 999px;
-    background: var(--panel); border: 1px solid var(--stroke); font-variant-numeric: tabular-nums;
+    font-size: 12px; color: rgba(255,255,255,.78); letter-spacing: .12em; line-height: 1;
+    padding: 3px 6px; border: none; border-radius: 1px;
+    background: rgba(6,8,10,.62); font-variant-numeric: tabular-nums;
   }
   #fps::after { content: " FPS"; }
 
@@ -453,7 +455,7 @@
   }
   #wanted {
     padding: calc(3px * var(--s)) calc(9px * var(--s)) calc(4px * var(--s));
-    border-radius: var(--hud-radius); background: var(--panel); border: 1px solid var(--stroke);
+    border-radius: var(--hud-radius); background: rgba(6,8,10,.74); border: none;
     backdrop-filter: blur(10px);
   }
   #wanted-label { font-size: 12px; letter-spacing: .22em; color: #ff8f83; font-weight: 800; }
@@ -521,7 +523,7 @@
     display: flex; align-items: center; flex-wrap: wrap; gap: calc(4px * var(--s)) calc(8px * var(--s));
     max-width: min(62vw, calc(560px * var(--s)));
     font-size: 12px; line-height: 1.5; letter-spacing: .02em; color: var(--ink-dim);
-    padding: calc(4px * var(--s)) calc(11px * var(--s)); border-radius: 999px;
+    padding: calc(4px * var(--s)) calc(9px * var(--s)); border-radius: 2px;
     background: var(--panel); border: 1px solid var(--stroke); backdrop-filter: blur(10px);
   }
   #hints b { color: var(--ink); font-weight: 700; }
@@ -539,7 +541,7 @@
   #health-label { font-size: 12px; letter-spacing: .16em; font-weight: 700; color: var(--ink-dim); }
   #health-bar {
     width: calc(160px * var(--s)); height: max(10px, calc(12px * var(--s)));
-    background: rgba(0,0,0,.6); border: 1px solid var(--stroke); border-radius: 999px; overflow: hidden;
+    background: rgba(0,0,0,.62); border: none; border-radius: 1px; overflow: hidden;
     box-shadow: inset 0 1px 3px rgba(0,0,0,.6);
   }
   #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#4ade80,#22c55e); transition: width .18s ease; }
@@ -556,7 +558,7 @@
     display: flex; flex-direction: column; align-items: center; gap: calc(6px * var(--s));
   }
   #prompt {
-    max-width: 100%; padding: calc(8px * var(--s)) calc(16px * var(--s)); border-radius: calc(16px * var(--s));
+    max-width: 100%; padding: calc(8px * var(--s)) calc(14px * var(--s)); border-radius: 2px;
     background: var(--panel); backdrop-filter: blur(8px);
     font-size: max(12px, calc(13px * var(--s))); font-weight: 600; letter-spacing: .03em; opacity: 0;
     transition: opacity .18s ease, transform .18s ease; border: 1px solid var(--stroke);
@@ -568,7 +570,7 @@
   #speedo {
     text-align: center; opacity: 0; transition: opacity .2s ease;
     padding: calc(1px * var(--s)) calc(14px * var(--s)) calc(3px * var(--s));
-    border-radius: var(--hud-radius); background: var(--panel); border: 1px solid var(--stroke);
+    border-radius: var(--hud-radius); background: rgba(6,8,10,.74); border: none;
   }
   #speedo.show { opacity: 1; }
   #speed-val { font-size: max(22px, calc(40px * var(--s))); font-weight: 800; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
@@ -660,10 +662,67 @@
   #loading-text { margin-top: 12px; font-size: 12px; color: rgba(255,255,255,.55); letter-spacing: .06em; min-height: 16px; }
   .credits { margin-top: 18px; font-size: 11.5px; line-height: 1.6; color: rgba(255,255,255,.42); }
 
-  #pause-screen .card {
-    width: min(520px, 100%); padding: calc(22px * var(--s)) calc(24px * var(--s)) calc(24px * var(--s));
-    border-radius: 14px; background: var(--panel); border: 1px solid var(--stroke);
-    border-left: 3px solid var(--accent); box-shadow: 0 30px 80px rgba(0,0,0,.55);
+  /* The pause screen is a HUD, not a modal dialog. A centred rounded card with a coloured
+     left border and three differently-weighted buttons is the shape every web app uses, and it
+     reads as one: the game disappears behind it and the type stops looking like a game.
+     GTA anchors the menu to the edge instead -- a left strip with a vertical list, thin labels
+     in small caps, selection carried by a bar and a faint wash, and the controls as a quiet
+     reference column, not a row of chips. */
+  #pause-screen {
+    justify-content: flex-start; align-items: stretch;
+    background: linear-gradient(90deg, rgba(6,8,10,.97) 0%, rgba(6,8,10,.94) 38%, rgba(6,8,10,.62) 66%, rgba(6,8,10,.3) 100%);
+    backdrop-filter: none; overflow: hidden;
+  }
+  .pause-wrap {
+    display: flex; gap: calc(44px * var(--s)); align-items: flex-start;
+    width: 100%; max-width: 1000px;
+    padding: calc(46px * var(--s)) calc(40px * var(--s));
+    margin: 0;
+  }
+  /* The HUD used to stay at full brightness under the pause scrim, so the objective panel sat
+     behind the menu heading and both became unreadable. GTA dims the HUD the moment the menu
+     opens; :has() does it here without plumbing a paused class through the game loop. */
+  body:has(#pause-screen:not(.hidden)) #hud,
+  body:has(#pause-screen:not(.hidden)) #touch-ui { opacity: .1; pointer-events: none; transition: opacity .18s linear; }
+  /* A keyboard legend on a touch device is furniture from the desktop build: there is no F key
+     on a phone. The column only exists where keys do. */
+  body.touch-mode .pause-side { display: none; }
+  #hud { transition: opacity .18s linear; }
+  .pause-main { width: min(320px, 44%); }
+  .pause-head {
+    font-size: 12px; letter-spacing: .3em; text-transform: uppercase; font-weight: 700;
+    color: rgba(255,255,255,.78); padding-bottom: calc(9px * var(--s));
+    border-bottom: 1px solid rgba(255,255,255,.14);
+  }
+  .pause-menu { display: flex; flex-direction: column; margin-top: calc(12px * var(--s)); }
+  .pause-row {
+    appearance: none; -webkit-appearance: none; text-align: left; cursor: pointer;
+    font-family: var(--font); font-size: 15px; font-weight: 500; letter-spacing: 0; line-height: 1;
+    color: #ededed; background: transparent; border: 0; border-left: 3px solid transparent;
+    padding: calc(13px * var(--s)) calc(15px * var(--s)); margin: 0; border-radius: 0;
+    transition: background .12s linear, border-color .12s linear, color .12s linear;
+  }
+  .pause-row:hover, .pause-row:focus-visible { background: rgba(255,255,255,.07); border-left-color: rgba(255,255,255,.55); outline: none; }
+  .pause-row.is-primary { background: rgba(255,204,51,.13); border-left-color: var(--accent); color: #fff; font-weight: 700; }
+  .pause-row.is-primary:hover, .pause-row.is-primary:focus-visible { background: rgba(255,204,51,.2); border-left-color: var(--accent); }
+  .pause-hint { margin-top: calc(18px * var(--s)); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.34); }
+  .pause-side {
+    flex: 1 1 0; max-width: 400px;
+    border-left: 1px solid rgba(255,255,255,.1); padding-left: calc(28px * var(--s));
+  }
+  .pause-keys { display: grid; gap: calc(10px * var(--s)); margin: calc(14px * var(--s)) 0 0; padding: 0; }
+  .pause-key { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: calc(13px * var(--s)); }
+  .pause-key kbd {
+    width: 26px; height: 22px; display: grid; place-items: center;
+    font-family: var(--font); font-size: 12px; font-weight: 700; color: #fff;
+    background: transparent; border: 1px solid rgba(255,255,255,.3); border-radius: 2px; padding: 0;
+  }
+  .pause-key span { font-size: 12.5px; line-height: 1.2; color: rgba(255,255,255,.76); }
+  @media (max-width: 760px) {
+    .pause-wrap { flex-direction: column; gap: calc(20px * var(--s)); padding: calc(28px * var(--s)) calc(20px * var(--s)); }
+    .pause-main { width: 100%; }
+    .pause-row { padding: calc(16px * var(--s)) calc(15px * var(--s)); }
+    .pause-side { width: 100%; border-left: 0; border-top: 1px solid rgba(255,255,255,.1); padding-left: 0; padding-top: calc(16px * var(--s)); }
   }
   .pause-actions { margin: 0 0 calc(16px * var(--s)); }
   .pause-section { border-top: 1px solid var(--stroke); padding-top: calc(12px * var(--s)); margin-top: calc(12px * var(--s)); }
@@ -1049,21 +1108,26 @@
 </div>
 
 <div id="pause-screen" class="overlay hidden">
-  <div class="card">
-    <h2>Paused</h2>
-    <div class="sub" style="text-align:center"><span class="kb-only">Click anywhere to jump back in.</span><span class="touch-only-inline">Tap anywhere to jump back in.</span></div>
-    <div class="actions" style="justify-content:center;margin-bottom:18px">
-      <button id="resume-btn">Resume</button>
-      <button id="pause-new-game" class="ghost-btn" type="button">New game</button>
-      <button id="pause-settings" class="ghost-btn" type="button">Settings</button>
-    </div>
-    <div class="keys" style="text-align:left">
-      <kbd>F</kbd><span>Enter / exit vehicle</span>
-      <kbd>Q</kbd><span>Punch</span>
-      <kbd>R</kbd><span>Reload</span>
-      <kbd>M</kbd><span>City map</span>
-      <kbd>N</kbd><span>Mute audio</span>
-    </div>
+  <div class="pause-wrap">
+    <section class="pause-main">
+      <div class="pause-head">Paused</div>
+      <nav class="pause-menu" aria-label="Pause menu">
+        <button id="resume-btn" class="pause-row is-primary" type="button">Resume</button>
+        <button id="pause-new-game" class="pause-row" type="button">New game</button>
+        <button id="pause-settings" class="pause-row" type="button">Settings</button>
+      </nav>
+      <div class="pause-hint kb-only">Esc resumes</div>
+    </section>
+    <aside class="pause-side">
+      <div class="pause-head">Controls</div>
+      <dl class="pause-keys">
+        <div class="pause-key"><kbd>F</kbd><span>Enter / exit vehicle</span></div>
+        <div class="pause-key"><kbd>Q</kbd><span>Punch</span></div>
+        <div class="pause-key"><kbd>R</kbd><span>Reload</span></div>
+        <div class="pause-key"><kbd>M</kbd><span>City map</span></div>
+        <div class="pause-key"><kbd>N</kbd><span>Mute audio</span></div>
+      </dl>
+    </aside>
   </div>
 </div>
 

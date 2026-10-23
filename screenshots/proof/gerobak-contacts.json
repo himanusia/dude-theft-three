@@ -1,0 +1,373 @@
+{
+ "limit": 0.03,
+ "carts": [
+  {
+   "name": "kaki5-bakso",
+   "slot": [
+    46.47,
+    -0.06,
+    157.7
+   ],
+   "pitch": [
+    0.006,
+    0.001
+   ],
+   "contacts": [
+    {
+     "contact": "tyre+Z",
+     "x": 46.01,
+     "z": 157.28,
+     "surface": -0.065,
+     "mesh": "terrain",
+     "bottom": -0.065,
+     "gap": 0
+    },
+    {
+     "contact": "tyre-Z",
+     "x": 46.19,
+     "z": 158.26,
+     "surface": -0.06,
+     "mesh": "terrain",
+     "bottom": -0.06,
+     "gap": 0
+    },
+    {
+     "contact": "foot+Z",
+     "x": 47.01,
+     "z": 157.31,
+     "surface": -0.063,
+     "mesh": "terrain",
+     "bottom": -0.063,
+     "gap": 0
+    },
+    {
+     "contact": "foot-Z",
+     "x": 47.12,
+     "z": 157.88,
+     "surface": -0.059,
+     "mesh": "terrain",
+     "bottom": -0.06,
+     "gap": 0
+    }
+   ],
+   "on_kerb": false,
+   "maxGap": 0,
+   "worst": 0
+  },
+  {
+   "name": "kaki5-nasgor",
+   "slot": [
+    57.85,
+    0.275,
+    176.61
+   ],
+   "pitch": [
+    0.001,
+    0.004
+   ],
+   "contacts": [
+    {
+     "contact": "tyre+Z",
+     "x": 57.38,
+     "z": 176.19,
+     "surface": 0.273,
+     "mesh": "trotoar",
+     "bottom": 0.273,
+     "gap": 0
+    },
+    {
+     "contact": "tyre-Z",
+     "x": 57.56,
+     "z": 177.17,
+     "surface": 0.275,
+     "mesh": "trotoar",
+     "bottom": 0.275,
+     "gap": 0
+    },
+    {
+     "contact": "foot+Z",
+     "x": 58.39,
+     "z": 176.22,
+     "surface": 0.272,
+     "mesh": "trotoar",
+     "bottom": 0.272,
+     "gap": 0
+    },
+    {
+     "contact": "foot-Z",
+     "x": 58.49,
+     "z": 176.79,
+     "surface": 0.273,
+     "mesh": "trotoar",
+     "bottom": 0.273,
+     "gap": 0
+    }
+   ],
+   "on_kerb": false,
+   "maxGap": 0,
+   "worst": 0
+  },
+  {
+   "name": "kaki5-sate",
+   "slot": [
+    77.66,
+    0.196,
+    173.01
+   ],
+   "pitch": [
+    -0.001,
+    0.009
+   ],
+   "contacts": [
+    {
+     "contact": "tyre+Z",
+     "x": 77.2,
+     "z": 172.59,
+     "surface": 0.197,
+     "mesh": "trotoar",
+     "bottom": 0.197,
+     "gap": 0
+    },
+    {
+     "contact": "tyre-Z",
+     "x": 77.38,
+     "z": 173.57,
+     "surface": 0.196,
+     "mesh": "trotoar",
+     "bottom": 0.196,
+     "gap": 0
+    },
+    {
+     "contact": "foot+Z",
+     "x": 78.2,
+     "z": 172.62,
+     "surface": 0.19,
+     "mesh": "trotoar",
+     "bottom": 0.19,
+     "gap": -0.001
+    },
+    {
+     "contact": "foot-Z",
+     "x": 78.3,
+     "z": 173.19,
+     "surface": 0.19,
+     "mesh": "trotoar",
+     "bottom": 0.189,
+     "gap": -0.001
+    }
+   ],
+   "on_kerb": false,
+   "maxGap": 0.001,
+   "worst": -0.001
+  },
+  {
+   "name": "kaki5-bakso",
+   "slot": [
+    290.44,
+    19.138,
+    812.02
+   ],
+   "pitch": [
+    0.047,
+    -0.103
+   ],
+   "contacts": [
+    {
+     "contact": "tyre+Z",
+     "x": 290.75,
+     "z": 811.48,
+     "surface": 19.073,
+     "mesh": "terrain",
+     "bottom": 19.069,
+     "gap": -0.004
+    },
+    {
+     "contact": "tyre-Z",
+     "x": 289.83,
+     "z": 811.86,
+     "surface": 19.12,
+     "mesh": "terrain",
+     "bottom": 19.116,
+     "gap": -0.004
+    },
+    {
+     "contact": "foot+Z",
+     "x": 290.93,
+     "z": 812.46,
+     "surface": 19.186,
+     "mesh": "terrain",
+     "bottom": 19.178,
+     "gap": -0.008
+    },
+    {
+     "contact": "foot-Z",
+     "x": 290.4,
+     "z": 812.68,
+     "surface": 19.213,
+     "mesh": "terrain",
+     "bottom": 19.205,
+     "gap": -0.008
+    }
+   ],
+   "on_kerb": false,
+   "maxGap": 0.008,
+   "worst": -0.008
+  },
+  {
+   "name": "kaki5-nasgor",
+   "slot": [
+    275.33,
+    20.678,
+    825.08
+   ],
+   "pitch": [
+    0.045,
+    -0.104
+   ],
+   "contacts": [
+    {
+     "contact": "tyre+Z",
+     "x": 275.65,
+     "z": 824.54,
+     "surface": 20.613,
+     "mesh": "terrain",
+     "bottom": 20.609,
+     "gap": -0.004
+    },
+    {
+     "contact": "tyre-Z",
+     "x": 274.72,
+     "z": 824.92,
+     "surface": 20.659,
+     "mesh": "terrain",
+     "bottom": 20.654,
+     "gap": -0.004
+    },
+    {
+     "contact": "foot+Z",
+     "x": 275.83,
+     "z": 825.52,
+     "surface": 20.727,
+     "mesh": "terrain",
+     "bottom": 20.719,
+     "gap": -0.008
+    },
+    {
+     "contact": "foot-Z",
+     "x": 275.29,
+     "z": 825.74,
+     "surface": 20.753,
+     "mesh": "terrain",
+     "bottom": 20.745,
+     "gap": -0.008
+    }
+   ],
+   "on_kerb": false,
+   "maxGap": 0.008,
+   "worst": -0.008
+  },
+  {
+   "name": "kaki5-sate",
+   "slot": [
+    280,
+    21.581,
+    830.61
+   ],
+   "pitch": [
+    0.045,
+    -0.104
+   ],
+   "contacts": [
+    {
+     "contact": "tyre+Z",
+     "x": 280.32,
+     "z": 830.07,
+     "surface": 21.516,
+     "mesh": "trotoar",
+     "bottom": 21.512,
+     "gap": -0.004
+    },
+    {
+     "contact": "tyre-Z",
+     "x": 279.4,
+     "z": 830.45,
+     "surface": 21.561,
+     "mesh": "trotoar",
+     "bottom": 21.557,
+     "gap": -0.004
+    },
+    {
+     "contact": "foot+Z",
+     "x": 280.5,
+     "z": 831.05,
+     "surface": 21.63,
+     "mesh": "trotoar",
+     "bottom": 21.622,
+     "gap": -0.008
+    },
+    {
+     "contact": "foot-Z",
+     "x": 279.97,
+     "z": 831.27,
+     "surface": 21.656,
+     "mesh": "trotoar",
+     "bottom": 21.648,
+     "gap": -0.008
+    }
+   ],
+   "on_kerb": false,
+   "maxGap": 0.008,
+   "worst": -0.008
+  }
+ ],
+ "propAudit": [
+  {
+   "name": "kaki5-bakso",
+   "x": 46.473545618000166,
+   "z": 157.70450089900092,
+   "bottom": -0.06513389183480126,
+   "bx": 46.01023298803805,
+   "bz": 157.28056215413383
+  },
+  {
+   "name": "kaki5-nasgor",
+   "x": 57.84712234764386,
+   "z": 176.6137670666431,
+   "bottom": 0.2721073209891371,
+   "bx": 58.38556280638081,
+   "bz": 176.2211179561178
+  },
+  {
+   "name": "kaki5-sate",
+   "x": 77.66156126884276,
+   "z": 173.0111418082433,
+   "bottom": 0.18998215317216793,
+   "bx": 78.30373407405439,
+   "bz": 173.1891342218779
+  },
+  {
+   "name": "kaki5-bakso",
+   "x": 290.43609519798184,
+   "z": 812.0204313890663,
+   "bottom": 19.07271255876495,
+   "bx": 290.7522774107669,
+   "bz": 811.4817550285735
+  },
+  {
+   "name": "kaki5-nasgor",
+   "x": 275.329585275391,
+   "z": 825.081935474839,
+   "bottom": 20.613392146678176,
+   "bx": 275.64589590810164,
+   "bz": 824.5432462238944
+  },
+  {
+   "name": "kaki5-sate",
+   "x": 280.00326319865013,
+   "z": 830.6100326995089,
+   "bottom": 21.51633208103745,
+   "bx": 280.3195732535014,
+   "bz": 830.0713443617223
+  }
+ ]
+}

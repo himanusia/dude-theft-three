@@ -1,3 +1,4 @@
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
@@ -218,4 +219,45 @@ export function shadowBlob(w = 1.2, h = 1.2, opacity = 0.42): THREE.Mesh {
 // beveled box — the shape language used by the reference game (soft toy edges, still low-poly)
 export function roundedBox(w: number, h: number, d: number, radius: number = 0.05, segments = 2): THREE.BufferGeometry {
   return new RoundedBoxGeometry(w, h, d, segments, Math.min(radius, Math.min(w, h, d) * 0.49));
+}
+
+
+/**
+ * Collapse a group of static meshes into one mesh per material. A shopfront built out of forty
+ * boxes is forty draw calls; merged, it is three. That is the difference between a mid-range
+ * phone holding its frame rate and not, and none of these props ever animate.
+ *
+ * Geometries are grouped by material *and* by attribute set, because mergeGeometries refuses to
+ * combine a geometry that carries a uv with one that does not.
+ */
+export function mergeStaticChildren(group: THREE.Group): THREE.Group {
+  group.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const buckets = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>();
+  const doomed: THREE.Mesh[] = [];
+
+  group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || (m as unknown as THREE.InstancedMesh).isInstancedMesh) return;
+    if (Array.isArray(m.material)) return;
+    const geo = m.geometry.clone();
+    geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+    const sig = `${m.material.uuid}|${Object.keys(geo.attributes).sort().join(',')}`;
+    const bucket = buckets.get(sig) ?? { mat: m.material as THREE.Material, geos: [] };
+    bucket.geos.push(geo);
+    buckets.set(sig, bucket);
+    doomed.push(m);
+  });
+
+  for (const m of doomed) m.removeFromParent();
+
+  for (const { mat, geos } of buckets.values()) {
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  return group;
 }

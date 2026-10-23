@@ -21,6 +21,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 class V4(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
+    # The suites open a burst of connections, each pulling a multi-megabyte bundle. The default
+    # backlog of 5 drops SYNs under that burst, which surfaces in the tests as
+    # ERR_CONNECTION_RESET and then as a 30 s navigation timeout.
+    request_queue_size = 128
+    daemon_threads = True
     daemon_threads = True
 
 

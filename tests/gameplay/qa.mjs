@@ -22,7 +22,7 @@ function check(name, ok, detail) {
   const IGNORE = /ERR_CONNECTION_RESET|ERR_SOCKET_NOT_CONNECTED|ERR_ABORTED|Failed to load resource: net::/;
   page.on('console', m => { if (m.type() === 'error' && !IGNORE.test(m.text())) errs.push('console: ' + m.text()); });
 
-  await page.goto((process.env.DTA_URL || 'http://localhost:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
+  await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
   await sleep(1200);
   const boot = await page.evaluate(() => ({ game: !!window.__game, peds: window.__game.peds.peds.length, cars: window.__game.cityCars.length, colliders: window.__game.city.colliders.length }));
@@ -46,7 +46,7 @@ function check(name, ok, detail) {
   };
 
   // walking
-  await page.evaluate(() => { const g = window.__game; g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.1); });
+  await page.evaluate(() => { const g = window.__game; const path = g.jakartaMap.ARTERIALS[0].path; const m = path[Math.floor(path.length / 2)]; g._test.teleport(m[0], m[1] - 30); g._test.setCam(0, 0.1); });
   await sleep(400);
   const p0 = await page.evaluate(() => window.__game.player.pos.toArray());
   await hold('w', 1.4);
@@ -63,11 +63,11 @@ function check(name, ok, detail) {
   };
   let sprinted = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
-    await page.evaluate(() => { const g = window.__game; g._test.teleport(26, -40); g._test.setCam(Math.PI, 0.1); });
+    await page.evaluate(() => { const g = window.__game; const path = g.jakartaMap.ARTERIALS[0].path; const m = path[Math.floor(path.length / 2)]; g._test.teleport(m[0], m[1] - 30); g._test.setCam(0, 0.1); });
     await sleep(400);
-    await page.keyboard.down('Shift');
+    await page.keyboard.down('ShiftLeft');
     sprinted = Math.max(sprinted, await measureRun(1.6));
-    await page.keyboard.up('Shift');
+    await page.keyboard.up('ShiftLeft');
     if (sprinted > walked * 1.15) break;
   }
   check('sprint faster than walk', sprinted > walked * 1.15, { walked: +walked.toFixed(2), sprinted: +sprinted.toFixed(2) });
@@ -80,23 +80,35 @@ function check(name, ok, detail) {
     // sample the peak instead of a single frame
     for (let i = 0; i < 12; i++) {
       await sleep(40);
-      airborne = Math.max(airborne, await page.evaluate(() => window.__game.player.y));
+      airborne = Math.max(
+        airborne,
+        await page.evaluate(() => window.__game.player.y - window.__game.city.groundHeightAt(window.__game.player.pos.x, window.__game.player.pos.z))
+      );
     }
     await page.keyboard.up('Space');
     await sleep(1200);
-    landed = await page.evaluate(() => ({ y: window.__game.player.y, grounded: window.__game.player.grounded }));
-    if (airborne > 0.15 && landed.grounded && landed.y < 0.35) break;
+    landed = await page.evaluate(() => ({
+      y: window.__game.player.y,
+      above: +(window.__game.player.y - window.__game.city.groundHeightAt(window.__game.player.pos.x, window.__game.player.pos.z)).toFixed(3),
+      grounded: window.__game.player.grounded,
+    }));
+    if (airborne > 0.15 && landed.grounded && Math.abs(landed.above) < 0.35) break;
     await sleep(300);
   }
-  check('jump + land', airborne > 0.15 && landed.grounded && landed.y < 0.35, { airborne: +airborne.toFixed(2), landed });
+  check('jump + land', airborne > 0.15 && landed.grounded && Math.abs(landed.above) < 0.35, { airborne: +airborne.toFixed(2), landed });
 
   // sidewalk step-up
   const step = await page.evaluate(() => {
     const g = window.__game;
-    g._test.teleport(26, 0);
-    const hRoad = g.city.groundHeightAt(26, 0);
-    const hWalk = g.city.groundHeightAt(0, 17);
-    return { hRoad, hWalk };
+    // measured on a real block now, not on a lattice coordinate: the kerb is wherever a
+    // plate exists, so ask the city for a block centre and a road point next to it
+    const b = g.city.blocks.find((b) => b.type === 'city') ?? g.city.blocks[0];
+    const hWalk = g.city.groundHeightAt(b.x, b.z);
+    // sample the road just outside this block. A fixed +400 m offset landed on the southern
+    // hills, so "the road is lower than the pavement" compared two different places.
+    const hRoad = g.city.groundHeightAt(b.x + b.size / 2 + 12, b.z);
+    g._test.teleport(b.x + 3, b.z + 3);
+    return { hRoad, hWalk, at: [+b.x.toFixed(0), +b.z.toFixed(0)] };
   });
   check('sidewalk height differs from road', step.hWalk > step.hRoad, step);
 
@@ -111,11 +123,21 @@ function check(name, ok, detail) {
       const cz = Math.max(b.minZ, Math.min(z, b.maxZ));
       return Math.hypot(x - cx, z - cz) > 3.6;
     });
-    let spot = { x: 26, z: 0 };
-    for (const z of [0, 52, -52, 104, -104, 156, -156]) {
-      if (clear(26, z)) { spot = { x: 26, z }; break; }
+    // park on the spawn road, and only where the ground is road level: a car set down on a
+    // kerb plate sits 26 cm high and cannot pull away
+    // the spawn point is on the pavement now (that is where a person starts), so park on the
+    // artery itself: take the centreline of the first arterial, not the player's feet
+    const path = g.jakartaMap.ARTERIALS[0].path;
+    const mid = path[Math.floor(path.length / 2)];
+    let spot = { x: mid[0], z: mid[1] };
+    for (const dz of [0, 20, -20, 40, -40, 60]) {
+      const x = mid[0] + 2;
+      const z = mid[1] + dz;
+      if (clear(x, z)) { spot = { x, z }; break; }
     }
-    c.pos.set(spot.x, 0, spot.z); c.yaw = 0; c.mesh.position.copy(c.pos); c.mesh.rotation.y = 0;
+    const ground = g.city.groundHeightAt(spot.x, spot.z);
+    c.pos.set(spot.x, ground, spot.z); c.y = ground; c.vy = 0; c.yaw = 0;
+    c.mesh.position.copy(c.pos); c.mesh.rotation.y = 0;
     g._test.teleport(spot.x + 2.2, spot.z + 0.4);
     return { car: c.pos.toArray(), spot, dist: +c.pos.distanceTo(g.player.pos).toFixed(2) };
   });
@@ -131,7 +153,11 @@ function check(name, ok, detail) {
   const drive = await page.evaluate(() => ({ kmh: Math.round(Math.abs(window.__game.player.inCar.speed) * 3.6), hp: window.__game.player.hp }));
   check('vehicle accelerates', drive.kmh > 15, drive);
   await page.keyboard.press('f'); await sleep(500);
-  const outCar = await page.evaluate(() => !window.__game.player.inCar && window.__game.player.y >= 0);
+  const outCar = await page.evaluate(() => {
+    const p = window.__game.player;
+    const ground = window.__game.city.groundHeightAt(p.pos.x, p.pos.z);
+    return !p.inCar && p.y >= ground - 0.05;
+  });
   check('exit vehicle with F', outCar);
 
   // shooting a pedestrian
@@ -165,12 +191,15 @@ function check(name, ok, detail) {
       const g = window.__game;
       // re-place the target in the same tick as the shot: an idle ped still gets stepped by
       // the crowd system, and a player that walked off its spot fired at empty road
+      // stand on the spawn road and put the ped down the street: hard-coded coordinates
+      // land inside a building now that the blocks follow the map
+      const spawn = g.city.getSpawn();
       const ped = g.peds.peds.find(p => !p.dead);
       if (ped) {
-        ped.pos.set(26 + off, g.city.groundHeightAt(26 + off, -32), -32);
+        ped.pos.set(spawn.x + off, g.city.groundHeightAt(spawn.x + off, spawn.z + 9), spawn.z + 9);
         ped.target = ped.pos.clone();
         ped.speed = 0.0001;
-        g._test.lookFrom(26 + off, 2.4, -40, ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
+        g._test.lookFrom(spawn.x + off, 2.4, spawn.z, ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
       }
       const magBefore = g.player.mag;
       const ragBefore = g.ragdolls.length;
@@ -198,13 +227,34 @@ function check(name, ok, detail) {
   const punchAfter = await page.evaluate(() => ({ rag: window.__game.ragdolls.length, cash: window.__game.player.cash }));
   check('punch ragdolls a ped', punchAfter.rag > punch.before, { punch, punchAfter });
 
-  // ragdoll settles onto the ground and eventually expires
+  // ragdoll settles onto the ground and eventually expires. Poll until the body stops moving
+  // instead of guessing a delay: a fixed wait measured a body that was still in the air.
+  await page
+    .waitForFunction(
+      () => {
+        const g = window.__game;
+        const r = g.ragdolls[0];
+        if (!r) return false;
+        const y = r.points.hips.p.y;
+        const w = window;
+        const prev = w.__lastHips === undefined ? y : w.__lastHips;
+        w.__lastHips = y;
+        return Math.abs(y - prev) < 0.004;
+      },
+      { timeout: 6000, polling: 120 }
+    )
+    .catch(() => {});
   const settle = await page.evaluate(() => {
     const r = window.__game.ragdolls[0];
     if (!r) return null;
-    return { hips: r.points.hips.p.toArray().map(v => +v.toFixed(2)), head: r.points.head.p.toArray().map(v => +v.toFixed(2)) };
+    const ground = window.__game.city.groundHeightAt(r.points.hips.p.x, r.points.hips.p.z);
+    return {
+      hips: r.points.hips.p.toArray().map(v => +v.toFixed(2)),
+      head: r.points.head.p.toArray().map(v => +v.toFixed(2)),
+      above: +(r.points.hips.p.y - ground).toFixed(2),
+    };
   });
-  check('ragdoll body is on the ground', settle && settle.hips[1] < 1.2, settle);
+  check('ragdoll body is on the ground', settle && settle.above < 1.2, settle);
 
   // wanted level -> police spawn -> arrest
   await page.evaluate(() => { const g = window.__game; g._test.teleport(26, 24); g.police.addWanted(3); });
@@ -228,14 +278,24 @@ function check(name, ok, detail) {
   const dead = await page.evaluate(() => ({ hp: Math.round(window.__game.player.hp), wanted: +window.__game.police.wanted.toFixed(2), cops: window.__game.police.cars.length, pos: window.__game.player.pos.toArray().map(v => Math.round(v)) }));
   check('death respawns with full hp and clears police', dead.hp === 100 && dead.wanted === 0 && dead.cops === 0, dead);
 
-  // cash pickup
+  // cash pickup - step out of the car first: a seated player is snapped back to the car every
+  // frame, so a teleport onto the pickup never sticks
+  if (await page.evaluate(() => !!window.__game.player.inCar)) {
+    await page.keyboard.press('f');
+    await sleep(500);
+  }
   const pickup = await page.evaluate(async () => {
     const g = window.__game;
     const before = g.player.cash;
     const p = g.pickups.find(p => p.active);
     if (!p) return { skipped: true };
     g._test.teleport(p.pos.x, p.pos.z);
-    await new Promise(r => setTimeout(r, 400));
+    // poll for the payout instead of a fixed wait: at 4-10 fps a 400 ms sleep is two frames,
+    // which is why this check failed intermittently
+    for (let i = 0; i < 40 && g.player.cash === before; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      g._test.teleport(p.pos.x, p.pos.z);
+    }
     return { before, after: g.player.cash, active: p.active };
   });
   await sleep(400);
