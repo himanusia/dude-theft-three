@@ -23,14 +23,12 @@ import { LOCAL_STREETS } from './streets';
 import { Car, driverLook } from '../vehicles/car';
 import { Ojek } from '../vehicles/ojek';
 import {
-  buildRoadSegment,
-  buildKerbWalk,
   buildSignalIntersection,
-  buildUtilityPole,
-  buildStreetNameSign,
-  buildManhole,
-  buildDrainGrate,
-  buildBollard,
+  buildStreetRun,
+  buildTIntersection,
+  KERB_WIDTH,
+  WALK_TOP_M,
+  type StreetGround,
 } from './streetkit';
 import {
   ArchetypeMixer,
@@ -241,6 +239,12 @@ export class City {
    * the slot sample reports the slope as a gap and hides the straddle it is looking for.
    */
   declare propAudit: { name: string; x: number; z: number; bottom: number; bx?: number; bz?: number }[];
+
+  declare streetSpines: { ax: number; az: number; bx: number; bz: number; half: number; walkW: number }[];
+
+  /** the mapped roads as segments in a grid, built on first use by the street-kit site search */
+  declare roadGrid: { grid: Map<string, number[]>; segs: number[]; CELL: number } | null;
+
   /**
    * Live ojeks, so a capture or a game system can find one without reverse-engineering a
    * propAudit slot: the group is where the mesh actually stands, and box is the delivery box's
@@ -639,7 +643,6 @@ export class City {
     }
 
     this.buildFrontage();
-    this.buildStreetKitCorner();
     this.buildTerrainFeatures();
     this.buildRoadRibbons();
     this.buildWater();
@@ -649,6 +652,11 @@ export class City {
     this.buildLayangRoad();
     this.buildMrt();
     this.buildKrlLine();
+    // The street goes in last of the world passes: its site search reads `this.blocks` to find a
+    // corridor with room for a full cross-section, and the MRT, the layang and the landmarks all
+    // push plates after the block loop. Built earlier it could pick ground that a later plate then
+    // covered, which showed up as kit props standing 9 cm inside a 26 cm plate.
+    this.buildStreetKit();
 
     // road markings (instanced): dashed centre lines along the roads the map defines
     const mtx = new THREE.Matrix4();
@@ -2627,44 +2635,309 @@ export class City {
     }
   }
 
+  // ------------------------------------------------------------ the street kit, wired
+
   /**
-   * The street kit, wired: one four-arm local junction, its pavements, and the furniture line that
-   * repeats along it, all from `src/world/streetkit.ts`.
+   * The kit's own street, laid between two block rows.
    *
-   * This is the kit's first tenant, not a replacement of the inline road code yet. It stands on open
-   * ground east of the Thamrin corridor (96, -116) because that is the nearest 34 m square the
-   * generator leaves free of block plates, local-street ribbons and arterial pavement - checked
-   * against `this.blocks` and `this.roads`, not guessed. The four arms are the map's local class
-   * (8 m) and the kerbs are the kit's 30 cm / 12 cm trotoar module, so a later pass can lift the
-   * rest of the network onto the same vocabulary.
+   * The map's local streets are 8 m ribbons with no trotoar, no kerb relief and no markings, and
+   * `planBlockSites` lays blocks on a 90 m lattice, so a whole 25 m corridor between two rows of
+   * blocks is bare ground - that is the "everything between the junctions is nothing" the owner
+   * photographed. This finds a crossing of that lattice with enough clear ground for a full
+   * cross-section, then builds a signalised junction, three street runs out of it and a T where a
+   * side street ends on the cross corridor. Everything comes from `src/world/streetkit.ts`, so the
+   * corner radius, the kerb height and the walk depth are the same as every other street the kit
+   * will ever lay.
    */
-  buildStreetKitCorner() {
-    const kx = 96;
-    const kz = -116;
-    const ground = (x: number, z: number) => terrainHeight(x, z);
+  buildStreetKit() {
+    const site = this.streetKitSite();
+    if (!site) return;
+    if (!this.propAudit) this.propAudit = [];
+    if (!this.streetSpines) this.streetSpines = [];
+
     const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+    // surfaces sit on the terrain; anything standing on the trotoar sits 17 cm higher - unless the
+    // city already draws a higher pavement there (an arterial's trotoar is 26 cm), in which case the
+    // prop stands on that. Both numbers come from the same `groundHeightAt` the audit reads, so a
+    // kit prop cannot report a 9 cm gap against the surface it is actually standing on.
+    const bed: StreetGround = (x, z) => terrainHeight(x, z);
+    const walkTop: StreetGround = (x, z) => Math.max(terrainHeight(x, z) + WALK_TOP_M, this.groundHeightAt(x, z));
 
-    buildSignalIntersection(ctx, kx, kz, 0, { roadClass: 'local', armsM: 13, cornerRadiusM: 7, ground });
+    const WALK = 3.6;
+    const HALF = 4; // the map's local class is 8 m
+    const ARM = 14; // how far the junction's asphalt arms run out past its box
+    const armEnd = HALF + ARM;
 
-    // the north approach continues past the junction as a road segment, so the carriageway, edge
-    // lines and double centre line come from the same builder the junction's arms use
-    buildRoadSegment(ctx, kx, kz + 30, 0, { roadClass: 'local', lengthM: 26, median: 'paint', ground });
+    buildSignalIntersection(ctx, site.x, site.z, 0, {
+      roadClass: 'local',
+      armsM: ARM,
+      walkWidthM: WALK,
+      lights: true,
+      ground: bed,
+      furnitureGround: walkTop,
+    });
+    // the junction's own cross-section, so the arms' walks are in groundHeightAt too
+    this.streetSpines.push({ ax: site.x - armEnd, az: site.z, bx: site.x + armEnd, bz: site.z, half: HALF, walkW: WALK });
+    this.streetSpines.push({ ax: site.x, az: site.z - armEnd, bx: site.x, bz: site.z + armEnd, half: HALF, walkW: WALK });
 
-    // trotoar up the north arm and along the west arm, one module each side
-    buildKerbWalk(ctx, kx + 4.3, kz + 8.65, 0, { lengthM: 8.7, crossingAt: -0.5, ground });
-    buildKerbWalk(ctx, kx - 4.3, kz + 8.65, Math.PI, { lengthM: 8.7, crossingAt: -0.5, ground });
-    buildKerbWalk(ctx, kx - 10.5, kz + 4.3, -Math.PI / 2, { lengthM: 13, tactile: false, ground });
-    buildKerbWalk(ctx, kx - 10.5, kz - 4.3, Math.PI / 2, { lengthM: 13, tactile: false, ground });
+    /** one street run out of the junction, from `from` to `to` metres along the arm */
+    const run = (dx: number, dz: number, from: number, to: number, features: Record<string, unknown>) => {
+      const len = to - from;
+      if (len < 16) return;
+      const mid = (from + to) / 2;
+      buildStreetRun(ctx, site.x + dx * mid, site.z + dz * mid, Math.atan2(dx, dz), {
+        roadClass: 'local',
+        lengthM: len,
+        walkWidthM: WALK,
+        ground: bed,
+        furnitureGround: walkTop,
+        ...features,
+      });
+      this.streetSpines.push({
+        ax: site.x + dx * from,
+        az: site.z + dz * from,
+        bx: site.x + dx * to,
+        bz: site.z + dz * to,
+        half: HALF,
+        walkW: WALK,
+      });
+    };
 
-    // the furniture that repeats: two poles with one sagging span between them, the name blade on
-    // the corner, the bollards at the crossing mouth, and the covers in the carriageway
-    buildUtilityPole(ctx, kx + 8.6, kz + 6.0, 0, { spanM: 12, ground });
-    buildUtilityPole(ctx, kx + 20.6, kz + 6.0, 0, { spanM: 12, cables: false, ground });
-    buildStreetNameSign(ctx, kx + 5.7, kz + 5.2, Math.PI / 2, { ground });
-    buildBollard(ctx, kx + 4.5, kz + 5.6, 0, { ground });
-    buildBollard(ctx, kx + 4.5, kz + 7.0, 0, { ground });
-    buildManhole(ctx, kx + 1.2, kz + 14.0, 0, { ground });
-    buildDrainGrate(ctx, kx - 2.4, kz + 15.0, 0, { ground });
+    // which arm, if any, ends on a cross corridor in a T? The one with the most room decides.
+    const T_STEM = 16;
+    const dirs = [
+      { dx: 0, dz: -1, reach: site.n },
+      { dx: 0, dz: 1, reach: site.s },
+      { dx: 1, dz: 0, reach: site.e },
+      { dx: -1, dz: 0, reach: site.w },
+    ];
+    const tSite = dirs.find((d) => {
+      if (d.reach < 96) return false;
+      const tx = site.x + d.dx * 90;
+      const tz = site.z + d.dz * 90;
+      const across = Math.min(this.streetReach(tx, tz, -d.dz, d.dx), this.streetReach(tx, tz, d.dz, -d.dx));
+      return across >= 14;
+    }) ?? null;
+
+    // the runs. The one that ends in the T stops where the T's own stem asphalt begins; the rest run
+    // out to whatever the city left clear, capped at a block.
+    for (const d of dirs) {
+      const isT = !!tSite && tSite.dx === d.dx && tSite.dz === d.dz;
+      // An arm that ends at the T stops where the T's stem asphalt begins. Every other arm runs out
+      // to the next crossing of the 90 m lattice and is closed with an end cap there: a block of
+      // street, not a slice of asphalt that stops in the middle of the ground.
+      const end = isT ? 90 - HALF - T_STEM : Math.min(d.reach - 3, 90 - HALF);
+      if (end - armEnd < 16) continue;
+      const mid = (armEnd + end) / 2;
+      const span = end - armEnd;
+      const features: Record<string, unknown> = {
+        ...(isT ? {} : { capEnd: true }),
+      };
+      if (d.dz === -1) {
+        // the hero run: a crossing mid-block, a bus bay cut into one trotoar, two driveway
+        // aprons in the other, and the poles, blade and bollards that make it a street
+        features.crossings = [{ at: 0 }];
+        features.bays = [{ side: 1, at: span * 0.32, lengthM: 13, depthM: 2.2 }];
+        features.driveways = [
+          { side: -1, at: -span * 0.3, widthM: 3.6 },
+          { side: -1, at: -span * 0.14, widthM: 3.0 },
+        ];
+      } else if (d.dz === 1) {
+        features.crossings = [{ at: 0 }];
+      }
+      run(d.dx, d.dz, armEnd, end, features);
+    }
+
+    if (tSite) {
+      const tx = site.x + tSite.dx * 90;
+      const tz = site.z + tSite.dz * 90;
+      const reachA = this.streetReach(tx, tz, -tSite.dz, tSite.dx);
+      const reachB = this.streetReach(tx, tz, tSite.dz, -tSite.dx);
+      const throughM = Math.max(11, Math.min(26, Math.min(reachA, reachB) - 2));
+      // yaw puts the T's local +z (its stem) back down the arm it serves
+      buildTIntersection(ctx, tx, tz, Math.atan2(-tSite.dx, -tSite.dz), {
+        roadClass: 'local',
+        widthM: HALF * 2,
+        stemWidthM: HALF * 2,
+        throughM,
+        stemM: T_STEM,
+        walkWidthM: WALK,
+        ground: bed,
+      });
+      this.streetSpines.push({
+        ax: tx + tSite.dz * throughM,
+        az: tz - tSite.dx * throughM,
+        bx: tx - tSite.dz * throughM,
+        bz: tz + tSite.dx * throughM,
+        half: HALF,
+        walkW: WALK,
+      });
+      const stemFrom = 90 - HALF - T_STEM;
+      this.streetSpines.push({
+        ax: site.x + tSite.dx * stemFrom,
+        az: site.z + tSite.dz * stemFrom,
+        bx: tx - tSite.dx * HALF,
+        bz: tz - tSite.dz * HALF,
+        half: HALF,
+        walkW: WALK,
+      });
+    }
+  }
+
+  /** distance from a point to one of the kit's street spines, and so to its kerb lines */
+  private spineDistance(x: number, z: number, s: { ax: number; az: number; bx: number; bz: number }): number {
+    const dx = s.bx - s.ax;
+    const dz = s.bz - s.az;
+    const l2 = dx * dx + dz * dz || 1;
+    let t = ((x - s.ax) * dx + (z - s.az) * dz) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(x - (s.ax + dx * t), z - (s.az + dz * t));
+  }
+
+  /**
+   * Is the ground here free of everything a street cannot cross? Blocks (a plate may not sit on the
+   * carriageway), the map's own roads, the rivers, and the landmarks. `PAD` is half the kit's
+   * cross-section - 8 m of carriageway plus a 3.6 m trotoar and its kerb - plus a kerb's grace.
+   */
+  streetClear(x: number, z: number) {
+    const PAD = 8.6;
+    for (const b of this.blocks) {
+      const half = (b.size ?? BLOCK) / 2;
+      if (Math.abs(x - b.x) < half + PAD && Math.abs(z - b.z) < half + PAD) return false;
+    }
+    const { grid, segs, CELL } = this.roadSegments();
+    const list = grid.get(Math.floor(x / CELL) + ',' + Math.floor(z / CELL));
+    if (list) {
+      for (const i of list) {
+        const b = i * 5;
+        const x1 = segs[b];
+        const z1 = segs[b + 1];
+        const dx = segs[b + 2] - x1;
+        const dz = segs[b + 3] - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)) < segs[b + 4] + PAD) return false;
+      }
+    }
+    for (const lm of LANDMARKS) if (Math.hypot(x - lm.x, z - lm.z) < 34) return false;
+    return true;
+  }
+
+  /**
+   * Every mapped road and river as a segment in a 40 m grid. A clearance test then touches the ~20
+   * segments near the point instead of all 4,000, which is the difference between a site search that
+   * costs a second and one that costs a frame.
+   */
+  private roadSegments() {
+    if (this.roadGrid) return this.roadGrid;
+    const CELL = 40;
+    const grid = new Map<string, number[]>();
+    const segs: number[] = [];
+    // A mapped arterial carries 3.8 m of trotoar beyond its kerb - further out than the carriageway
+    // the road list measures. A street the kit lays has to clear that paving, not just the asphalt:
+    // without the extra 3.9 m a run could stand its own trotoar inside the arterial's, and then
+    // `groundHeightAt` answered 26 cm where the kit's props stood at 17.
+    const walkPaths = new Set(WALK_ROADS.map((w) => w.path));
+    const lanes: { path: [number, number][]; width: number; extra: number }[] = [
+      ...this.roads.map((r) => ({ path: r.path as [number, number][], width: r.width, extra: walkPaths.has(r.path) ? 3.9 : 0 })),
+      ...RIVERS.map((v) => ({ path: v.path as [number, number][], width: v.width, extra: 4 })),
+    ];
+    for (const r of lanes) {
+      for (let s = 0; s < r.path.length - 1; s++) {
+        const [x1, z1] = r.path[s];
+        const [x2, z2] = r.path[s + 1];
+        const clearance = r.width / 2 + r.extra;
+        const i = segs.length;
+        segs.push(x1, z1, x2, z2, clearance);
+        const pad = clearance + 12;
+        const i0 = Math.floor((Math.min(x1, x2) - pad) / CELL);
+        const i1 = Math.floor((Math.max(x1, x2) + pad) / CELL);
+        const j0 = Math.floor((Math.min(z1, z2) - pad) / CELL);
+        const j1 = Math.floor((Math.max(z1, z2) + pad) / CELL);
+        for (let a = i0; a <= i1; a++) {
+          for (let b = j0; b <= j1; b++) {
+            const k = a + ',' + b;
+            const list = grid.get(k);
+            if (list) list.push(i);
+            else grid.set(k, [i]);
+          }
+        }
+      }
+    }
+    this.roadGrid = { grid, segs, CELL };
+    return this.roadGrid;
+  }
+
+  /** how far the ground stays clear of everything, walking out from (x, z) */
+  streetReach(x: number, z: number, dx: number, dz: number, step = 3) {
+    let d = 0;
+    while (d <= 126 && this.streetClear(x + dx * d, z + dz * d)) d += step;
+    return d;
+  }
+
+  /**
+   * A crossing of the 90 m block lattice with enough clear ground for a junction and four runs.
+   *
+   * The corridor between two rows of blocks is 24-30 m wide and the map's local streets cut across it
+   * every 112 m, so where a street fits is not where the lattice says it should: the search walks a
+   * +-8 m lateral offset grid around each crossing and keeps the first site whose every approach is
+   * clear far enough to be a street and not a stub. Deterministic for a given city - the lattice is
+   * fixed, only block sizes and their +-3 m jitter move.
+   */
+  streetKitSite() {
+    const PITCH_BLOCK = 90;
+    const xs = new Set<number>();
+    const zs = new Set<number>();
+    for (const b of this.blocks) {
+      xs.add(Math.round(b.x / PITCH_BLOCK) * PITCH_BLOCK + PITCH_BLOCK / 2);
+      zs.add(Math.round(b.z / PITCH_BLOCK) * PITCH_BLOCK + PITCH_BLOCK / 2);
+    }
+    const spots: { x: number; z: number; d: number }[] = [];
+    for (const ox of [0, 4, -4, 8, -8]) {
+      for (const oz of [0, 4, -4, 8, -8]) {
+        for (const x of xs) {
+          for (const z of zs) {
+            const px = x + ox;
+            const pz = z + oz;
+            const d = Math.hypot(px, pz);
+            if (d > 760) continue;
+            if (!this.streetClear(px, pz)) continue;
+            spots.push({ x: px, z: pz, d });
+          }
+        }
+      }
+    }
+    spots.sort((a, b) => a.d - b.d);
+    // coarse pass: rank by how much room there is, and prefer the site squeezed between two block
+    // rows (a 9-15 m margin either side) over one standing in a void - a street with no blocks on it
+    // is a road in a field
+    const coarse = spots.map((s) => {
+      const m = Math.min(
+        this.streetReach(s.x, s.z, 1, 0, 12),
+        this.streetReach(s.x, s.z, -1, 0, 12),
+        this.streetReach(s.x, s.z, 0, -1, 12),
+        this.streetReach(s.x, s.z, 0, 1, 12)
+      );
+      let gap = 999;
+      for (const b of this.blocks) {
+        const half = (b.size ?? BLOCK) / 2;
+        gap = Math.min(gap, Math.max(Math.abs(s.x - b.x) - half, Math.abs(s.z - b.z) - half));
+      }
+      return { ...s, m, gap };
+    });
+    const usable = coarse.filter((s) => s.m >= 36).sort((a, b) => a.gap - b.gap || a.d - b.d);
+    let fallback: { x: number; z: number; e: number; w: number; n: number; s: number; min: number } | null = null;
+    for (const s of usable.slice(0, 8)) {
+      const e = this.streetReach(s.x, s.z, 1, 0);
+      const w = this.streetReach(s.x, s.z, -1, 0);
+      const n = this.streetReach(s.x, s.z, 0, -1);
+      const so = this.streetReach(s.x, s.z, 0, 1);
+      const min = Math.min(e, w, n, so);
+      if (min >= 40) return { x: s.x, z: s.z, e, w, n, s: so };
+      if (min >= 26 && (!fallback || min > fallback.min)) fallback = { x: s.x, z: s.z, e, w, n, s: so, min };
+    }
+    return fallback;
   }
 
   buildWater() {
@@ -3860,6 +4133,13 @@ export class City {
     // ojek on the pavement stood 26 cm inside the slab the moment it became visible
     const band = this.pavementBand(x, z);
     if (band) return h + band;
+    // and then the kit's trotoar, which is its own raised band along the streets it laid: a player,
+    // a prop or an audit row standing on it is WALK_TOP_M above the terrain, not inside the slab
+    for (const s of this.streetSpines ?? []) {
+      const d = this.spineDistance(x, z, s);
+      if (d <= s.half) break; // on the carriageway: the terrain, as every other road here
+      if (d <= s.half + KERB_WIDTH + s.walkW) return h + WALK_TOP_M;
+    }
     return h;
   }
 

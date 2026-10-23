@@ -4,11 +4,6 @@ import { canvasTexture, mergeStaticChildren } from '../core/utils';
 /**
  * The street kit: the vocabulary the city repeats most and had no shared words for.
  *
- * Road, kerb, trotoar, signalised junction, traffic light and the furniture that repeats on every
- * Jakarta street are drawn inline in `city.ts` today - a dashed line here, an instanced traffic
- * mast there, a 26 cm plate somewhere else. This file is the one place that knows what a lane is,
- * what a kerb is proud of, how a signal hangs, and which of these things a player can walk into.
- *
  * Every builder has the same shape: `(ctx, x, z, yaw, opts?) => THREE.Group`. It
  *  - builds in a local frame (x across, z along the run, y up from the ground),
  *  - samples `opts.ground` in WORLD coordinates so the surface follows terrain instead of assuming
@@ -17,6 +12,23 @@ import { canvasTexture, mergeStaticChildren } from '../core/utils';
  *  - pushes one audit row per part that stands on the ground, with the bottom it really has,
  *  - pushes a collider only where a body would actually be stopped: poles, cabinets, bollards.
  *    Paint, kerbs, manholes and grates get none - a 12 cm kerb is a step, not a wall.
+ *
+ * v2 answers two defects the first pass shipped:
+ *
+ * 1. It only made intersections. A street consisted of its crossing point and four 13 m stubs, so
+ *    everything between two junctions was bare ground. `buildStreetRun` is now a full cross-section
+ *    of arbitrary length - carriageway, continuous lane markings, a kerb and a trotoar on both
+ *    sides - with the interruptions a real street has: a bus bay cut into the walk, driveway
+ *    aprons, and a zebra whose ramps are paved and sloped. `buildTIntersection` adds the three-arm
+ *    case, so a side street can end on a through road the way most Jakarta gangs do.
+ *
+ * 2. The corner radius was not one rule. Two arms got a kerbed arc and two got a straight kerb laid
+ *    across the middle of the walk, because the `runBox` call for the x-axis kerb passed its across
+ *    and along arguments in the z-axis order - the corner looked rounded from one side of the
+ *    junction and sharp from the other. A corner is now built by one function,
+ *    `cornerReturn()`, called once per quadrant with the radius for the road class from
+ *    `CORNER_RADIUS_M`, and the fillet between the kerb arc and the two kerb lines is asphalt (that
+ *    is the area a turning bus sweeps) instead of a hole that showed the ground plane.
  *
  * Widths are the map's own, never invented: arterial 20 m, collector 12 m, local 8 m. Where the map
  * measures a road differently (Gatot Subroto is 16 m in `jakartamap.ts`) pass `widthM` and say why.
@@ -56,6 +68,16 @@ export interface StreetOpts {
 export const ROAD_CLASS_WIDTH = { arterial: 20, collector: 12, local: 8 } as const;
 export type RoadClass = keyof typeof ROAD_CLASS_WIDTH;
 
+/**
+ * THE corner-radius rule, one value per road class, and nothing else may round a corner.
+ *
+ * Jakarta signalised arterials turn on a short kerb radius - a bus or a truk can still take the
+ * corner, and the pavement does not lose half its depth to the sweep. 6 m on the 20 m arterial,
+ * 5 m on a 12 m collector, 3.5 m on an 8 m local street: local corners are tighter than arterials,
+ * which is the one thing every reference photograph of a Jakarta junction agrees on.
+ */
+export const CORNER_RADIUS_M = { arterial: 6, collector: 5, local: 3.5 } as const;
+
 /** trotoar, kerb stone, and how far the kerb stands proud of the carriageway (card numbers). */
 export const WALK_WIDTH = 3.6;
 export const KERB_WIDTH = 0.3;
@@ -63,11 +85,17 @@ export const KERB_PROUD = 0.12;
 
 // ---------------------------------------------------------------- palette & textures
 
-const texCache: { pavers?: THREE.Texture; hazard?: THREE.Texture } = {};
+const texCache: {
+  pavers?: THREE.Texture;
+  hazard?: THREE.Texture;
+  tactile?: THREE.Texture;
+} = {};
 const matCache: {
   walk?: THREE.MeshStandardMaterial;
-  slab?: THREE.MeshStandardMaterial;
+  slope?: THREE.MeshStandardMaterial;
+  extrude?: THREE.MeshStandardMaterial;
   hazard?: THREE.MeshStandardMaterial;
+  tactileBand?: THREE.MeshStandardMaterial;
 } = {};
 
 function pavers(): THREE.Texture {
@@ -144,25 +172,75 @@ function hazardTex(): THREE.Texture {
   return texCache.hazard;
 }
 
+/**
+ * Tactile studs as a texture rather than 156 tiny boxes per crossing: the band is 60 cm wide and
+ * reads at arm's length, which is the only distance a player ever sees it from.
+ */
+function tactileTex(): THREE.Texture {
+  if (!texCache.tactile) {
+    const tex = canvasTexture(64, 64, (ctx, w, h) => {
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#b08c1c';
+      ctx.fillRect(0, 0, w, 2);
+      ctx.fillRect(0, h - 2, w, 2);
+      ctx.fillStyle = '#dcb643';
+      for (let y = 6; y < h; y += 16) {
+        for (let x = 6; x < w; x += 16) {
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    });
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1 / 0.6, 1 / 0.6);
+    texCache.tactile = tex;
+  }
+  return texCache.tactile;
+}
+
 const walkMaterial = (): THREE.MeshStandardMaterial =>
   (matCache.walk ??= new THREE.MeshStandardMaterial({ map: pavers(), roughness: 0.95 }));
 
 /**
- * The corner slab is an ExtrudeGeometry, whose UVs are the shape's own metres, so it needs the same
- * pavers at 1.8 m per tile instead of 1 per face.
+ * Ramps and aprons are quads with their own UVs in metres, so they need the pavers at one tile per
+ * 1.8 m rather than one per face.
  */
-const slabMaterial = (): THREE.MeshStandardMaterial => {
-  if (!matCache.slab) {
+const slopeMaterial = (): THREE.MeshStandardMaterial => {
+  if (!matCache.slope) {
     const tex = pavers().clone();
     tex.needsUpdate = true;
     tex.repeat.set(1 / 1.8, 1 / 1.8);
-    matCache.slab = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.96 });
+    matCache.slope = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.96 });
   }
-  return matCache.slab;
+  return matCache.slope;
 };
+
+/**
+ * The corner slab is an ExtrudeGeometry, and an extrusion is not indexed while every box and quad
+ * here is. `mergeStaticChildren` buckets by material and refuses to merge a mixed bucket, which
+ * silently drops the whole mesh - so the extrusion gets a material of its own, one extra draw call
+ * per junction, and everything else stays merged.
+ */
+const slabMaterial = (): THREE.MeshStandardMaterial => {
+  if (!matCache.extrude) {
+    const tex = pavers().clone();
+    tex.needsUpdate = true;
+    tex.repeat.set(1 / 1.8, 1 / 1.8);
+    matCache.extrude = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.96 });
+  }
+  return matCache.extrude;
+};
+
+const tactileMaterial = (): THREE.MeshStandardMaterial =>
+  (matCache.tactileBand ??= new THREE.MeshStandardMaterial({ map: tactileTex(), roughness: 0.9 }));
 
 const hazardMaterial = (): THREE.MeshStandardMaterial =>
   (matCache.hazard ??= new THREE.MeshStandardMaterial({ map: hazardTex(), roughness: 0.8 }));
+
+// Extruded corner slabs are the one geometry the merge refuses to mix with boxes (an extrusion is
+// not indexed), so they get a material of their own and their own draw call per junction.
 
 const M = {
   asphalt: new THREE.MeshStandardMaterial({ color: 0x1b1f24, roughness: 1 }),
@@ -186,6 +264,8 @@ const M = {
   porcelain: new THREE.MeshStandardMaterial({ color: 0x5a4636, roughness: 0.4, metalness: 0.1 }),
   cable: new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.9 }),
   walk: walkMaterial(),
+  slope: slopeMaterial(),
+  tactileBand: tactileMaterial(),
   hazard: hazardMaterial(),
 };
 
@@ -269,12 +349,106 @@ function runBox(
   }
 }
 
+/**
+ * A slab of ground between four explicit extents, cut into `step`-metre pieces along its length so
+ * it follows the terrain. This is the workhorse the kerb, the trotoar and a bus bay are built from:
+ * `across` is measured from the road edge outwards, `along` is the run direction.
+ */
+function slab(
+  k: Kit,
+  axis: 'x' | 'z',
+  across0: number,
+  across1: number,
+  along0: number,
+  along1: number,
+  h0: number,
+  h1: number,
+  material: THREE.Material,
+  step = 2.5
+): void {
+  if (across1 - across0 < 0.001 || along1 - along0 < 0.001) return;
+  const n = Math.max(1, Math.ceil((along1 - along0) / step));
+  const seg = (along1 - along0) / n;
+  for (let s = 0; s < n; s++) {
+    const a = along0 + s * seg;
+    const b = a + seg;
+    const ac = (across0 + across1) / 2;
+    const al = (a + b) / 2;
+    const lx = axis === 'z' ? ac : al;
+    const lz = axis === 'z' ? al : ac;
+    const box =
+      axis === 'z'
+        ? new THREE.BoxGeometry(across1 - across0, h1 - h0, seg + 0.02)
+        : new THREE.BoxGeometry(seg + 0.02, h1 - h0, across1 - across0);
+    const m = new THREE.Mesh(box, material);
+    m.position.set(lx, k.gy(lx, lz) + (h0 + h1) / 2, lz);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    k.g.add(m);
+  }
+}
+
+/**
+ * A planar face with a height per corner, welded to the terrain under each corner. `pts` are local
+ * (x, z) with the height above the ground at that point - a crossing ramp, a driveway apron and the
+ * quarter-circle fillet at a junction corner are all this one primitive.
+ *
+ * Winding is resolved from the signed area, so a mirrored call (the same corner on the other side of
+ * the road) still faces up. That is the bug class this kit shipped: a surface built with corners in
+ * the wrong order is culled by FrontSide and the player sees the ground plane instead.
+ */
+function polyFace(
+  k: Kit,
+  pts: [number, number, number][],
+  material: THREE.Material,
+  uvScale = 1
+): THREE.Mesh | null {
+  if (pts.length < 3) return null;
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    area += a[0] * b[1] - b[0] * a[1];
+  }
+  const list = area > 0 ? [...pts].reverse() : pts;
+  const pos: number[] = [];
+  const uv: number[] = [];
+  for (const [lx, lz, h] of list) {
+    pos.push(lx, k.gy(lx, lz) + h, lz);
+    uv.push(lx * uvScale, lz * uvScale);
+  }
+  const idx: number[] = [];
+  for (let i = 1; i < list.length - 1; i++) idx.push(0, i, i + 1);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.receiveShadow = true;
+  k.g.add(mesh);
+  return mesh;
+}
+
 /** The city draws its road ribbons 5 cm over the terrain; the kit matches that, or every surface
  *  coplanar with the ground mesh z-fights at distance. Everything on the carriageway stacks on it. */
 const ROAD_LIFT = 0.05;
 
 /** Paint: no thickness worth casting a shadow with, lifted just clear of the asphalt. */
 const PAINT_LIFT = ROAD_LIFT + 0.022;
+
+/** Top of the kerb stone and of the trotoar: 12 cm proud of the carriageway. */
+const WALK_TOP = ROAD_LIFT + KERB_PROUD;
+
+/** The two heights the city needs to seat the player and its props: the carriageway and the walk. */
+export const ROAD_LIFT_M = ROAD_LIFT;
+export const WALK_TOP_M = WALK_TOP;
+
+/** How deep a crossing ramp or a driveway apron cuts into the walk. */
+const RAMP_DEPTH = 1.2;
+
+/** Width of the painted zebra and therefore of the ramp that lands on it. */
+const ZEBRA_LEN = 3;
 
 function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, start: number): number {
   let size = start;
@@ -354,6 +528,280 @@ function kit(ctx: StreetCtx, x: number, z: number, yaw: number, opts?: StreetOpt
   return new Kit(ctx, x, z, yaw, opts);
 }
 
+// ---------------------------------------------------------------- the cross-section
+
+/** Where a run is measured from: along z (the default) or along x for the arm of a junction. */
+type RunAxis = 'x' | 'z';
+
+interface Across {
+  axis: RunAxis;
+  /** +1 keeps the walk on the +x (or +z) side of a z-aligned (x-aligned) road */
+  side: -1 | 1;
+}
+
+/** local -> local after mirroring an across coordinate onto the chosen side */
+function acrossPoint(o: Across, acrossM: number, along: number): [number, number] {
+  const a = o.side * acrossM;
+  return o.axis === 'z' ? [a, along] : [along, a];
+}
+
+/** One interruption of a trotoar: a ramp down to the road (crossing or driveway). */
+interface WalkCut {
+  /** centre, metres along the run */
+  at: number;
+  width: number;
+  /** how far into the walk the ramp reaches */
+  depth: number;
+  /** paint the tactile stud band behind the ramp */
+  tactile?: boolean;
+}
+
+/** A bus bay: the walk is pushed back and the carriageway widens into it. */
+interface WalkBay {
+  at: number;
+  length: number;
+  depth: number;
+}
+
+/**
+ * One side of a street: kerb stone, trotoar, and the two things that interrupt them - a ramp where a
+ * crossing or a driveway meets the walk, and a bus bay cut into it.
+ *
+ * The kerb face is at `half` (the road edge), the kerb stone is `KERB_WIDTH` wide behind it and the
+ * walk runs another `walkWidthM` back, so the cross-section is the same for a run, a junction arm
+ * and a T-junction mouth. That sameness is what makes the street read as one street.
+ */
+function pavementSide(
+  k: Kit,
+  o: Across & {
+    half: number;
+    z0: number;
+    z1: number;
+    walkW?: number;
+    cuts?: WalkCut[];
+    bays?: WalkBay[];
+    /** draw the linear drain channel at the back of the walk */
+    drain?: boolean;
+  }
+): void {
+  const walkW = o.walkW ?? WALK_WIDTH;
+  const cut = KERB_WIDTH;
+  const outer = o.half + cut + walkW;
+  const cuts = (o.cuts ?? []).map((c) => ({ ...c, from: c.at - c.width / 2, to: c.at + c.width / 2 }));
+  const bays = (o.bays ?? []).map((b) => ({ ...b, from: b.at - b.length / 2, to: b.at + b.length / 2 }));
+
+  const edges = new Set<number>([o.z0, o.z1]);
+  for (const c of [...cuts, ...bays]) {
+    edges.add(Math.max(o.z0, Math.min(o.z1, c.from)));
+    edges.add(Math.max(o.z0, Math.min(o.z1, c.to)));
+  }
+  const stops = [...edges].sort((a, b) => a - b);
+
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (b - a < 0.02) continue;
+    const mid = (a + b) / 2;
+    const hitCut = cuts.find((c) => mid > c.from && mid < c.to);
+    const hitBay = bays.find((v) => mid > v.from && mid < v.to);
+    // a bay makes the carriageway reach further out; a ramp does not move the kerb line, it slopes
+    const inner = o.half + (hitBay ? hitBay.depth : 0);
+
+    if (hitBay) {
+      // the bay's floor is asphalt, laid from the road edge out to the pushed-back kerb
+      slab2(k, o, o.half, inner, a, b, M.asphalt, ROAD_LIFT, ROAD_LIFT + 0.01);
+    }
+
+    if (hitCut) {
+      // a dropped kerb: the walk starts `depth` metres back and a paver ramp climbs to it
+      const rampOuter = inner + hitCut.depth;
+      if (hitCut.tactile) {
+        // stud band immediately behind the ramp, where a cane finds it before the kerb
+        drawBand(k, o, inner + hitCut.depth, Math.min(outer, inner + hitCut.depth + 0.6), a, b, 0.006);
+      }
+      ramp(k, o, inner, rampOuter, a, b);
+      slab2(k, o, rampOuter, outer, a, b);
+    } else {
+      // kerb stone, its lighter nose at the road face, then the walk
+      slab2(k, o, inner, inner + cut, a, b, M.kerb);
+      const nose = 0.1;
+      slab2(k, o, inner, inner + nose, a, b, M.kerbNose, WALK_TOP - 0.03, WALK_TOP);
+      slab2(k, o, inner + cut, outer, a, b);
+    }
+  }
+
+  // the diagonal kerb return at each end of a bay, so it reads as a bay and not a widened road
+  for (const bay of bays) {
+    for (const end of [bay.from, bay.to]) {
+      const dir = end === bay.from ? -1 : 1;
+      const stone = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(bay.depth, bay.depth), KERB_PROUD, KERB_WIDTH), M.kerb);
+      const [px, pz] = acrossPoint(o, o.half + bay.depth / 2, end + dir * bay.depth / 2);
+      stone.rotation.y = o.axis === 'z' ? o.side * dir * (Math.PI / 4) : Math.PI / 2 - o.side * dir * (Math.PI / 4);
+      k.plant(stone, px, pz, ROAD_LIFT + KERB_PROUD / 2);
+    }
+  }
+
+  if (o.drain) {
+    for (let d = o.z0 + 1; d < o.z1 - 1; d += 0.4) {
+      const [px, pz] = acrossPoint(o, outer - 0.18, d);
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.03, 0.05), M.iron);
+      bar.rotation.y = o.axis === 'z' ? 0 : Math.PI / 2;
+      k.plant(bar, px, pz, ROAD_LIFT + 0.012);
+    }
+  }
+}
+
+/** a walk slab between two across coordinates, at the walk top */
+function slab2(
+  k: Kit,
+  o: Across,
+  a0: number,
+  a1: number,
+  along0: number,
+  along1: number,
+  material: THREE.Material = M.walk,
+  h0 = ROAD_LIFT,
+  h1 = WALK_TOP
+): void {
+  const [x0, z0] = acrossPoint(o, a0, along0);
+  const [x1, z1] = acrossPoint(o, a1, along1);
+  slab(k, o.axis, Math.min(x0, x1), Math.max(x0, x1), Math.min(z0, z1), Math.max(z0, z1), h0, h1, material);
+}
+
+/** the tactile stud band on top of the walk */
+function drawBand(
+  k: Kit,
+  o: Across,
+  a0: number,
+  a1: number,
+  along0: number,
+  along1: number,
+  lift: number
+): void {
+  const [x0, z0] = acrossPoint(o, a0, along0);
+  const [x1, z1] = acrossPoint(o, a1, along1);
+  const w = Math.abs(x1 - x0) || 0.6;
+  const d = Math.abs(z1 - z0) || 0.6;
+  const geo = o.axis === 'z' ? new THREE.BoxGeometry(w, 0.02, d) : new THREE.BoxGeometry(d, 0.02, w);
+  const mesh = new THREE.Mesh(geo, M.tactileBand);
+  k.plant(mesh, (x0 + x1) / 2, (z0 + z1) / 2, WALK_TOP + lift);
+}
+
+/**
+ * The ramp itself: a paved slope from the carriageway up to the walk, which is what a kerb ramp is.
+ * It replaces the flat white slab the first pass drew at every crossing.
+ */
+function ramp(k: Kit, o: Across, a0: number, a1: number, along0: number, along1: number): void {
+  const pts: [number, number, number][] = [];
+  for (const [acrossM, h] of [
+    [a0, ROAD_LIFT + 0.008],
+    [a1, WALK_TOP],
+  ] as [number, number][]) {
+    for (const along of [along0, along1]) {
+      const [x, z] = acrossPoint(o, acrossM, along);
+      pts.push([x, z, h]);
+    }
+  }
+  polyFace(k, [pts[0], pts[1], pts[3], pts[2]], M.slope, 1);
+}
+
+// ---------------------------------------------------------------- carriageway + markings
+
+interface RoadSurfaceOpts {
+  half: number;
+  length: number;
+  lanes: number;
+  median: 'none' | 'paint' | 'raised';
+  /** intervals along the run where the markings must stop (a zebra sits there) */
+  breaks?: [number, number][];
+  centre?: boolean;
+}
+
+/**
+ * A painted strip that follows the ground instead of a single flat plane.
+ *
+ * A 30 m plane planted at the height of its own midpoint is 2 cm below the asphalt at the ends of a
+ * noticeable slope, and the asphalt - which conforms per vertex - buries it: the edge line vanished
+ * for 16 m of a 68 m block on the first run of this, which is exactly the kind of break a player
+ * reads as "the markings stop". Subdivide every 2 m and sample the ground per vertex instead.
+ */
+function paintStrip(k: Kit, acrossM: number, width: number, along0: number, along1: number): void {
+  const d = along1 - along0;
+  if (d <= 0.02) return;
+  gridMesh(k, width, d, 1, Math.max(1, Math.round(d / 2)), PAINT_LIFT, M.paint, acrossM, (along0 + along1) / 2);
+}
+
+/** The same, for a strip that runs along x instead of along z (an x-aligned arm's zebra). */
+function paintStripX(k: Kit, acrossM: number, width: number, along0: number, along1: number): void {
+  const d = along1 - along0;
+  if (d <= 0.02) return;
+  gridMesh(k, d, width, Math.max(1, Math.round(d / 2)), 1, PAINT_LIFT, M.paint, (along0 + along1) / 2, acrossM);
+}
+
+/** Asphalt with the markings a Jakarta carriageway actually carries. */
+function roadSurface(k: Kit, o: RoadSurfaceOpts): void {
+  const len = o.length;
+  const z0 = -len / 2;
+  const z1 = len / 2;
+  gridMesh(k, o.half * 2, len, 4, Math.max(4, Math.round(len / 4)), ROAD_LIFT, M.asphalt);
+
+  const spans = subtract(z0, z1, o.breaks ?? []);
+  const laneW = (o.half * 2) / o.lanes;
+
+  for (const [a, b] of spans) {
+    // continuous edge line, 30 cm in from the kerb face
+    for (const side of [-1, 1]) paintStrip(k, side * (o.half - 0.3), 0.15, a, b);
+    // lane dividers, skipping the centreline which the median owns
+    for (let i = 1; i < o.lanes; i++) {
+      const lx = -o.half + laneW * i;
+      if (Math.abs(lx) < laneW * 0.5 + 0.01) continue;
+      for (let d = a + 1.5; d + 3 < b; d += 8) paintStrip(k, lx, 0.12, d, d + 3);
+    }
+    if (o.median === 'paint' && o.centre !== false) {
+      for (const off of [-0.14, 0.14]) paintStrip(k, off, 0.12, a, b);
+    }
+  }
+
+  if (o.median === 'raised') {
+    const mw = 1.5;
+    for (const side of [-1, 1]) {
+      runBox(k, 'z', 0.2, 0.34, len, side * (mw / 2 - 0.1), 0, M.kerb, 2.5, ROAD_LIFT);
+    }
+    gridMesh(k, mw - 0.4, len, 2, Math.max(2, Math.round(len / 6)), ROAD_LIFT + 0.3, M.soil);
+    for (let d = z0 + 3; d < z1 - 3; d += 2.6) {
+      const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 0), M.shrub);
+      bush.scale.set(1, 0.62, 1);
+      bush.castShadow = true;
+      k.plant(bush, Math.sin(d * 1.7) * 0.28, d, ROAD_LIFT + 0.42);
+    }
+    k.collider(0, 0, mw / 2, len / 2, 0.34);
+  }
+}
+
+/** [a, b] minus the given intervals, in order. */
+function subtract(a: number, b: number, holes: [number, number][]): [number, number][] {
+  const sorted = [...holes].filter(([x, y]) => y > a && x < b).sort((p, q) => p[0] - q[0]);
+  const out: [number, number][] = [];
+  let cursor = a;
+  for (const [x, y] of sorted) {
+    if (x > cursor) out.push([cursor, Math.min(x, b)]);
+    cursor = Math.max(cursor, Math.min(y, b));
+  }
+  if (cursor < b) out.push([cursor, b]);
+  return out;
+}
+
+/** The painted zebra: white bars across the carriageway, longitudinal to travel. */
+function zebra(k: Kit, axis: RunAxis, half: number, at: number, len = ZEBRA_LEN): void {
+  const stripeW = 0.45;
+  const bars = Math.floor((half * 2 - 0.8) / (stripeW * 2));
+  for (let i = 0; i < bars; i++) {
+    const off = -((bars - 1) / 2) * stripeW * 2 + i * stripeW * 2;
+    if (axis === 'z') paintStrip(k, off, stripeW, at - len / 2, at + len / 2);
+    else paintStripX(k, off, stripeW, at - len / 2, at + len / 2);
+  }
+}
+
 // ---------------------------------------------------------------- 1. road segment
 
 export interface RoadSegmentOpts extends StreetOpts {
@@ -361,9 +809,13 @@ export interface RoadSegmentOpts extends StreetOpts {
   /** a width taken from the map for a road that is not one of the three classes (e.g. 16 m) */
   widthM?: number;
   lengthM?: number;
-  /** lanes across the whole carriageway; default arterial 4, collector 4, local 2 */
+  /** lanes across the whole carriageway; default arterial 6, collector 4, local 2 */
   lanes?: number;
   median?: 'none' | 'paint' | 'raised';
+}
+
+export function defaultLanes(cls: RoadClass): number {
+  return cls === 'local' ? 2 : cls === 'arterial' ? 6 : 4;
 }
 
 /**
@@ -384,57 +836,12 @@ export function buildRoadSegment(
   const cls = opts.roadClass ?? 'collector';
   const width = opts.widthM ?? ROAD_CLASS_WIDTH[cls];
   const length = opts.lengthM ?? 40;
-  const half = width / 2;
-  // 20 m of asphalt with a 1.5 m median is three 3.3 m lanes a side, which is what the photo of
-  // Sudirman (street-ref-2) shows once you discount the busway; a collector is two a side.
-  const lanes = opts.lanes ?? (cls === 'local' ? 2 : cls === 'arterial' ? 6 : 4);
-  const median = opts.median ?? (cls === 'arterial' ? 'raised' : 'paint');
-
-  gridMesh(k, width, length, 4, Math.max(4, Math.round(length / 4)), ROAD_LIFT, M.asphalt);
-
-  // continuous edge line, 30 cm in from the kerb face
-  for (const side of [-1, 1]) {
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.15, length), M.paint);
-    strip.rotation.x = -Math.PI / 2;
-    k.plant(strip, side * (half - 0.3), 0, PAINT_LIFT);
-  }
-
-  // lane dividers: dashes, skipping the centreline (that is the median's business)
-  const laneW = width / lanes;
-  for (let i = 1; i < lanes; i++) {
-    const lx = -half + laneW * i;
-    if (Math.abs(lx) < laneW * 0.5 + 0.01) continue;
-    for (let d = -length / 2 + 3; d < length / 2 - 3; d += 8) {
-      const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 3), M.paint);
-      dash.rotation.x = -Math.PI / 2;
-      k.plant(dash, lx, d, PAINT_LIFT);
-    }
-  }
-
-  if (median === 'paint') {
-    // double centre line on the narrower classes
-    for (const off of [-0.14, 0.14]) {
-      const line = new THREE.Mesh(new THREE.PlaneGeometry(0.12, length), M.paint);
-      line.rotation.x = -Math.PI / 2;
-      k.plant(line, off, 0, PAINT_LIFT);
-    }
-  } else if (median === 'raised') {
-    // a planted median, kerbed both sides (street-ref-2). 1.5 m is the narrow end of what the photo
-    // shows; the fill is soil with low clipped shrubs, not lawn.
-    const mw = 1.5;
-    for (const side of [-1, 1]) {
-      runBox(k, 'z', 0.2, 0.34, length, side * (mw / 2 - 0.1), 0, M.kerb, 2.5, ROAD_LIFT);
-    }
-    gridMesh(k, mw - 0.4, length, 2, Math.max(2, Math.round(length / 6)), ROAD_LIFT + 0.3, M.soil);
-    for (let d = -length / 2 + 3; d < length / 2 - 3; d += 2.6) {
-      const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 0), M.shrub);
-      bush.scale.set(1, 0.62, 1);
-      bush.castShadow = true;
-      k.plant(bush, Math.sin(d * 1.7) * 0.28, d, ROAD_LIFT + 0.42);
-    }
-    k.collider(0, 0, mw / 2, length / 2, 0.34);
-  }
-
+  roadSurface(k, {
+    half: width / 2,
+    length,
+    lanes: opts.lanes ?? defaultLanes(cls),
+    median: opts.median ?? (cls === 'arterial' ? 'raised' : 'paint'),
+  });
   k.finish(`street:road-${cls}`, 0, 0);
   return k.g;
 }
@@ -443,6 +850,7 @@ export function buildRoadSegment(
 
 export interface KerbWalkOpts extends StreetOpts {
   lengthM?: number;
+  walkWidthM?: number;
   /** tactile studs at a crossing, 60 cm band as in street-ref-3 */
   tactile?: boolean;
   /** where along the run the crossing sits */
@@ -452,58 +860,640 @@ export interface KerbWalkOpts extends StreetOpts {
 }
 
 /**
- * Kerb + trotoar module. The kerb stone is 30 cm wide and stands 12 cm proud of the carriageway;
- * the walk behind it is 3.6 m. Local frame: the kerb face is at x = -0.3, the walk runs to x = +3.9,
- * so a caller mirrors it with yaw = PI.
+ * A single kerb + trotoar module, for a caller that wants one side only.
+ *
+ * Local frame: the kerb face is at x = 0 and the walk runs to x = +walkWidthM, so a caller mirrors it
+ * with yaw = PI. `buildStreetRun` uses the same machinery for both sides at once.
  */
 export function buildKerbWalk(ctx: StreetCtx, x: number, z: number, yaw: number, opts: KerbWalkOpts = {}): THREE.Group {
   const k = kit(ctx, x, z, yaw, opts);
   const length = opts.lengthM ?? 30;
-  const crossingAt = opts.crossingAt ?? 0;
-
-  // kerb stone: the exposed band between asphalt and walk, 12 cm of it
-  runBox(k, 'z', KERB_WIDTH, KERB_PROUD, length, -KERB_WIDTH / 2, 0, M.kerb, 2.5, ROAD_LIFT);
-  // a lighter 10 cm cap along the road edge, which is what a kerb looks like from a car
-  runBox(k, 'z', 0.1, 0.03, length, -KERB_WIDTH + 0.05, 0, M.kerbNose, 2.5, ROAD_LIFT + KERB_PROUD - 0.03);
-
-  // walk: one textured slab per 2.5 m, flush behind the kerb, following the ground under it
-  runBox(k, 'z', WALK_WIDTH, KERB_PROUD, length, WALK_WIDTH / 2, 0, M.walk, 2.5, ROAD_LIFT);
-
-  // tactile studs where the crossing meets the walk: 60 cm band of truncated domes
-  if (opts.tactile !== false) {
-    const bandZ = crossingAt;
-    for (let i = 0; i < 6; i++) {
-      for (let j = 0; j < 26; j++) {
-        const stud = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.014, 0.055), M.tactile);
-        k.plant(stud, 0.25 + i * 0.1, bandZ - 1.56 + j * 0.12, ROAD_LIFT + KERB_PROUD + 0.007);
-      }
-    }
-    // a directional bar strip leads out of the studs, like the guidance strip in street-ref-3
-    for (let j = 0; j < 8; j++) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.012, 0.07), M.tactile);
-      k.plant(bar, 1.05, bandZ - 1.54 + j * 0.44, ROAD_LIFT + KERB_PROUD + 0.006);
-    }
-    // painted hazard on the kerb face either side of the crossing mouth
-    for (const side of [-1, 1]) {
-      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.02, KERB_PROUD - 0.01, 2.2), M.hazard);
-      k.plant(guard, -KERB_WIDTH - 0.01, bandZ + side * 2.4, ROAD_LIFT + KERB_PROUD / 2);
-    }
-  }
-
-  if (opts.drain !== false) {
-    // linear drain channel at the back of the walk, with a grate bar every 40 cm
-    runBox(k, 'z', 0.36, 0.05, length, WALK_WIDTH + 0.18, 0, M.drain, 2.5, ROAD_LIFT - 0.03);
-    for (let d = -length / 2 + 1; d < length / 2 - 1; d += 0.4) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.03, 0.05), M.iron);
-      k.plant(bar, WALK_WIDTH + 0.18, d, ROAD_LIFT + 0.012);
-    }
-  }
-
-  k.finish('street:kerb-walk', WALK_WIDTH / 2, 0);
+  const walkW = opts.walkWidthM ?? WALK_WIDTH;
+  pavementSide(k, {
+    axis: 'z',
+    side: 1,
+    // no carriageway in this module: the kerb face is the module's own origin
+    half: 0,
+    z0: -length / 2,
+    z1: length / 2,
+    walkW,
+    drain: opts.drain,
+    cuts:
+      opts.tactile === false
+        ? []
+        : [{ at: opts.crossingAt ?? 0, width: ZEBRA_LEN - 0.4, depth: RAMP_DEPTH, tactile: true }],
+  });
+  k.finish('street:kerb-walk', 0, 0);
   return k.g;
 }
 
-// ---------------------------------------------------------------- 4. traffic light
+// ---------------------------------------------------------------- 3. the street between junctions
+
+export interface StreetRunFeature {
+  /** metres along the run from its centre */
+  at: number;
+}
+
+export interface StreetRunOpts extends StreetOpts {
+  roadClass?: RoadClass;
+  widthM?: number;
+  lengthM?: number;
+  lanes?: number;
+  median?: 'none' | 'paint' | 'raised';
+  walkWidthM?: number;
+  walk?: 'both' | 'none';
+  /** bus bays cut into the walk */
+  bays?: (StreetRunFeature & { side: -1 | 1; lengthM?: number; depthM?: number })[];
+  /** driveway aprons: a dropped kerb where a gate opens onto the street */
+  driveways?: (StreetRunFeature & { side: -1 | 1; widthM?: number })[];
+  /** zebra crossings; both pavements get a paved ramp at the kerb */
+  crossings?: (StreetRunFeature & { widthM?: number })[];
+  /** utility poles, the name blade, bollards at the crossing */
+  furniture?: boolean;
+  /** ground for the things that stand on the trotoar, which is 17 cm above the carriageway */
+  furnitureGround?: StreetGround;
+  /** false when the map has already drawn this carriageway (the kit then adds the edges only) */
+  asphalt?: boolean;
+  /** close the +z end with a kerb across the road and a band of pavement behind it */
+  capEnd?: boolean;
+  /** close the -z end the same way (a run that does not join anything must not end on a slice) */
+  capStart?: boolean;
+  /** how deep the end pavement is; the default is one kerb ramp plus a step */
+  capDepthM?: number;
+}
+
+/**
+ * The head of a run: a kerb across the carriageway and a band of pavement behind it, flush with both
+ * trotoar. A run of arbitrary length has to end somewhere; ending on a slice of asphalt open to the
+ * ground plane is the same defect as a corner that does not close, and it is what a block of street
+ * looks like when nothing joins its end.
+ *
+ * `dir` is +1 for the +z end of the run and -1 for the -z end, so the pavement always sits behind
+ * the kerb, never on the road side.
+ */
+function endCap(k: Kit, half: number, walkW: number, at: number, dir: 1 | -1, depth = 2.2): void {
+  const outer = half + KERB_WIDTH + walkW;
+  // kerb line across the carriageway, at the same height as every other kerb stone
+  const kz0 = dir > 0 ? at : at - KERB_WIDTH;
+  const kz1 = dir > 0 ? at + KERB_WIDTH : at;
+  slab(k, 'z', -half, half, kz0, kz1, ROAD_LIFT, WALK_TOP, M.kerb);
+  // pavement behind it, the full width of the cross-section so it also closes the two trotoar
+  const wz0 = dir > 0 ? at + KERB_WIDTH : at - depth;
+  const wz1 = dir > 0 ? at + depth : at - KERB_WIDTH;
+  slab(k, 'z', -outer, outer, wz0, wz1, ROAD_LIFT, WALK_TOP, M.walk);
+  // the outer edge of that pavement gets a kerb stone too, so the head reads as a wall of paving
+  const oz0 = dir > 0 ? at + depth : at - depth - KERB_WIDTH;
+  const oz1 = dir > 0 ? at + depth + KERB_WIDTH : at - depth;
+  slab(k, 'z', -outer, outer, oz0, oz1, ROAD_LIFT, WALK_TOP, M.kerb);
+}
+
+/**
+ * A STREET, not a crossing: an arbitrary length of carriageway with continuous markings and a kerb
+ * and trotoar on both sides, plus the interruptions a real street has - a bus bay, driveway aprons,
+ * and a zebra whose ramps are paved and sloped.
+ *
+ * This is the builder the city was missing. A junction with four 13 m stubs is a model of a
+ * junction; a run between two of them makes a street out of it.
+ */
+export function buildStreetRun(
+  ctx: StreetCtx,
+  x: number,
+  z: number,
+  yaw: number,
+  opts: StreetRunOpts = {}
+): THREE.Group {
+  const k = kit(ctx, x, z, yaw, opts);
+  const cls = opts.roadClass ?? 'collector';
+  const width = opts.widthM ?? ROAD_CLASS_WIDTH[cls];
+  const half = width / 2;
+  const length = opts.lengthM ?? 60;
+  const walkW = opts.walkWidthM ?? WALK_WIDTH;
+  const z0 = -length / 2;
+  const z1 = length / 2;
+  const crossings = (opts.crossings ?? []).map((c) => ({
+    ...c,
+    width: c.widthM ?? ZEBRA_LEN,
+  }));
+
+  if (opts.asphalt !== false) {
+    roadSurface(k, {
+      half,
+      length,
+      lanes: opts.lanes ?? defaultLanes(cls),
+      median: opts.median ?? (cls === 'arterial' ? 'raised' : 'paint'),
+      breaks: crossings.map((c) => [c.at - c.width / 2 - 0.4, c.at + c.width / 2 + 0.4] as [number, number]),
+    });
+  }
+
+  for (const c of crossings) zebra(k, 'z', half, c.at, c.width);
+
+  if (opts.walk !== 'none') {
+    for (const side of [-1, 1] as const) {
+      const cuts: WalkCut[] = [];
+      for (const c of crossings) {
+        cuts.push({ at: c.at, width: c.width - 0.4, depth: RAMP_DEPTH, tactile: true });
+      }
+      for (const d of opts.driveways ?? []) {
+        if (d.side !== side) continue;
+        cuts.push({ at: d.at, width: d.widthM ?? 3.6, depth: RAMP_DEPTH });
+      }
+      const bays: WalkBay[] = (opts.bays ?? [])
+        .filter((b) => b.side === side)
+        .map((b) => ({ at: b.at, length: b.lengthM ?? 15, depth: b.depthM ?? 2.6 }));
+      pavementSide(k, { axis: 'z', side, half, z0, z1, walkW, cuts, bays });
+    }
+  }
+
+  if (opts.capStart) endCap(k, half, walkW, z0, -1, opts.capDepthM);
+  if (opts.capEnd) endCap(k, half, walkW, z1, 1, opts.capDepthM);
+
+  if (opts.furniture !== false) {
+    const fg = opts.furnitureGround ?? opts.ground;
+    // poles on the kerb line, one span between them along the run
+    const span = Math.max(18, Math.min(34, length / 2));
+    const pz1 = z0 + 4;
+    const pz2 = Math.min(z1 - 4, pz1 + span);
+    const px = half + KERB_WIDTH + 0.5;
+    const [w1x, w1z] = k.world(px, pz1);
+    const [w2x, w2z] = k.world(px, pz2);
+    buildUtilityPole(ctx, w1x, w1z, yaw + Math.PI / 2, {
+      ground: fg,
+      spanM: pz2 - pz1,
+    });
+    buildUtilityPole(ctx, w2x, w2z, yaw + Math.PI / 2, {
+      ground: fg,
+      spanM: pz2 - pz1,
+      cables: false,
+    });
+    const [sx, sz] = k.world(half + KERB_WIDTH + 1.1, (crossings[0]?.at ?? 0) - 4.2);
+    buildStreetNameSign(ctx, sx, sz, yaw, { ground: fg });
+    for (const at of [(crossings[0]?.at ?? 0) + 1.4, (crossings[0]?.at ?? 0) - 1.4]) {
+      const [bx, bz] = k.world(half + 0.9, at);
+      buildBollard(ctx, bx, bz, yaw, { ground: fg });
+    }
+  }
+
+  k.g.userData.streetkit = {
+    kind: 'run',
+    roadClass: cls,
+    widthM: width,
+    lengthM: length,
+    walkWidthM: walkW,
+    crossings: crossings.length,
+    bays: (opts.bays ?? []).length,
+    driveways: (opts.driveways ?? []).length,
+    caps: (opts.capStart ? 1 : 0) + (opts.capEnd ? 1 : 0),
+  };
+  k.finish(`street:run-${cls}`, 0, 0);
+  return k.g;
+}
+
+// ---------------------------------------------------------------- 4. the corner return
+
+interface CornerSpec {
+  halfX: number;
+  halfZ: number;
+  radius: number;
+  walkW: number;
+  /** how far the corner apron reaches back along both kerb lines */
+  fill: number;
+  /** ramps on the two kerb lines that face a crossing, as [near, far] along that line */
+  jogX?: [number, number];
+  jogZ?: [number, number];
+  sx: -1 | 1;
+  sz: -1 | 1;
+}
+
+/**
+ * ONE corner of ONE junction. Every corner of every arm is this call with the four sign combinations,
+ * so a junction physically cannot have a rounded corner on one side and a sharp one on the other -
+ * the defect the owner photographed.
+ *
+ * It draws the four things a corner is: the pavement slab that fills the corner, the kerb stones
+ * following the arc, the straight kerbs that pick the two kerb lines up again, and a paved ramp
+ * wherever a zebra lands on it. The area between the kerb arc and the two kerb lines is left to the
+ * carriageway (the fillet a turning bus sweeps), so nothing shows the ground plane through the
+ * corner.
+ */
+function cornerReturn(k: Kit, c: CornerSpec): void {
+  const { halfX, halfZ, radius: R, walkW, fill, sx, sz } = c;
+  const kw = KERB_WIDTH;
+  const P = (x: number, z: number): [number, number] => [sx * x, sz * z];
+  const arcSteps = 16;
+
+  // --- the pavement: a quarter disc's worth of corner, minus the kerb band, minus the ramps
+  const pts: [number, number][] = [];
+  const cx = halfX + R;
+  const cz = halfZ + R;
+  pts.push(P(halfX + kw, halfZ + R));
+  for (let i = 1; i <= arcSteps; i++) {
+    const t = (i / arcSteps) * (Math.PI / 2);
+    pts.push(P(cx - (R - kw) * Math.cos(t), cz - (R - kw) * Math.sin(t)));
+  }
+  // along the +x arm's kerb line, out to the corner's fill
+  if (c.jogX) {
+    const [j0, j1] = c.jogX;
+    pts.push(P(j0, halfZ + kw), P(j0, halfZ + RAMP_DEPTH), P(j1, halfZ + RAMP_DEPTH), P(j1, halfZ + kw));
+  }
+  pts.push(P(halfX + fill, halfZ + kw));
+  pts.push(P(halfX + fill, halfZ + fill));
+  pts.push(P(halfX + kw, halfZ + fill));
+  if (c.jogZ) {
+    const [j0, j1] = c.jogZ;
+    pts.push(P(halfX + kw, j1), P(halfX + RAMP_DEPTH, j1), P(halfX + RAMP_DEPTH, j0), P(halfX + kw, j0));
+  }
+
+  const depth = KERB_PROUD + 0.1;
+  const shape = new THREE.Shape(pts.map(([px, pz]) => new THREE.Vector2(px, -pz)));
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, steps: 1 });
+  const slabMesh = new THREE.Mesh(geo, slabMaterial());
+  slabMesh.rotation.x = -Math.PI / 2;
+  const [gx, gz] = P((halfX + fill) * 0.6, (halfZ + fill) * 0.6);
+  slabMesh.position.set(0, k.gy(gx, gz) + ROAD_LIFT - 0.1, 0);
+  slabMesh.receiveShadow = true;
+  slabMesh.castShadow = true;
+  k.g.add(slabMesh);
+
+  // --- kerb stones following the arc, at the same angles as the slab's own arc
+  const arcLen = (Math.PI / 2) * R;
+  const stones = arcSteps;
+  const stoneW = arcLen / stones + 0.02;
+  for (let i = 0; i < stones; i++) {
+    const t = ((i + 0.5) / stones) * (Math.PI / 2);
+    const [px, pz] = P(cx - (R - kw / 2) * Math.cos(t), cz - (R - kw / 2) * Math.sin(t));
+    const stone = new THREE.Mesh(new THREE.BoxGeometry(stoneW, KERB_PROUD + 0.015, kw), M.kerb);
+    // tangent of the arc at t, mirrored with the quadrant
+    const tx = -Math.sin(t) * sx;
+    const tz = -Math.cos(t) * sz;
+    stone.rotation.y = Math.atan2(-tz, tx);
+    k.plant(stone, px, pz, ROAD_LIFT + (KERB_PROUD + 0.015) / 2);
+  }
+
+  // --- the two straight kerbs, from the arc's tangent points out to the corner's fill, with the
+  //     dropped section where a ramp is
+  const kerbX: [number, number][] = [[halfZ + R, halfZ + fill]];
+  if (c.jogX) kerbX.push([c.jogX[0], c.jogX[1]]);
+  for (const [a, b] of intervals([halfZ + R, halfZ + fill], kerbX.slice(1))) {
+    const [x0, z0] = P(halfX, a);
+    const [x1, z1] = P(halfX + kw, b);
+    slab(k, 'z', Math.min(x0, x1), Math.max(x0, x1), Math.min(z0, z1), Math.max(z0, z1), ROAD_LIFT, WALK_TOP, M.kerb);
+  }
+  const kerbZ: [number, number][] = [[halfX + R, halfX + fill]];
+  if (c.jogZ) kerbZ.push([c.jogZ[0], c.jogZ[1]]);
+  for (const [a, b] of intervals([halfX + R, halfX + fill], kerbZ.slice(1))) {
+    const [x0, z0] = P(a, halfZ);
+    const [x1, z1] = P(b, halfZ + kw);
+    slab(k, 'x', Math.min(z0, z1), Math.max(z0, z1), Math.min(x0, x1), Math.max(x0, x1), ROAD_LIFT, WALK_TOP, M.kerb);
+  }
+
+  // --- the ramps a crossing lands on
+  if (c.jogX) {
+    const [j0, j1] = c.jogX;
+    const [x0, z0] = P(halfX, j0);
+    const [x1, z1] = P(halfX + RAMP_DEPTH, j1);
+    polyFace(
+      k,
+      [
+        [Math.min(x0, x1), Math.min(z0, z1), ROAD_LIFT + 0.008],
+        [Math.min(x0, x1), Math.max(z0, z1), ROAD_LIFT + 0.008],
+        [Math.max(x0, x1), Math.max(z0, z1), WALK_TOP],
+        [Math.max(x0, x1), Math.min(z0, z1), WALK_TOP],
+      ],
+      M.slope
+    );
+  }
+  if (c.jogZ) {
+    const [j0, j1] = c.jogZ;
+    const [x0, z0] = P(j0, halfZ);
+    const [x1, z1] = P(j1, halfZ + RAMP_DEPTH);
+    polyFace(
+      k,
+      [
+        [Math.min(x0, x1), Math.min(z0, z1), ROAD_LIFT + 0.008],
+        [Math.max(x0, x1), Math.min(z0, z1), ROAD_LIFT + 0.008],
+        [Math.max(x0, x1), Math.max(z0, z1), WALK_TOP],
+        [Math.min(x0, x1), Math.max(z0, z1), WALK_TOP],
+      ],
+      M.slope
+    );
+  }
+
+  // --- the asphalt fillet between the corner point and the arc: a turning bus sweeps this, and
+  //     leaving it unpainted is what showed the ground plane as a white wedge at every corner
+  const fillet: [number, number, number][] = [];
+  {
+    const [px, pz] = P(halfX, halfZ);
+    fillet.push([px, pz, ROAD_LIFT]);
+  }
+  for (let i = 0; i <= arcSteps; i++) {
+    const t = (Math.PI / 2) * (i / arcSteps);
+    const [px, pz] = P(cx - R * Math.cos(t), cz - R * Math.sin(t));
+    fillet.push([px, pz, ROAD_LIFT]);
+  }
+  polyFace(k, fillet, M.asphalt);
+}
+
+/** [from, to] minus the given holes, in order. */
+function intervals(span: [number, number], holes: [number, number][]): [number, number][] {
+  const [a, b] = span;
+  return subtract(a, b, holes.map(([x, y]) => [Math.max(a, x), Math.min(b, y)] as [number, number]));
+}
+
+// ---------------------------------------------------------------- 5. signalised intersection
+
+export interface IntersectionOpts extends StreetOpts {
+  roadClass?: RoadClass;
+  widthM?: number;
+  /** how far each arm's asphalt runs out from the junction box */
+  armsM?: number;
+  /** overrides CORNER_RADIUS_M[roadClass]; only for a road the map measures differently */
+  cornerRadiusM?: number;
+  walkWidthM?: number;
+  zebra?: boolean;
+  /** compose a traffic light on each corner (reuses buildTrafficLight) */
+  lights?: boolean;
+  /** paved ramps where each zebra lands on the corner pavement */
+  ramps?: boolean;
+  /** ground for the signals, which stand on the corner pavement rather than in the road */
+  furnitureGround?: StreetGround;
+}
+
+/**
+ * A four-arm signalised junction: carriageway, a zebra on every arm, stop lines, and one corner
+ * return per quadrant with the radius the road class calls for.
+ *
+ * v1 filled the corner with a square that had the quarter disc cut out of it and then laid the
+ * straight kerb of the x-axis arms across the middle of the walk, because the runBox call passed its
+ * across and along arguments in the other axis's order. From one side of the junction the corner was
+ * rounded; from the other it was sharp. v2 builds every quadrant from `cornerReturn()`, so the four
+ * corners are the same code with the same numbers.
+ */
+export function buildSignalIntersection(
+  ctx: StreetCtx,
+  x: number,
+  z: number,
+  yaw: number,
+  opts: IntersectionOpts = {}
+): THREE.Group {
+  const k = kit(ctx, x, z, yaw, opts);
+  const cls = opts.roadClass ?? 'collector';
+  const width = opts.widthM ?? ROAD_CLASS_WIDTH[cls];
+  const half = width / 2;
+  const arms = opts.armsM ?? 20;
+  const R = opts.cornerRadiusM ?? CORNER_RADIUS_M[cls];
+  const walkW = opts.walkWidthM ?? WALK_WIDTH;
+  const armEnd = half + arms;
+
+  // the corner apron has to be deep enough to carry the crossing ramp, or the ramp falls off the
+  // end of the slab and shows the ground through the gap
+  const fill = Math.max(walkW + KERB_WIDTH + 0.5, R + 3.8);
+  const zebraFrom = half + R + 0.8;
+  const zebraLen = ZEBRA_LEN;
+  const rampAt: [number, number] = [zebraFrom + 0.2, zebraFrom + zebraLen - 0.2];
+  const stopD = zebraFrom + zebraLen + 1.2;
+
+  // asphalt: the junction box plus four arms, all conforming to the ground
+  gridMesh(k, width, width, 3, 3, ROAD_LIFT, M.asphalt);
+  const armDefs = [
+    { axis: 'z', dir: 1, inbound: -half / 2 },
+    { axis: 'z', dir: -1, inbound: half / 2 },
+    { axis: 'x', dir: 1, inbound: half / 2 },
+    { axis: 'x', dir: -1, inbound: -half / 2 },
+  ] as const;
+  for (const arm of armDefs) {
+    const mid = arm.dir * (half + arms / 2);
+    if (arm.axis === 'z') gridMesh(k, width, arms, 3, Math.max(3, Math.round(arms / 4)), ROAD_LIFT, M.asphalt, 0, mid);
+    else gridMesh(k, arms, width, Math.max(3, Math.round(arms / 4)), 3, ROAD_LIFT, M.asphalt, mid, 0);
+  }
+
+  for (const arm of armDefs) {
+    const along = arm.dir * (zebraFrom + zebraLen / 2);
+    if (opts.zebra !== false) {
+      const stripeW = 0.45;
+      const bars = Math.floor((width - 0.8) / (stripeW * 2));
+      for (let i = 0; i < bars; i++) {
+        const off = -((bars - 1) / 2) * stripeW * 2 + i * stripeW * 2;
+        const stripe =
+          arm.axis === 'z'
+            ? new THREE.Mesh(new THREE.PlaneGeometry(stripeW, zebraLen), M.paint)
+            : new THREE.Mesh(new THREE.PlaneGeometry(zebraLen, stripeW), M.paint);
+        stripe.rotation.x = -Math.PI / 2;
+        if (arm.axis === 'z') k.plant(stripe, off, along, PAINT_LIFT);
+        else k.plant(stripe, along, off, PAINT_LIFT);
+      }
+    }
+    const stop =
+      arm.axis === 'z'
+        ? new THREE.Mesh(new THREE.PlaneGeometry(half - 0.15, 0.3), M.paint)
+        : new THREE.Mesh(new THREE.PlaneGeometry(0.3, half - 0.15), M.paint);
+    stop.rotation.x = -Math.PI / 2;
+    if (arm.axis === 'z') k.plant(stop, arm.inbound, arm.dir * stopD, PAINT_LIFT);
+    else k.plant(stop, arm.dir * stopD, arm.inbound, PAINT_LIFT);
+
+    // past the stop line the arm is a street: edge lines, a centre line and lane dashes
+    const from = stopD + 1;
+    const to = armEnd;
+    const midSpan = arm.dir * ((from + to) / 2);
+    const span = to - from;
+    for (const side of [-1, 1]) {
+      const edge =
+        arm.axis === 'z'
+          ? new THREE.Mesh(new THREE.PlaneGeometry(0.15, span), M.paint)
+          : new THREE.Mesh(new THREE.PlaneGeometry(span, 0.15), M.paint);
+      edge.rotation.x = -Math.PI / 2;
+      if (arm.axis === 'z') k.plant(edge, side * (half - 0.3), midSpan, PAINT_LIFT);
+      else k.plant(edge, midSpan, side * (half - 0.3), PAINT_LIFT);
+    }
+    for (const off of [-0.14, 0.14]) {
+      const centre =
+        arm.axis === 'z'
+          ? new THREE.Mesh(new THREE.PlaneGeometry(0.12, span), M.paint)
+          : new THREE.Mesh(new THREE.PlaneGeometry(span, 0.12), M.paint);
+      centre.rotation.x = -Math.PI / 2;
+      if (arm.axis === 'z') k.plant(centre, off, midSpan, PAINT_LIFT);
+      else k.plant(centre, midSpan, off, PAINT_LIFT);
+    }
+  }
+
+  // four identical corner returns
+  for (const sx of [-1, 1] as const) {
+    for (const sz of [-1, 1] as const) {
+      cornerReturn(k, {
+        halfX: half,
+        halfZ: half,
+        radius: R,
+        walkW,
+        fill,
+        jogX: opts.ramps === false ? undefined : rampAt,
+        jogZ: opts.ramps === false ? undefined : rampAt,
+        sx,
+        sz,
+      });
+    }
+  }
+
+  // the walk continues along each arm, from the corner apron out to the arm end
+  for (const axis of ['z', 'x'] as const) {
+    for (const dir of [1, -1] as const) {
+      for (const side of [-1, 1] as const) {
+        pavementSide(k, {
+          axis,
+          side,
+          half,
+          // the corner apron already owns the pavement out to half + fill; the arm picks it up there
+          z0: dir * (half + fill),
+          z1: dir * armEnd,
+          walkW,
+          cuts: [],
+        });
+      }
+    }
+  }
+
+  if (opts.lights !== false) {
+    const lx = half + 1.6;
+    const lz = stopD + 2.6;
+    const corners: [number, number, number, 'red' | 'green'][] = [
+      [-lx, lz, 0, 'green'],
+      [lx, -lz, Math.PI, 'green'],
+      [lz, lx, Math.PI / 2, 'red'],
+      [-lz, -lx, -Math.PI / 2, 'red'],
+    ];
+    for (const [ax, az, ayaw, lit] of corners) {
+      const [wx, wz] = k.world(ax, az);
+      buildTrafficLight(ctx, wx, wz, yaw + ayaw, {
+        ground: opts.furnitureGround ?? opts.ground,
+        lit,
+      });
+    }
+  }
+
+  // the corners this junction actually built - the numeric handle a harness can assert on
+  k.g.userData.streetkit = {
+    kind: 'signal-intersection',
+    roadClass: cls,
+    widthM: width,
+    cornerRadiusM: R,
+    corners: ([-1, 1] as const).flatMap((sx) =>
+      ([-1, 1] as const).map((sz) => ({ sx, sz, radius: R, arcSteps: 16, fillM: fill }))
+    ),
+    zebraFromM: zebraFrom,
+  };
+  k.finish('street:signal-intersection', 0, 0);
+  return k.g;
+}
+
+// ---------------------------------------------------------------- 6. T junction
+
+export interface TOpts extends StreetOpts {
+  /** the through road */
+  roadClass?: RoadClass;
+  widthM?: number;
+  /** the stem, when it is a narrower side street */
+  stemWidthM?: number;
+  /** half the length of the through road the junction dresses */
+  throughM?: number;
+  /** how far the stem's asphalt runs out of the junction */
+  stemM?: number;
+  cornerRadiusM?: number;
+  walkWidthM?: number;
+  lights?: boolean;
+}
+
+/**
+ * A T: a side street ends on a through road. Two corner returns (one either side of the mouth) and a
+ * kerb line that runs unbroken along the far side, which is the shape most Jakarta gangs make when
+ * they meet a collector.
+ *
+ * Local frame: the through road runs along x with its kerbs at z = ±half; the stem leaves toward +z.
+ */
+export function buildTIntersection(
+  ctx: StreetCtx,
+  x: number,
+  z: number,
+  yaw: number,
+  opts: TOpts = {}
+): THREE.Group {
+  const k = kit(ctx, x, z, yaw, opts);
+  const cls = opts.roadClass ?? 'collector';
+  const width = opts.widthM ?? ROAD_CLASS_WIDTH[cls];
+  const stemW = opts.stemWidthM ?? ROAD_CLASS_WIDTH.local;
+  const half = width / 2;
+  const halfStem = stemW / 2;
+  const through = opts.throughM ?? 40;
+  const stemM = opts.stemM ?? 20;
+  const R = opts.cornerRadiusM ?? CORNER_RADIUS_M[cls];
+  const walkW = opts.walkWidthM ?? WALK_WIDTH;
+  const fill = Math.max(walkW + KERB_WIDTH + 0.5, R + 3.8);
+
+  // asphalt: through road, the stem, and the two fillets the turning bus sweeps
+  gridMesh(k, through * 2, width, Math.max(4, Math.round(through / 4)), 3, ROAD_LIFT, M.asphalt);
+  gridMesh(k, stemW, stemM, 3, Math.max(3, Math.round(stemM / 4)), ROAD_LIFT, M.asphalt, 0, half + stemM / 2);
+
+  // paint on the through road: edge lines and a centre line, broken at the mouth
+  for (const side of [-1, 1] as const) {
+    const spans = side === -1 ? [[-through, through]] : [[-through, -halfStem], [halfStem, through]];
+    for (const [a, b] of spans) {
+      const edge = new THREE.Mesh(new THREE.PlaneGeometry(b - a, 0.15), M.paint);
+      edge.rotation.x = -Math.PI / 2;
+      k.plant(edge, (a + b) / 2, side * (half - 0.3), PAINT_LIFT);
+    }
+    for (const off of [-0.14, 0.14]) {
+      const centre = new THREE.Mesh(new THREE.PlaneGeometry(through * 2, 0.12), M.paint);
+      centre.rotation.x = -Math.PI / 2;
+      k.plant(centre, 0, off, PAINT_LIFT);
+    }
+  }
+  for (const side of [-1, 1]) {
+    const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.15, stemM), M.paint);
+    edge.rotation.x = -Math.PI / 2;
+    k.plant(edge, side * (halfStem - 0.3), half + stemM / 2, PAINT_LIFT);
+  }
+  const stop = new THREE.Mesh(new THREE.PlaneGeometry(halfStem - 0.15, 0.3), M.paint);
+  stop.rotation.x = -Math.PI / 2;
+  k.plant(stop, -halfStem / 2, half + 1.2, PAINT_LIFT);
+
+  // the two corners at the mouth, from the same corner return the four-arm junction uses
+  for (const sx of [-1, 1] as const) {
+    cornerReturn(k, {
+      halfX: halfStem,
+      halfZ: half,
+      radius: R,
+      walkW,
+      fill,
+      sx,
+      sz: 1,
+    });
+  }
+
+  // the pavement on the far side of the through road, unbroken
+  pavementSide(k, { axis: 'x', side: -1, half, z0: -through, z1: through, walkW });
+  // and the two walks on the mouth side, from the corner aprons out to the ends
+  for (const side of [-1, 1] as const) {
+    pavementSide(k, { axis: 'x', side: 1, half, z0: side > 0 ? halfStem + fill : -through, z1: side > 0 ? through : -halfStem - fill, walkW });
+  }
+  // the stem's own walks, from the corner apron down the side street
+  for (const side of [-1, 1] as const) {
+    pavementSide(k, { axis: 'z', side, half: halfStem, z0: half + fill, z1: half + stemM, walkW });
+  }
+
+  k.g.userData.streetkit = {
+    kind: 't-intersection',
+    roadClass: cls,
+    widthM: width,
+    stemWidthM: stemW,
+    cornerRadiusM: R,
+    corners: [
+      { sx: -1, sz: 1, radius: R, arcSteps: 16, fillM: fill },
+      { sx: 1, sz: 1, radius: R, arcSteps: 16, fillM: fill },
+    ],
+  };
+  k.finish('street:t-intersection', 0, 0);
+  return k.g;
+}
+
+// ---------------------------------------------------------------- 7. traffic light
 
 export interface TrafficLightOpts extends StreetOpts {
   /** which aspect is lit; the head always carries all three lenses */
@@ -619,215 +1609,7 @@ export function buildTrafficLight(ctx: StreetCtx, x: number, z: number, yaw: num
   return k.g;
 }
 
-// ---------------------------------------------------------------- 3. signalised intersection
-
-export interface IntersectionOpts extends StreetOpts {
-  roadClass?: RoadClass;
-  widthM?: number;
-  /** how far each arm runs out from the junction box */
-  armsM?: number;
-  /** kerb return radius at each corner */
-  cornerRadiusM?: number;
-  zebra?: boolean;
-  /** compose a traffic light on each corner (reuses buildTrafficLight) */
-  lights?: boolean;
-}
-
-/**
- * A four-arm signalised junction: carriageway, zebra crossings on every arm, stop lines, and the
- * corner radius filled with kerbed pavement.
- *
- * The kerb return is the detail that makes a junction read as a junction: the kerb line leaves the
- * arm, sweeps an arc of `cornerRadiusM`, and joins the crossing arm. Outside that arc is pavement;
- * inside it is the asphalt a turning bus needs (street-ref-4).
- */
-export function buildSignalIntersection(
-  ctx: StreetCtx,
-  x: number,
-  z: number,
-  yaw: number,
-  opts: IntersectionOpts = {}
-): THREE.Group {
-  const k = kit(ctx, x, z, yaw, opts);
-  const cls = opts.roadClass ?? 'collector';
-  const width = opts.widthM ?? ROAD_CLASS_WIDTH[cls];
-  const half = width / 2;
-  const arms = opts.armsM ?? 14;
-  const R = opts.cornerRadiusM ?? 8;
-
-  // asphalt: the junction box plus four arms, all conforming to the ground
-  gridMesh(k, width, width, 3, 3, ROAD_LIFT, M.asphalt);
-  for (const [nx, nz] of [
-    [0, 1],
-    [0, -1],
-    [1, 0],
-    [-1, 0],
-  ]) {
-    const cx = nx * (half + arms / 2);
-    const cz = nz * (half + arms / 2);
-    if (nx) gridMesh(k, arms, width, 4, 3, ROAD_LIFT, M.asphalt, cx, cz);
-    else gridMesh(k, width, arms, 3, 4, ROAD_LIFT, M.asphalt, cx, cz);
-  }
-
-  // paint per arm: zebra stripes longitudinal to travel, stop line across the inbound half
-  const stripeW = 0.45;
-  const zebraFrom = half + 2.2;
-  const zebraLen = 3.6;
-  const stopD = zebraFrom + zebraLen + 1.4;
-  const perArm = Math.floor((width - 0.8) / (stripeW * 2));
-  // arm 0 extends +z (traffic travels -z), and so on round the junction. Left-hand traffic: the
-  // inbound half sits to the left of the direction of travel, which is `up x forward`.
-  const armDefs = [
-    { axis: 'z', dir: 1, inbound: -half / 2 },
-    { axis: 'z', dir: -1, inbound: half / 2 },
-    { axis: 'x', dir: 1, inbound: half / 2 },
-    { axis: 'x', dir: -1, inbound: -half / 2 },
-  ] as const;
-  for (const arm of armDefs) {
-    const along = arm.dir * (zebraFrom + zebraLen / 2);
-    if (opts.zebra !== false) {
-      for (let i = 0; i < perArm; i++) {
-        const off = -((perArm - 1) / 2) * stripeW * 2 + i * stripeW * 2;
-        const stripe =
-          arm.axis === 'z'
-            ? new THREE.Mesh(new THREE.PlaneGeometry(stripeW, zebraLen), M.paint)
-            : new THREE.Mesh(new THREE.PlaneGeometry(zebraLen, stripeW), M.paint);
-        stripe.rotation.x = -Math.PI / 2;
-        if (arm.axis === 'z') k.plant(stripe, off, along, PAINT_LIFT);
-        else k.plant(stripe, along, off, PAINT_LIFT);
-      }
-    }
-    const stop =
-      arm.axis === 'z'
-        ? new THREE.Mesh(new THREE.PlaneGeometry(half - 0.15, 0.3), M.paint)
-        : new THREE.Mesh(new THREE.PlaneGeometry(0.3, half - 0.15), M.paint);
-    stop.rotation.x = -Math.PI / 2;
-    if (arm.axis === 'z') k.plant(stop, arm.inbound, arm.dir * stopD, PAINT_LIFT);
-    else k.plant(stop, arm.dir * stopD, arm.inbound, PAINT_LIFT);
-
-    // the arm past the stop line still needs its edge lines and a lane divider, or the junction
-    // reads as a painted box dropped on empty asphalt
-    const from = stopD + 1.2;
-    const to = half + arms;
-    const mid = arm.dir * ((from + to) / 2);
-    const span = to - from;
-    for (const side of [-1, 1]) {
-      const edge =
-        arm.axis === 'z'
-          ? new THREE.Mesh(new THREE.PlaneGeometry(0.12, span), M.paint)
-          : new THREE.Mesh(new THREE.PlaneGeometry(span, 0.12), M.paint);
-      edge.rotation.x = -Math.PI / 2;
-      if (arm.axis === 'z') k.plant(edge, side * (half - 0.3), mid, PAINT_LIFT);
-      else k.plant(edge, mid, side * (half - 0.3), PAINT_LIFT);
-    }
-    for (let d = from; d + 3 < to; d += 6) {
-      const dash =
-        arm.axis === 'z'
-          ? new THREE.Mesh(new THREE.PlaneGeometry(0.12, 3), M.paint)
-          : new THREE.Mesh(new THREE.PlaneGeometry(3, 0.12), M.paint);
-      dash.rotation.x = -Math.PI / 2;
-      if (arm.axis === 'z') k.plant(dash, 0, arm.dir * (d + 1.5), PAINT_LIFT);
-      else k.plant(dash, arm.dir * (d + 1.5), 0, PAINT_LIFT);
-    }
-  }
-
-  // four kerbed corner pavements: a square with the quarter-circle kerb return cut out of it
-  const inner = half;
-  const outer = half + arms;
-  for (const sx of [-1, 1]) {
-    for (const sz of [-1, 1]) {
-      // the shape is built in (x, -z) so a -90 deg lay-down maps shape y onto world z
-      const shape = new THREE.Shape();
-      const P = (px: number, pz: number) => [px, -pz] as [number, number];
-      const p1 = P(sx * inner, sz * (inner + R));
-      shape.moveTo(p1[0], p1[1]);
-      const Cx = sx * (inner + R);
-      const Cz = sz * (inner + R);
-      const arcSteps = 12;
-      for (let i = 1; i <= arcSteps; i++) {
-        const th = (i / arcSteps) * (Math.PI / 2);
-        const ax = Cx - sx * R * Math.cos(th);
-        const az = Cz - sz * R * Math.sin(th);
-        const p = P(ax, az);
-        shape.lineTo(p[0], p[1]);
-      }
-      for (const p of [P(sx * outer, sz * inner), P(sx * outer, sz * outer), P(sx * inner, sz * outer)]) {
-        shape.lineTo(p[0], p[1]);
-      }
-      shape.closePath();
-
-      const depth = KERB_PROUD + 0.1;
-      const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, steps: 1 });
-      const slab = new THREE.Mesh(geo, slabMaterial());
-      slab.rotation.x = -Math.PI / 2;
-      const gx = k.gy(sx * (inner + arms * 0.5), sz * (inner + arms * 0.5));
-      slab.position.set(0, gx - 0.1 + ROAD_LIFT, 0);
-      slab.receiveShadow = true;
-      slab.castShadow = true;
-      k.g.add(slab);
-
-      // the kerb on the arc: stones stepped along the return
-      const arcLen = (Math.PI / 2) * R;
-      const steps = Math.max(8, Math.ceil(arcLen / 0.55));
-      const stoneW = arcLen / steps + 0.02;
-      for (let i = 0; i < steps; i++) {
-        const th = ((i + 0.5) / steps) * (Math.PI / 2);
-        const px = Cx - sx * (R - KERB_WIDTH / 2) * Math.cos(th);
-        const pz = Cz - sz * (R - KERB_WIDTH / 2) * Math.sin(th);
-        const stone = new THREE.Mesh(new THREE.BoxGeometry(stoneW, KERB_PROUD + 0.015, KERB_WIDTH), M.kerb);
-        // tangent of the arc at this angle
-        stone.rotation.y = Math.atan2(sz * Math.sin(th), -sx * Math.cos(th)) + Math.PI / 2;
-        k.plant(stone, px, pz, ROAD_LIFT + (KERB_PROUD + 0.015) / 2);
-      }
-      // kerb returns along both arms, so the pavement edge does not stop in mid air
-      runBox(
-        k,
-        'z',
-        KERB_WIDTH,
-        KERB_PROUD + 0.015,
-        arms - R,
-        sx * (inner + KERB_WIDTH / 2),
-        sz * (inner + R + (arms - R) / 2),
-        M.kerb,
-        2.5,
-        ROAD_LIFT
-      );
-      runBox(
-        k,
-        'x',
-        KERB_WIDTH,
-        KERB_PROUD + 0.015,
-        arms - R,
-        sz * (inner + R + (arms - R) / 2),
-        sx * (inner + KERB_WIDTH / 2),
-        M.kerb,
-        2.5,
-        ROAD_LIFT
-      );
-    }
-  }
-
-  if (opts.lights !== false) {
-    // one mast per approach, on the left kerb of that approach, arm over the carriageway
-    const lx = half + 1.6;
-    const lz = zebraFrom + zebraLen + 2.6;
-    const corners: [number, number, number, 'red' | 'green'][] = [
-      [-lx, lz, 0, 'green'],
-      [lx, -lz, Math.PI, 'green'],
-      [lz, lx, Math.PI / 2, 'red'],
-      [-lz, -lx, -Math.PI / 2, 'red'],
-    ];
-    for (const [ax, az, ayaw, lit] of corners) {
-      const [wx, wz] = k.world(ax, az);
-      buildTrafficLight(ctx, wx, wz, yaw + ayaw, { ground: opts.ground, lit });
-    }
-  }
-
-  k.finish('street:signal-intersection', 0, 0);
-  return k.g;
-}
-
-// ---------------------------------------------------------------- 5. street furniture
+// ---------------------------------------------------------------- 8. street furniture
 
 export interface UtilityPoleOpts extends StreetOpts {
   spanM?: number;
