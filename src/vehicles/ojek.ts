@@ -320,6 +320,12 @@ export class Ojek {
     kit.box(S, 'matte', BLACK, [0.035, 0.10, 0.44], [-0.195, 0.305, 0.22]);
     // heel plate and a floor mat line so the footwell is not one flat slab
     kit.box(S, 'matte', TRIM, [0.30, 0.012, 0.06], [0, 0.327, 0.05]);
+    // The two joints that used to read as holes in the bike. Floorboard front edge is z 0.45 and
+    // the lower cowl starts at z 0.575: a 12 cm slot you could see the road through. The apron
+    // bottom at y 0.54 never met the floorboard at y 0.325 either. This raked bulkhead closes
+    // both, the way the black inner cowl of a Beat does.
+    kit.box(S, 'matte', 0x232529, [0.30, 0.30, 0.09], [0, 0.44, 0.515], [0.42, 0, 0],
+      taperBox(0.30, 0.30, 0.09, 1.0, 1.0, 0.03));
 
     // saddle: rider pad stepped lower and narrower than the pillion pad behind it
     kit.box(S, 'matte', TRIM, [0.31, 0.07, 0.62], [0, 0.755, 0.10]); // saddle base
@@ -333,6 +339,18 @@ export class Ojek {
       taperBox(0.09, 0.22, 0.48, 0.78, 0.84, 0));
     kit.box(S, 'gloss', paint, [0.09, 0.22, 0.48], [-0.225, 0.70, -0.40], [0, 0, 0],
       taperBox(0.09, 0.22, 0.48, 0.78, 0.84, 0));
+    // Mid body: the underbone is open, but not empty. The gap between the floorboard (z -0.01)
+    // and the rear cowls (z -0.16) ran all the way up to the seat, so the silhouette had a
+    // see-through hole under the saddle. A Beat's rear body reaches forward under the seat, so
+    // these two flank panels plus a dark centre close it while keeping the step-through open in
+    // front of the rider's shins.
+    kit.box(S, 'gloss', paint, [0.05, 0.32, 0.36], [0.158, 0.575, -0.02], [0, 0, 0],
+      taperBox(0.05, 0.32, 0.36, 0.9, 0.86, 0));
+    kit.box(S, 'gloss', paint, [0.05, 0.32, 0.36], [-0.158, 0.575, -0.02], [0, 0, 0],
+      taperBox(0.05, 0.32, 0.36, 0.9, 0.86, 0));
+    kit.box(S, 'matte', DARK_METAL, [0.28, 0.28, 0.34], [0, 0.545, -0.03]);
+    // engine cover, so the dark centre is a cover and not an empty box
+    kit.box(S, 'matte', 0x2b2e35, [0.06, 0.20, 0.22], [0.17, 0.50, -0.06], [0, 0, 0]);
     kit.box(S, 'gloss', paint, [0.26, 0.20, 0.26], [0, 0.73, -0.72], [-0.2, 0, 0],
       taperBox(0.26, 0.20, 0.26, 0.7, 0.8, 0.02)); // tail
     kit.box(S, 'gloss', TAIL_LENS, [0.16, 0.065, 0.035], [0, 0.805, -0.875], [-0.2, 0, 0]);
