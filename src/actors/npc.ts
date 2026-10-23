@@ -31,12 +31,14 @@ const CROSS_SPEED = 2.35; // brisk, but still a walk
 const STREET_REACH = 10; // a car this close along the crossing line holds me at the kerb
 
 // ---------------------------------------------------------------- vendors and customers
-// A gerobak is nothing without the person behind it. One vendor per cart stands on the serving
-// side, on the ground, facing the street; walkers on that pavement stop for 3-6 s beside it and
-// walk on. The numbers are budgeted: two carts can serve a customer at once, and a pedestrian
-// needs a cooldown before it queues again, so the crowd keeps moving.
-const VENDOR_RINGS = [1.5, 1.7, 1.9, 2.1, 2.3, 2.5]; // distances off the cart centre to try
-const VENDOR_ANGLES = 24; // spots sampled around each ring
+// A gerobak is nothing without the person behind it. One vendor per cart stands on the customer
+// side of it, close enough for both hands to reach over the worktop and turned into the cart he
+// serves; walkers on that pavement stop for 3-6 s beside it and walk on. The numbers are budgeted:
+// two carts can serve a customer at once, and a pedestrian needs a cooldown before it queues
+// again, so the crowd keeps moving.
+const VENDOR_RINGS = [1.05, 1.2, 1.35, 1.5, 1.7, 1.9, 2.1, 2.3]; // distances off the cart centre to try
+const VENDOR_ANGLES = 32; // spots sampled around each ring
+const VENDOR_LANE_SLACK = 0.7; // how much further off the pavement lane a closer post may stand
 const VENDOR_HOME = 0.45; // a vendor inside this radius of its post does not walk back
 const VENDOR_RETURN_SNAP = 12; // further away than this and it is put back, not walked back
 const CUSTOMER_RANGE = 3.2; // a walker this close to a staffed cart stops for food
@@ -49,7 +51,7 @@ const CUSTOMER_COOLDOWN_MAX = 70;
 const _footV = new THREE.Vector3();
 const _scratch: any[] = [];
 
-/** Where a cart's vendor stands: on the ground, beside the cart, facing the street. */
+/** Where a cart's vendor stands: on the ground at the cart's serve side, turned into the cart. */
 interface VendorPost {
   i: number;
   cart: string;
@@ -952,8 +954,9 @@ export class Ped {
     }
     this.speed = 0;
     this.lookT += dt;
-    // face the street, with the small sway of someone watching the road for customers
-    const desired = this.postYaw + Math.sin(this.lookT * 0.5) * 0.3;
+    // turned into his own worktop, with only the small drift of a man stirring: a wide scan would
+    // read as watching the street while his hands are over the pan
+    const desired = this.postYaw + Math.sin(this.lookT * 0.45) * 0.06;
     this.yaw += angleDelta(this.yaw, desired) * clamp(dt * 3, 0, 1);
   }
 
@@ -990,18 +993,18 @@ export class Ped {
       headPitch = 0.42;
       tilt = Math.sin(this.stateT * 26) * 0.05;
     } else if (this.state === 'vendor') {
-      // Working the cart: both arms down and forward over the counter, the right hand stirring.
-      // The old pose was armX -1.15 with the arms splayed outwards (-0.26), which is 24 degrees off
-      // horizontal — the T-pose in screenshots/proof/pedagang.png. The body also leans in now, so
-      // the reach reads as someone tending a wok rather than a mannequin beside an umbrella.
+      // Working the pan: both arms down and forward over the worktop, the arms slightly apart so
+      // the shoulders stay narrow instead of splaying to the sides, the right hand stirring. The
+      // body leans in over the cart and the head tips down to it, so the reach reads as someone
+      // tending a wok rather than a mannequin beside an umbrella.
       const stir = Math.sin(this.stateT * 2.1);
-      armX = -0.66;
-      armLX = -0.58 + stir * 0.08;
-      armRX = -0.78 - stir * 0.06;
-      armZL = 0.14;
-      armZR = -0.10;
-      torsoPitch = 0.15;
-      headPitch = 0.3;
+      armX = -1.0;
+      armLX = -0.98 + stir * 0.06;
+      armRX = -1.12 - stir * 0.04;
+      armZL = 0.1;
+      armZR = -0.08;
+      torsoPitch = 0.26;
+      headPitch = 0.38;
       headYaw = Math.sin(this.lookT * 0.8) * 0.16;
     } else if (this.shopTimer > 0) {
       // a customer ordering: half-raised hand, eyes on the menu board
@@ -1513,6 +1516,20 @@ export class PedManager {
     return true;
   }
 
+  /**
+   * The gerobak group the city built at (x,z), so a vendor can stand square on its worktop. The
+   * audit entry the carts publish is a position only, but the group in the scene carries the
+   * rotation the cart was built with.
+   */
+  private cartAt(x: number, z: number) {
+    const list: any[] = this.city.group?.children || [];
+    for (let i = 0; i < list.length; i++) {
+      const g = list[i];
+      if (Math.abs(g.position.x - x) < 0.05 && Math.abs(g.position.z - z) < 0.05) return g;
+    }
+    return null;
+  }
+
   /** One post per food cart the city audited (propAudit `kaki5-*`), in audit order. */
   buildCartPosts() {
     const audit = this.city.propAudit || [];
@@ -1520,7 +1537,8 @@ export class PedManager {
     for (let i = 0; i < audit.length; i++) {
       const a = audit[i];
       if (!a || typeof a.name !== 'string' || !a.name.startsWith('kaki5-')) continue;
-      const spot = this.vendorSpot(a.x, a.z);
+      const cart = this.cartAt(a.x, a.z);
+      const spot = this.vendorSpot(a.x, a.z, cart ? cart.rotation.y : null);
       if (!spot) continue;
       posts.push({ i: posts.length, cart: a.name, cx: a.x, cz: a.z, x: spot.x, z: spot.z, yaw: spot.yaw });
     }
@@ -1528,18 +1546,66 @@ export class PedManager {
   }
 
   /**
-   * Where the vendor stands for the cart at (cx,cz). A ring of spots is sampled around the cart and
-   * the one kept is on the ground, off the carriageway when the cart leaves any room, clear of
-   * every solid collider, and as close to the pavement lane as the cart allows: that lane is the
-   * serving side, where customers walk. The vendor faces the road they come in from.
+   * Where the vendor stands for the cart at (cx,cz). The person serving stands squared up to one
+   * of the cart's two long faces, close enough that both hands reach over the worktop (the deck is
+   * 1.5 m by 0.9 m, so a body at ~1 m from the centre is working it, at 2.5 m it is loitering). The
+   * face kept is the one on the pavement lane customers walk in: off the carriageway, clear of
+   * every solid collider, and as near that lane as the cart allows.
    *
-   * The search is geometric on purpose. The audit entry is a placement coordinate, not the cart's
-   * yaw, so "the serve side" has to be measured against the pavement and the kerb rather than read
-   * off a rotation the city never publishes.
+   * `cartYaw` is the rotation the cart itself was built with. Without it (a cart whose group the
+   * scene no longer holds) the search falls back to rings sampled around the position; the audit
+   * entry is a placement coordinate, so the serve side has to be measured against the pavement and
+   * the kerb rather than read off a rotation that is not published.
+   *
+   * The post's yaw points into the cart, not at the street: the body is turned into its own
+   * worktop, which is what the pose (both hands forward over the pan) is built on.
    */
-  vendorSpot(cx: number, cz: number) {
+  vendorSpot(cx: number, cz: number, cartYaw: number | null = null) {
+    const pick = cartYaw === null ? this.vendorSpotOnRing(cx, cz) : this.vendorSpotOnCart(cx, cz, cartYaw);
+    if (!pick) return null;
+    return { x: pick.x, z: pick.z, yaw: pick.yaw };
+  }
+
+  /**
+   * Squared up to a long face of the cart: four depths either side of the deck edge, slides along
+   * the face, the pavement side scored to win.
+   */
+  private vendorSpotOnCart(cx: number, cz: number, cartYaw: number) {
+    const fx = Math.sin(cartYaw); // cart-local +z: the face the sign is painted on
+    const fz = Math.cos(cartYaw);
+    const rx = Math.cos(cartYaw); // cart-local +x: along the worktop
+    const rz = -Math.sin(cartYaw);
     let best: any = null;
     let fallback: any = null;
+    for (const side of [1, -1]) {
+      for (const off of [0.97, 1.05, 1.15, 1.3]) {
+        for (const slide of [0, -0.22, 0.22, -0.45, 0.45]) {
+          const x = cx + fx * off * side + rx * slide;
+          const z = cz + fz * off * side + rz * slide;
+          if (!this.clearSpot(x, z)) continue;
+          // square to the worktop, not aimed at the cart's centre: a body slid down the face would
+          // otherwise work the pan at an angle
+          const yaw = Math.atan2(-fx * side, -fz * side);
+          const lane = this.nearestLeg(x, z).d;
+          const road = this.onCarriageway(x, z);
+          // square on the face, not slid down it: the pan sits in the middle of the worktop, so a
+          // body centred on it reaches the pot and reads as turned into the cart, not across it
+          const score = off * 0.35 + lane + Math.abs(slide) * 2.2;
+          if (!road && (!best || score < best.score)) best = { x, z, yaw, score };
+          if (!fallback || score < fallback.score) fallback = { x, z, yaw, score };
+        }
+      }
+    }
+    // a cart parked so tight against the kerb that every face point is asphalt keeps its vendor in
+    // the parking lane rather than having none at all
+    return best || fallback;
+  }
+
+  /** Fallback when the cart's own rotation is unknown: rings of spots around the position. */
+  private vendorSpotOnRing(cx: number, cz: number) {
+    let bestLane = Infinity;
+    let fallback: any = null;
+    const onLane: any[] = [];
     for (let r = 0; r < VENDOR_RINGS.length; r++) {
       const R = VENDOR_RINGS[r];
       for (let i = 0; i < VENDOR_ANGLES; i++) {
@@ -1549,18 +1615,22 @@ export class PedManager {
         if (!this.clearSpot(x, z)) continue;
         const lane = this.nearestLeg(x, z).d;
         const road = this.onCarriageway(x, z);
-        if (!road && (!best || lane < best.lane)) best = { x, z, lane };
-        // a cart can be parked so tight against the kerb that every ring point is asphalt: the
-        // vendor then stands in the parking lane rather than not existing at all
-        if (!fallback || lane < fallback.lane) fallback = { x, z, lane };
+        const yaw = Math.atan2(cx - x, cz - z);
+        if (!road) {
+          onLane.push({ x, z, lane, gap: R, yaw });
+          if (lane < bestLane) bestLane = lane;
+        }
+        if (!fallback || lane < fallback.lane) fallback = { x, z, lane, gap: R, yaw };
       }
     }
-    const pick = best || fallback;
-    if (!pick) return null;
-    // Face the cart, not the street. The person serving is turned into his own gerobak, working
-    // over the pot; the previous yaw faced the lane he stands on, so the screenshots showed a man
-    // staring at the road with the back of his head to the cart he is supposed to be serving from.
-    return { x: pick.x, z: pick.z, yaw: Math.atan2(cx - pick.x, cz - pick.z) };
+    // the lane side wins, then the closest post on it
+    let pick: any = null;
+    for (let i = 0; i < onLane.length; i++) {
+      const s = onLane[i];
+      if (s.lane > bestLane + VENDOR_LANE_SLACK) continue;
+      if (!pick || s.gap < pick.gap || (s.gap === pick.gap && s.lane < pick.lane)) pick = s;
+    }
+    return pick || fallback;
   }
 
   /** Is a live, calm vendor standing behind this cart's counter? */
