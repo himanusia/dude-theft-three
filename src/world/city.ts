@@ -1133,7 +1133,7 @@ export class City {
       { name: 'Ring Road', width: 20, path: RING_ROAD as [number, number][] },
       ...LOCAL_STREETS.map((s, i) => ({ name: `Local Street ${i}`, width: s.width, path: s.path as [number, number][] })),
     ];
-    const asphalt = new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.98 });
+    const asphalt = new THREE.MeshStandardMaterial({ color: 0x1b1f24, roughness: 1 });
     const ring = new THREE.MeshStandardMaterial({ color: 0x1e2228, roughness: 0.98 });
     const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });
     for (const st of LOCAL_STREETS) {
@@ -1152,8 +1152,8 @@ export class City {
 
     // Pavements. Without a kerb the buildings meet the asphalt and every street reads as a
     // corridor between walls; Jakarta roads all have a raised trotoar with a kerb stone.
-    const trotoar = new THREE.MeshStandardMaterial({ color: 0x8f8b82, roughness: 0.98 });
-    const kerbMat = new THREE.MeshStandardMaterial({ color: 0xb9b4a8, roughness: 0.95 });
+    const trotoar = new THREE.MeshStandardMaterial({ color: 0x9d988c, roughness: 0.98 });
+    const kerbMat = new THREE.MeshStandardMaterial({ color: 0xd6d0c2, roughness: 0.95 });
     for (const road of [...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })), { path: RING_ROAD as [number, number][], width: 20 }]) {
       for (const side of [-1, 1]) {
         const walk = this.offsetPath(road.path, side * (road.width / 2 + 1.9));
@@ -2128,9 +2128,16 @@ export class City {
       this.colliders.some((c) => x > c.minX - 1 && x < c.maxX + 1 && z > c.minZ - 1 && z < c.maxZ + 1);
     // walk along the spine until a point is free: spawning inside a wall made the camera start
     // inside a building and every shot hit a wall at zero distance
-    for (const offset of [3, -3, 6, -6, 9, -9, 12, -12]) {
-      const x = baseX + offset;
-      if (!inside(x, baseZ)) return new THREE.Vector3(x, 0, baseZ);
+    // the spawn guard has to look clear of street furniture too: a halte platform, a cart or a
+    // parked ojek on the kerb is enough to pin the player, which is what "walked 1 m" was
+    const clearOf = (x: number, z: number) =>
+      this.colliders.every((c) => x < c.minX - 3 || x > c.maxX + 3 || z < c.minZ - 3 || z > c.maxZ + 3);
+    for (const d of [3, -3, 6, -6, 9, -9, 12, -12, 18, -18, 24, -24]) {
+      for (const dz of [0, 6, -6, 12, -12, 20, -20]) {
+        const x = baseX + d;
+        const z = baseZ + dz;
+        if (!inside(x, z) && clearOf(x, z)) return new THREE.Vector3(x, 0, z);
+      }
     }
     return new THREE.Vector3(baseX, 0, baseZ);
   }
