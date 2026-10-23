@@ -477,7 +477,7 @@ export class City {
       const isLot = !isPark && Math.random() < 0.18;
 
       const plate = new THREE.Mesh(new THREE.BoxGeometry(size, 0.26, size), sidewalkMat);
-      plate.position.set(cx, terrainHeight(cx, cz) + 0.13, cz);
+      plate.position.set(cx, 0.13, cz);
       plate.receiveShadow = true;
       this.group.add(plate);
 
