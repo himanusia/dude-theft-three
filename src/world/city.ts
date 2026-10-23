@@ -475,6 +475,37 @@ export class City {
    * Merge the collected ground-floor plinths into one mesh per texture variant. Called once,
    * after every block and frontage row has been laid out.
    */
+  /**
+   * Clear the spawn square of street furniture, whoever placed it.
+   *
+   * Props come from half a dozen paths -- becak, benches, crates, ojek ranks, carts, parking --
+   * and each was allowed to ignore where the player starts. Every guard added so far fixed one
+   * path and left the others, so the player kept starting with a gerobak or a becak inside him.
+   * This sweeps once, at the end, over small ground-level objects near the spawn point.
+   */
+  finalizeSpawnClearance() {
+    const sp = this.getSpawn();
+    const doomed: THREE.Object3D[] = [];
+    const box = new THREE.Box3();
+    for (const child of this.group.children) {
+      if ((child as any).isLight) continue;
+      box.setFromObject(child);
+      const size = box.getSize(new THREE.Vector3());
+      if (size.y > 4 || Math.max(size.x, size.z) > 6) continue;      // buildings and decks stay
+      const c = box.getCenter(new THREE.Vector3());
+      if (Math.hypot(c.x - sp.x, c.z - sp.z) > 7) continue;
+      doomed.push(child);
+    }
+    for (const o of doomed) o.removeFromParent();
+    // and the colliders that belonged to them
+    this.colliders = this.colliders.filter((c) => {
+      const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+      const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
+      if (Math.max(w, d) > 8 || c.h > 4) return true;                 // buildings stay
+      return Math.hypot(cx - sp.x, cz - sp.z) > 7;
+    });
+  }
+
   finalizePlinths() {
     for (let v = 0; v < this.plinthGeos.length; v++) {
       const list = this.plinthGeos[v];
@@ -760,6 +791,7 @@ export class City {
     this.buildTreeInstances();
     this.buildNightLights();
     this.finalizePlinths();
+    this.finalizeSpawnClearance();
   }
 
   buildNightLights() {
@@ -945,6 +977,15 @@ export class City {
    * onto the nearest arterial, walks out to the middle of that road's pavement, and picks the
    * side that is actually free.
    */
+  /** the player's start, cached so street furniture can keep out of it */
+  spawnCache: { x: number; z: number } | null = null;
+
+  /** true when a proposed prop slot would land on the player's spawn */
+  tooCloseToSpawn(x: number, z: number, pad = 6): boolean {
+    if (!this.spawnCache) this.spawnCache = this.getSpawn();
+    return Math.hypot(x - this.spawnCache.x, z - this.spawnCache.z) < pad;
+  }
+
   snapToVerge(x: number, z: number): { x: number; z: number; yaw: number } | null {
     let best: { d: number; cx: number; cz: number; nx: number; nz: number; yaw: number; half: number } | null = null;
     for (const a of [...ARTERIALS, { path: RING_ROAD, width: 20 } as any]) {
@@ -2638,8 +2679,11 @@ export class City {
     // parked ojek on the kerb is enough to pin the player, which is what "walked 1 m" was
     const clearOf = (x: number, z: number) =>
       this.colliders.every((c) => x < c.minX - 3 || x > c.maxX + 3 || z < c.minZ - 3 || z > c.maxZ + 3);
-    const verge = this.snapToVerge(baseX, baseZ);
-    if (verge) return new THREE.Vector3(verge.x, 0, verge.z);
+    // Start on the carriageway, not on a plate. snapToVerge pulls a point onto the nearest
+    // block plate so props have a kerb to stand on -- using it here put the player on a park
+    // lawn at y = 0.56 m, two metres from the asphalt, which is why the street looked like a
+    // plain pale surface with no road under him.
+    if (clearOf(baseX, baseZ)) return new THREE.Vector3(baseX, 0, baseZ);
     for (const d of [3, -3, 6, -6, 9, -9, 12, -12, 18, -18, 24, -24]) {
       for (const dz of [0, 6, -6, 12, -12, 20, -20]) {
         const x = baseX + d;
