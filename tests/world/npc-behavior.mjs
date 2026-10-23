@@ -421,7 +421,26 @@ function stopServer() {
       }
       g.police.clearWanted();
       g._test.cinematic(false);
-      g._test.teleport(26, 0);
+      // Stand where the citizen actually is. The old hardcoded (26, 0) was a point on the
+      // pre-Jakarta grid; once blocks followed the street network it fell inside a building and
+      // every shot hit a wall, so the pedestrians never had a reason to run.
+      const _o = (() => {
+        const sp = g.city.getSpawn();
+        const clear = (px, pz) => !g.city.colliders.some(
+          (c) => px > c.minX - 3.5 && px < c.maxX + 3.5 && pz > c.minZ - 3.5 && pz < c.maxZ + 3.5
+        );
+        for (let r = 0; r <= 70; r += 4) {
+          for (let a = 0; a < 16; a++) {
+            const x = sp.x + Math.cos((a / 16) * 6.2832) * r;
+            const z = sp.z + Math.sin((a / 16) * 6.2832) * r;
+            if (clear(x, z) && clear(x, z - 8) && clear(x, z - 17) && clear(x - 6, z - 10) && clear(x + 6, z - 10)) {
+              return { x, z };
+            }
+          }
+        }
+        return sp;
+      })();
+      g._test.teleport(_o.x, _o.z);
       g._test.setCam(0, 0.02); // camera behind the player, looking down -z
       g.player.mag = g.player.magSize;
       g.player.shootCd = 0;
@@ -445,7 +464,7 @@ function stopServer() {
 
       const alive = g.peds.peds.filter((p) => !p.dead);
       for (let i = 0; i < fixture.length && i < alive.length; i++) {
-        reset(alive[i], fixture[i][0], fixture[i][1], alive[i].walkSpeed);
+        reset(alive[i], _o.x - 26 + fixture[i][0], _o.z + fixture[i][1], alive[i].walkSpeed);
       }
       await new Promise((r) => setTimeout(r, 400)); // let the camera settle behind the player
 
@@ -510,7 +529,26 @@ function stopServer() {
     const g = window.__game;
     g.police.clearWanted();
     g._test.cinematic(false);
-    g._test.teleport(26, 0);
+      // Stand where the citizen actually is. The old hardcoded (26, 0) was a point on the
+      // pre-Jakarta grid; once blocks followed the street network it fell inside a building and
+      // every shot hit a wall, so the pedestrians never had a reason to run.
+      const _o = (() => {
+        const sp = g.city.getSpawn();
+        const clear = (px, pz) => !g.city.colliders.some(
+          (c) => px > c.minX - 3.5 && px < c.maxX + 3.5 && pz > c.minZ - 3.5 && pz < c.maxZ + 3.5
+        );
+        for (let r = 0; r <= 70; r += 4) {
+          for (let a = 0; a < 16; a++) {
+            const x = sp.x + Math.cos((a / 16) * 6.2832) * r;
+            const z = sp.z + Math.sin((a / 16) * 6.2832) * r;
+            if (clear(x, z) && clear(x, z - 8) && clear(x, z - 17) && clear(x - 6, z - 10) && clear(x + 6, z - 10)) {
+              return { x, z };
+            }
+          }
+        }
+        return sp;
+      })();
+      g._test.teleport(_o.x, _o.z);
     g._test.setCam(0, 0.9); // muzzle up: the shot scares the block, it does not hit anyone
     g.player.mag = g.player.magSize;
     g.player.shootCd = 0;
@@ -525,7 +563,7 @@ function stopServer() {
     const alive = g.peds.peds.filter((p) => !p.dead);
     for (let i = 0; i < spots.length && i < alive.length; i++) {
       const p = alive[i];
-      const [x, z] = spots[i];
+      const x = _o.x - 26 + spots[i][0], z = _o.z + spots[i][1];
       p.pos.set(x, g.city.groundHeightAt(x, z), z);
       p.char.group.position.copy(p.pos);
       p.fleeTimer = 0;
@@ -590,7 +628,26 @@ function stopServer() {
     const g = window.__game;
     g._test.cinematic(false);
     g.police.clearWanted();
-    g._test.teleport(26, 0);
+      // Stand where the citizen actually is. The old hardcoded (26, 0) was a point on the
+      // pre-Jakarta grid; once blocks followed the street network it fell inside a building and
+      // every shot hit a wall, so the pedestrians never had a reason to run.
+      const _o = (() => {
+        const sp = g.city.getSpawn();
+        const clear = (px, pz) => !g.city.colliders.some(
+          (c) => px > c.minX - 3.5 && px < c.maxX + 3.5 && pz > c.minZ - 3.5 && pz < c.maxZ + 3.5
+        );
+        for (let r = 0; r <= 70; r += 4) {
+          for (let a = 0; a < 16; a++) {
+            const x = sp.x + Math.cos((a / 16) * 6.2832) * r;
+            const z = sp.z + Math.sin((a / 16) * 6.2832) * r;
+            if (clear(x, z) && clear(x, z - 8) && clear(x, z - 17) && clear(x - 6, z - 10) && clear(x + 6, z - 10)) {
+              return { x, z };
+            }
+          }
+        }
+        return sp;
+      })();
+      g._test.teleport(_o.x, _o.z);
     g._test.setCam(0, 0.02);
     g.player.mag = g.player.magSize;
     g.player.shootCd = 0;
@@ -628,7 +685,7 @@ function stopServer() {
     ];
     const alive = g.peds.peds.filter((p) => !p.dead);
     for (let i = 0; i < fixture.length && i < alive.length; i++) {
-      reset(alive[i], fixture[i][0], fixture[i][1], alive[i].walkSpeed);
+      reset(alive[i], _o.x - 26 + fixture[i][0], _o.z + fixture[i][1], alive[i].walkSpeed);
     }
     await new Promise((r) => setTimeout(r, 400));
     const camPos = g.camera.position;
