@@ -471,6 +471,25 @@ export class City {
     return this.interiors.find((r) => r.kind === kind);
   }
 
+  /**
+   * Merge the collected ground-floor plinths into one mesh per texture variant. Called once,
+   * after every block and frontage row has been laid out.
+   */
+  finalizePlinths() {
+    for (let v = 0; v < this.plinthGeos.length; v++) {
+      const list = this.plinthGeos[v];
+      if (!list.length) continue;
+      const merged = mergeGeometries(list, false);
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, shopfrontMat(v));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+      for (const g of list) g.dispose();
+      list.length = 0;
+    }
+  }
+
   buildClouds() {
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, fog: false, depthWrite: false });
     this.clouds = new THREE.Group();
@@ -740,6 +759,7 @@ export class City {
     this.buildLampInstances();
     this.buildTreeInstances();
     this.buildNightLights();
+    this.finalizePlinths();
   }
 
   buildNightLights() {
@@ -1103,6 +1123,9 @@ export class City {
    */
   /** the deck the layang was built on, so a shop never ends up underneath it */
   layangSpine: [number, number][] = [];
+
+  /** ground-floor plinth geometry, bucketed by texture variant, merged at the end of generation */
+  plinthGeos: THREE.BufferGeometry[][] = [[], [], []];
 
   /** true when (x, z) is within `pad` metres of the elevated deck's centreline */
   nearLayang(x: number, z: number, pad: number): boolean {
@@ -1750,11 +1773,12 @@ export class City {
     // existed in the scene and never drew, three attempts running; a plain mesh that hangs off
     // the same group as the body cannot fail that way. Cost: one draw call per building.
     if (h > 4 && d > 5) {
-      const plinth = new THREE.Mesh(new THREE.BoxGeometry(w + 0.34, 3.2, d + 0.34), shopfrontMat(variant));
-      plinth.position.set(x, 1.9 + 0.2, z);
-      plinth.castShadow = true;
-      plinth.receiveShadow = true;
-      this.group.add(plinth);
+      // One plinth mesh per building is one draw call per building: ~1,400 of them against the
+      // whole rest of the frame. They share three materials, so the geometry is collected here
+      // and merged into three meshes once the city is laid out.
+      const pg = new THREE.BoxGeometry(w + 0.34, 3.2, d + 0.34);
+      pg.translate(x, 1.9 + 0.2, z);
+      this.plinthGeos[variant].push(pg);
     }
 
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats);

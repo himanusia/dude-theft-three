@@ -201,14 +201,14 @@ async function auditPause() {
   hud.showPause(true);
   // let the overlay's opacity/visibility transition commit before measuring
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  const card = document.querySelector('#pause-screen .card');
+  const card = document.querySelector('#pause-screen .pause-wrap');
   const shell = document.getElementById('pause-screen');
   const r = card.getBoundingClientRect();
   const rect = { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) };
   const scrolls = card.scrollHeight > card.clientHeight + 1;
   const inside = rect.x >= 3.5 && rect.y >= 3.5 && rect.x + rect.w <= window.innerWidth - 3.5 && rect.y + rect.h <= window.innerHeight - 3.5;
   const resume = document.getElementById('resume-btn').getBoundingClientRect();
-  const buttons = [...card.querySelectorAll('button, .section-title, .muted, .keys span, .keys kbd')]
+  const buttons = [...card.querySelectorAll('button, .pause-key span, .pause-key kbd, .pause-head')]
     .filter((n) => {
       const cs = getComputedStyle(n);
       if (cs.display === 'none') return false;
