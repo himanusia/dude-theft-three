@@ -32,7 +32,9 @@ export function buildLayang(ctx: LayangCtx, path: [number, number][], opts: Laya
   const pierEvery = opts.pierEvery ?? 28;
 
   const concrete = new THREE.MeshStandardMaterial({ color: 0x9a9a94, roughness: 0.95 });
-  const deckMat = new THREE.MeshStandardMaterial({ color: 0x6f7377, roughness: 0.98 });
+  // the soffit faces down, so the hemisphere light's ground colour is all it ever sees;
+  // a mid grey came out mossy green. Dark concrete keeps it a shadowed underside.
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x4a4d51, roughness: 0.98 });
   const railMat = new THREE.MeshStandardMaterial({ color: 0xc9c6bc, roughness: 0.9 });
 
   const deckM: THREE.Matrix4[] = [];

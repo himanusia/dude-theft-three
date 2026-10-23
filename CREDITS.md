@@ -115,3 +115,8 @@ palette (and the brief) — the stations in the photographs are grey/blue.
 - `reference/assets/padang-ref-0.jpg` — *Rumah Makan Padang Sederhana*, panoramio, Wikimedia Commons,
   **CC BY 3.0**. Used to model `src/world/rumahpadang.ts` (gonjong roof, carved band, glazed
   upper facade, red name plate). Comparison: `screenshots/proof/padang-compare.png`.
+
+- `reference/assets/ruko-ref-0.jpg` — *Komplek Pertokoan Jalan Pekiringan, Kota Cirebon*, Wikimedia
+  Commons, **CC BY-SA 4.0**. Used for the ground-floor shop-row texture in `src/world/city.ts`
+  (banner fascias, striped awnings, mixed shutters and lit glazing, air-con units, kerb grime).
+  Comparison: `screenshots/proof/ruko-compare.png`.

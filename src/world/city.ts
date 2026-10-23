@@ -67,31 +67,111 @@ function fitFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, 
 
 /** Roller-shutter shopfront, shared by every frontage building. */
 let shutterMat: THREE.MeshStandardMaterial | null = null;
-function shopfrontMat(): THREE.MeshStandardMaterial {
-  if (shutterMat) return shutterMat;
-  const tex = canvasTexture(256, 128, (ctx, w, h) => {
-    // painted fascia
-    ctx.fillStyle = '#d8cfb8';
-    ctx.fillRect(0, 0, w, h * 0.34);
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.fillRect(0, h * 0.34 - 3, w, 3);
-    // roller door slats
-    for (let y = h * 0.34; y < h; y += 7) {
-      ctx.fillStyle = (Math.floor(y / 7) % 2) ? '#5a6068' : '#6b727b';
-      ctx.fillRect(0, y, w, 5);
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.fillRect(0, y + 5, w, 2);
+const shopfrontCache: THREE.MeshStandardMaterial[] = [];
+
+/**
+ * The ground floor of a ruko, after reference/assets/ruko-ref-0.jpg (Komplek Pertokoan
+ * Jalan Pekiringan, Cirebon; Wikimedia, CC BY-SA 4.0). What the photo actually shows along the
+ * pavement: banner signs in flat strong colours strung across the frontage, some bays shuttered
+ * and some glazed with the shop lit inside, striped awnings over the walk, air-con units bolted
+ * to the wall, and paint that has run at the kerb line.
+ *
+ * Three variants so a row of buildings is not one print repeated. One tile spans four bays.
+ */
+function shopfrontMat(variant = 0): THREE.MeshStandardMaterial {
+  const cached = shopfrontCache[variant];
+  if (cached) return cached;
+
+  const fascias = ['#c9302c', '#e8b91d', '#1f7a4d', '#f2efe6', '#2b4c7e'];
+  const awnings = ['#e2622a', '#2f6fb3', '#c0392b', '#3f7d3a'];
+  const glassGlow = ['#f6d98a', '#f3e6c8', '#dce9f2'];
+
+  const tex = canvasTexture(512, 128, (ctx, w, h) => {
+    ctx.fillStyle = '#cfc7b4';
+    ctx.fillRect(0, 0, w, h);
+
+    const bay = w / 4;
+    for (let i = 0; i < 4; i++) {
+      const x0 = i * bay;
+      const kind = (i + variant) % 3;      // 0 = shuttered, 1 = glazed & lit, 2 = half-glazed
+
+      // glazing or shutter -------------------------------------------------------------
+      if (kind === 0) {
+        ctx.fillStyle = '#5f666e';
+        ctx.fillRect(x0 + 4, 34, bay - 8, h - 34);
+        for (let y = 40; y < h - 6; y += 9) {
+          ctx.fillStyle = '#767d85';
+          ctx.fillRect(x0 + 4, y, bay - 8, 5);
+          ctx.fillStyle = 'rgba(0,0,0,0.22)';
+          ctx.fillRect(x0 + 4, y + 5, bay - 8, 3);
+        }
+      } else {
+        // interior first, then the mullions over it
+        ctx.fillStyle = glassGlow[(i + variant) % 3];
+        ctx.fillRect(x0 + 4, 34, bay - 8, h - 34);
+        ctx.fillStyle = 'rgba(90,70,40,0.35)';
+        ctx.fillRect(x0 + 4, 34, bay - 8, 26);              // shelving in shadow
+        if (kind === 2) {                                    // half shuttered
+          ctx.fillStyle = '#666d75';
+          ctx.fillRect(x0 + 4, 34, (bay - 8) / 2, h - 34);
+        }
+        ctx.fillStyle = '#2f353b';
+        for (let mx = x0 + 4; mx < x0 + bay - 4; mx += 26) ctx.fillRect(mx, 34, 3, h - 34);
+        ctx.fillRect(x0 + 4, 62, bay - 8, 3);
+        ctx.fillRect(x0 + 4, 96, bay - 8, 3);
+        // a door in the middle of the open bay
+        ctx.fillStyle = '#20262c';
+        ctx.fillRect(x0 + bay / 2 - 9, 58, 18, h - 58);
+      }
+
+      // awnings: a striped band that overhangs the walk
+      const aw = awnings[(i + variant * 2) % awnings.length];
+      ctx.fillStyle = aw;
+      ctx.fillRect(x0 + 2, 20, bay - 4, 14);
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      for (let sx = x0 + 2; sx < x0 + bay - 4; sx += 18) ctx.fillRect(sx, 20, 9, 14);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(x0 + 2, 32, bay - 4, 4);
+
+      // banner sign above the awning, one flat colour per bay
+      ctx.fillStyle = fascias[(i * 2 + variant) % fascias.length];
+      ctx.fillRect(x0 + 2, 4, bay - 4, 15);
+      // letter-like blocks: signage reads at this scale without spelling anything
+      const ink = ctx.fillStyle === '#f2efe6' ? '#20262c' : '#ffffff';
+      ctx.fillStyle = ink;
+      for (let gx = x0 + 10; gx < x0 + bay - 12; gx += 11) {
+        const bh = 7 + ((gx * 7 + i * 13) % 4);
+        ctx.fillRect(gx, 8 + (9 - bh) / 2, 7, bh);
+      }
+
+      // an air-con box bolted beside the bay, as on every ruko in the photo
+      if ((i + variant) % 2 === 0) {
+        ctx.fillStyle = '#e8e8e3';
+        ctx.fillRect(x0 + bay - 26, 46, 20, 14);
+        ctx.fillStyle = '#9aa0a6';
+        ctx.fillRect(x0 + bay - 24, 49, 16, 8);
+      }
+
+      // paint run and kerb grime
+      const grad = ctx.createLinearGradient(0, h - 26, 0, h);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(30,24,16,0.45)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x0, h - 26, bay, 26);
     }
-    // uneven wear so the row is not one clean print
-    for (let i = 0; i < 14; i++) {
-      ctx.fillStyle = `rgba(0,0,0,${rand(0.03, 0.1)})`;
-      ctx.fillRect(rand(0, w), rand(0, h), rand(4, 26), rand(3, 10));
+
+    // dirt streaks down the whole face
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = `rgba(40,34,24,${rand(0.02, 0.09)})`;
+      ctx.fillRect(rand(0, w), rand(20, h - 30), rand(2, 7), rand(10, 40));
     }
   });
+
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(2, 1);
-  shutterMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 });
-  return shutterMat;
+  tex.repeat.set(1, 1);
+  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.88 });
+  shopfrontCache[variant] = mat;
+  return mat;
 }
 
 function windowTexture(wall: any, style = 'grid') {
@@ -311,7 +391,9 @@ export class City {
   }
 
   buildLights() {
-    const hemi = new THREE.HemisphereLight(0xbfe6ff, 0x59a05e, 1.15);
+    // bounce light in a Jakarta street is warm concrete, not grass: a saturated green ground
+    // colour painted every underside in the city mossy, worst of all the toll deck soffit
+    const hemi = new THREE.HemisphereLight(0xbfe6ff, 0x8a8377, 1.15);
     this.scene.add(hemi);
     this.hemi = hemi;
 
@@ -993,7 +1075,7 @@ export class City {
         groundHeightAt: (x, z) => this.groundHeightAt(x, z),
       },
       shifted,
-      { deckY: 9.5, width: 21, pierEvery: 26 }
+      { deckY: 13.2, width: 16.5, pierEvery: 28 }
     );
   }
 
@@ -1536,6 +1618,7 @@ export class City {
 
   makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z, style: any = null) {
     const chromeLike = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
+    const variant = randInt(0, 2);
     const prof = this.facadeProfile(districtAtPoint(x, z), h);
     const wall = pick(prof.walls);
     const facade = prof.style;
@@ -1564,7 +1647,7 @@ export class City {
     // existed in the scene and never drew, three attempts running; a plain mesh that hangs off
     // the same group as the body cannot fail that way. Cost: one draw call per building.
     if (h > 4 && d > 5) {
-      const plinth = new THREE.Mesh(new THREE.BoxGeometry(w + 0.34, 3.2, d + 0.34), shopfrontMat());
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(w + 0.34, 3.2, d + 0.34), shopfrontMat(variant));
       plinth.position.set(x, 1.9 + 0.2, z);
       plinth.castShadow = true;
       plinth.receiveShadow = true;
@@ -2712,7 +2795,7 @@ export class City {
     );
     this.hemi.intensity = lerp(0.78, 0.95, daylight);
     this.hemi.color.setHex(daylight > 0.3 ? 0xbfd8ff : 0x4a5f8a);
-    this.hemi.groundColor.setHex(daylight > 0.3 ? 0x59a05e : 0x2a2b33);
+    this.hemi.groundColor.setHex(daylight > 0.3 ? 0x8a8377 : 0x2a2b33);
 
     this.daylight = daylight;
     const night = 1 - clamp((daylight - 0.05) / 0.4, 0, 1);
