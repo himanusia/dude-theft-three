@@ -1,7 +1,55 @@
 import * as THREE from 'three';
 import { Car } from '../vehicles/car';
 import { LANE, RoadNav } from '../core/pathfinding';
-import { clamp, angleDelta, rand } from '../core/utils';
+import { clamp, angleDelta, rand, roundedBox } from '../core/utils';
+import { Character } from '../actors/character';
+
+// A police officer is the same Character asset the player and the crowd are built from: navy
+// shirt, navy trousers, the same head, hands and shoes. Only the colours and the peaked cap are
+// the uniform. The old officer was four boxes (body, legs, head, cap) in one flat skin tone, so a
+// cop read as a different species next to the player he was chasing.
+const NAVY = 0x22304f;
+const NAVY_DARK = 0x14161c;
+const COP_SKIN = 0xd8a273;
+// built once for the whole force: two cruisers per star, two officers per cruiser
+const CAP_BAND_GEO = roundedBox(0.49, 0.14, 0.49, 0.03, 1);
+const CAP_PEAK_GEO = roundedBox(0.42, 0.05, 0.17, 0.02, 1);
+const CAP_BAND_MAT = new THREE.MeshStandardMaterial({ color: NAVY, roughness: 0.8, flatShading: true });
+const CAP_PEAK_MAT = new THREE.MeshStandardMaterial({ color: NAVY_DARK, roughness: 0.55, flatShading: true });
+
+/** A peaked cap that sits on the asset's own head, above the face, so the officer stays readable. */
+function makeCap(): THREE.Group {
+  const cap = new THREE.Group();
+  // the skull is 0.22 m up the head joint and 0.22 m half-height, so the cap band rides at 0.45
+  cap.position.set(0, 0.45, 0);
+  const band = new THREE.Mesh(CAP_BAND_GEO, CAP_BAND_MAT);
+  band.castShadow = true;
+  cap.add(band);
+  const peak = new THREE.Mesh(CAP_PEAK_GEO, CAP_PEAK_MAT);
+  peak.position.set(0, -0.05, 0.31);
+  peak.castShadow = true;
+  cap.add(peak);
+  return cap;
+}
+
+const _soleV = new THREE.Vector3();
+/**
+ * Sit an officer so the lower sole touches the road. The walk cycle lifts one foot, so the height
+ * is measured off the shoes instead of a sine bob on the whole group (which is what the box body
+ * needed because it had no legs to swing).
+ */
+function plantFeet(char: any, groundY: number) {
+  char.group.position.y = groundY;
+  let lowest = Infinity;
+  for (const leg of [char.legL, char.legR]) {
+    const shoe = leg?.children?.[1];
+    if (!shoe) continue;
+    shoe.getWorldPosition(_soleV);
+    lowest = Math.min(lowest, _soleV.y - 0.075 * (char.scale ?? 1));
+  }
+  if (lowest === Infinity) return;
+  char.group.position.y += groundY - lowest;
+}
 
 // Cruisers navigate the road grid instead of aiming at the player through walls:
 // RoadNav gives a lane-accurate waypoint list, this module drives the list with the
@@ -37,10 +85,11 @@ interface CopEntry {
 
 export interface Officer {
   group: any;
+  /** the shared character asset this officer is built from (limbs, face, gun) */
+  char: any;
   pos: THREE.Vector3;
   yaw: number;
   fireCd: number;
-  phase: number;
   dead: boolean;
 }
 
@@ -227,31 +276,25 @@ export class Police {
     return CRUISE;
   }
 
-  /** Build one officer: navy shirt, cap, boots — four draws, cheap enough for a squad. */
+  /** Build one officer out of the city's own character asset: navy uniform, peaked cap, sidearm. */
   makeOfficer(x: number, z: number, yaw: number): Officer {
-    const g = new THREE.Group();
-    const navy = new THREE.MeshStandardMaterial({ color: 0x22304f, roughness: 0.85, flatShading: true });
-    const skin = new THREE.MeshStandardMaterial({ color: 0xd8a273, roughness: 0.85, flatShading: true });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.9, flatShading: true });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.74, 0.28), navy);
-    body.position.y = 1.03;
-    body.castShadow = true;
-    g.add(body);
-    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.68, 0.26), dark);
-    legs.position.y = 0.34;
-    legs.castShadow = true;
-    g.add(legs);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), skin);
-    head.position.y = 1.55;
-    head.castShadow = true;
-    g.add(head);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.34), navy);
-    cap.position.y = 1.73;
-    g.add(cap);
+    const char = new Character({ skin: COP_SKIN, shirt: NAVY, pants: NAVY_DARK, hair: 'cap', face: 'calm' });
+    char.setArmed(true);
+    char.head.add(makeCap());
+    // a random stride offset, so a squad does not march in lockstep
+    char.phase = Math.random() * Math.PI * 2;
+    const g = char.group;
     const y = this.city.groundHeightAt ? this.city.groundHeightAt(x, z) : 0;
     g.position.set(x, y, z);
     this.scene.add(g);
-    const officer: Officer = { group: g, pos: new THREE.Vector3(x, y, z), yaw, fireCd: 1.2 + Math.random(), phase: Math.random() * 6, dead: false };
+    const officer: Officer = {
+      group: g,
+      char,
+      pos: new THREE.Vector3(x, y, z),
+      yaw,
+      fireCd: 1.2 + Math.random(),
+      dead: false,
+    };
     this.officers.push(officer);
     return officer;
   }
@@ -440,20 +483,29 @@ export class Police {
       const dz = playerPos.z - o.pos.z;
       const d = Math.hypot(dx, dz);
       o.yaw = Math.atan2(dx, dz);
-      if (d > 11) {
+      const walking = d > 11;
+      if (walking) {
         const step = 3.6 * dt;
         o.pos.x += (dx / d) * step;
         o.pos.z += (dz / d) * step;
-        o.phase += dt * 9;
-      } else {
-        o.phase += dt * 1.5;
       }
       if (this.city.groundHeightAt) o.pos.y = this.city.groundHeightAt(o.pos.x, o.pos.z);
       o.group.position.copy(o.pos);
       o.group.rotation.y = o.yaw;
-      o.group.position.y += Math.abs(Math.sin(o.phase)) * 0.05;
+      // The officer now walks on the asset's own legs, so the body is posed by the shared walk
+      // cycle - at the player's own cadence for 3.6 m/s - and stood on the road by its soles
+      // instead of a sine bob on the whole group. The gun comes up when he has a clear line.
+      const los = d < 26 && this.nav.clear(o.pos.x, o.pos.z, playerPos.x, playerPos.z, 0.6);
+      // The stride offset is random so a squad does not march in lockstep, which means a stopped
+      // officer would freeze mid-step: ease the cycle back to a neutral stance instead.
+      if (!walking) {
+        const neutral = Math.round(o.char.phase / Math.PI) * Math.PI;
+        o.char.phase += (neutral - o.char.phase) * Math.min(1, dt * 7);
+      }
+      o.char.animate(dt, walking ? 0.5 : 0, { aiming: los });
+      plantFeet(o.char, o.pos.y);
 
-      if (d < 26 && this.nav.clear(o.pos.x, o.pos.z, playerPos.x, playerPos.z, 0.6)) {
+      if (los) {
         o.fireCd -= dt;
         if (o.fireCd <= 0) {
           o.fireCd = clamp(1.9 - this.wanted * 0.15, 0.7, 1.9);
