@@ -3497,6 +3497,16 @@ export class City {
     trunk.position.set(x, base + 1.6 * scale, z);
     trunk.castShadow = true;
     this.group.add(trunk);
+    // the bark is the solid part of a tree: the crowns start 3.2 m up, out of reach of a walker,
+    // so the collider is the trunk's own footprint at its widest ring, not a box around the tree
+    const trunkHalf = 0.32 * scale;
+    this.colliders.push({
+      minX: x - trunkHalf,
+      maxX: x + trunkHalf,
+      minZ: z - trunkHalf,
+      maxZ: z + trunkHalf,
+      h: 3.2 * scale,
+    });
     const leafMat = new THREE.MeshStandardMaterial({ color: pick([0x2bae4a, 0x1c7c3b, 0x39c455]), roughness: 1, flatShading: true });
     for (let i = 0; i < 2; i++) {
       const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(rand(1.5, 2.1) * scale, 0), leafMat);
@@ -3592,6 +3602,20 @@ export class City {
     const benchGeo = new THREE.BoxGeometry(1.9, 0.14, 0.55);
     const lightGeo = new THREE.BoxGeometry(0.28, 0.34, 0.28);
 
+    /**
+     * The footprint each instanced prop actually occupies, so the collider is the object and not a
+     * box around the whole batch of instances. Half-extents are the geometry's own widest ring or
+     * box half. The signal arm and its housing sit at 4 m, above anyone's head, and the collider
+     * list carries no vertical extent - only a height threshold - so they are deliberately absent;
+     * a collider there would be an invisible 0.9 m wall on the pavement.
+     */
+    const PROP_FOOTPRINT: Record<string, { hx: number; hz: number; h: number }> = {
+      bin: { hx: 0.3, hz: 0.3, h: 0.85 },                 // CylinderGeometry(0.3, 0.26, 0.85)
+      hydrant: { hx: 0.19, hz: 0.19, h: 0.62 },           // CylinderGeometry(0.16, 0.19, 0.62)
+      bench: { hx: 0.95, hz: 0.275, h: 0.85 },            // BoxGeometry(1.9, 0.14, 0.55) on its legs
+      'traffic-mast': { hx: 0.13, hz: 0.13, h: 4.0 },     // BoxGeometry(0.26, 4.0, 0.26)
+    };
+
     const binM = [], hydM = [], benchM = [], lightM = [], lightLampM = [], lightArmM = [], lightBaseM = [];
     for (let i = 0; i < 34; i++) {
       const pt = this.randomSidewalkPoint();
@@ -3655,6 +3679,20 @@ export class City {
       mesh.frustumCulled = false;
       mesh.name = name;
       this.group.add(mesh);
+      // the solid part of each instance: its own footprint at its own position and turn, so a
+      // walker is stopped by the bin and not by a box around every bin in the city
+      const footprint = PROP_FOOTPRINT[name];
+      if (footprint) {
+        for (const m of matrices) {
+          const p = new THREE.Vector3().setFromMatrixPosition(m);
+          const yaw = Math.atan2(m.elements[8], m.elements[0]);
+          const c = Math.abs(Math.cos(yaw));
+          const s = Math.abs(Math.sin(yaw));
+          const hx = c * footprint.hx + s * footprint.hz;
+          const hz = s * footprint.hx + c * footprint.hz;
+          this.colliders.push({ minX: p.x - hx, maxX: p.x + hx, minZ: p.z - hz, maxZ: p.z + hz, h: footprint.h });
+        }
+      }
       if (!audit) return mesh;
       geo.computeBoundingBox();
       const localBottom = geo.boundingBox.min.y;
