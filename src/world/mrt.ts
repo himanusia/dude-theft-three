@@ -108,7 +108,14 @@ export function buildMrtStation(ctx: LayangCtx, x: number, z: number, yaw: numbe
   return g;
 }
 
-/** The guideway itself: a narrow deck on slim piers, distinct from both other structures. */
+/**
+ * The guideway itself: a narrow deck on slim piers, distinct from both other structures.
+ *
+ * Same builder as the toll viaduct, so it gets the same joint for free: the pier head's top
+ * plane is the guideway's soffit plane and the columns run up inside the head. The head's depth
+ * and the columns' spacing are derived from the deck width, which is what keeps this one
+ * reading as a slim metro crosshead rather than a toll-road bent.
+ */
 export function buildMrtLine(ctx: LayangCtx, path: [number, number][]): void {
   buildLayang(ctx, path, { deckY: 12, width: 8.5, pierEvery: 32 });
 }
