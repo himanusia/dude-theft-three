@@ -41,6 +41,11 @@ node tests/world/audit.mjs
 node tools/shoot-ojek.mjs          # headless: aims a camera at a live ojek and writes
                                    # screenshots/proof/kurir.png, or fails if the cargo box
                                    # is not actually in the frame
+node tools/proof-bullets.mjs       # headless: 20 shots, then proves the muzzle flash sits on the
+                                   # barrel tip for ~60 ms, the wall hit leaves a puff sized by the
+                                   # surface, and firing allocates NOTHING after warm-up (scene
+                                   # objects, GPU geometries and the pool's own counter all flat).
+                                   # Writes screenshots/proof/muzzle-flash.png and bullet-impact.png
 node tools/shoot-facades.mjs       # headless: searches the city's own facade audit for the street
                                    # frame that shows the most DISTINCT building archetypes, saves
                                    # screenshots/proof/facade-archetypes.png, raycast-confirms each

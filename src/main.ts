@@ -16,7 +16,16 @@ import { HUD } from './ui/hud';
 import { AudioSys } from './core/audio';
 import { loadSave, writeSave, clearSave, loadSettings, writeSettings, SaveData, Settings } from './core/save';
 import { TouchControls } from './core/touch';
-import { WEAPONS, WEAPON_ORDER, weaponBySlot, buildWeaponModel, STARTING_WEAPONS, WeaponId } from './systems/weapons';
+import {
+  WEAPONS,
+  WEAPON_ORDER,
+  weaponBySlot,
+  buildWeaponModel,
+  STARTING_WEAPONS,
+  WeaponId,
+  PooledShotFx,
+  muzzleAnchor,
+} from './systems/weapons';
 import {
   clamp,
   lerp,
@@ -26,7 +35,6 @@ import {
   rayVsColliders,
   resolveCircleBox,
   formatMoney,
-  canvasTexture,
 } from './core/utils';
 
 // ---------------------------------------------------------------- renderer
@@ -186,76 +194,13 @@ for (let i = 0; i < 14; i++) {
   pickups.push({ pos: city.randomSidewalkPoint(), mesh, active: true, timer: 0 });
 }
 
-// effects
-const fx: { obj: any; life: number; max: number; kind: string }[] = [];
-function addTracer(a: THREE.Vector3, b: THREE.Vector3) {
-  const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-  const mat = new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.95 });
-  const line = new THREE.Line(geo, mat);
-  scene.add(line);
-  fx.push({ obj: line, life: 0.08, max: 0.08, kind: 'fade' });
-}
-function addSpark(pos: THREE.Vector3, color: number = 0xffd27a) {
-  const m = new THREE.Mesh(
-    new THREE.SphereGeometry(0.13, 6, 5),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
-  );
-  m.position.copy(pos);
-  scene.add(m);
-  fx.push({ obj: m, life: 0.22, max: 0.22, kind: 'spark' });
-}
-// muzzle flash: additive sprite with soft falloff + spike so it reads as a
-// flash, not a floating ball, and stays visible for a couple of frames
-const muzzleTex = canvasTexture(64, 64, (ctx, w, h) => {
-  const g = ctx.createRadialGradient(w / 2, h / 2, 1, w / 2, h / 2, w / 2);
-  g.addColorStop(0, 'rgba(255,255,240,1)');
-  g.addColorStop(0.3, 'rgba(255,224,140,0.95)');
-  g.addColorStop(0.62, 'rgba(255,150,40,0.5)');
-  g.addColorStop(1, 'rgba(255,110,0,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = 'rgba(255,248,210,0.9)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.5, h * 0.06);
-  ctx.lineTo(w * 0.5, h * 0.94);
-  ctx.moveTo(w * 0.1, h * 0.5);
-  ctx.lineTo(w * 0.9, h * 0.5);
-  ctx.stroke();
-});
-function addMuzzle(pos: THREE.Vector3) {
-  (window as any).__lastMuzzleAt = performance.now();
-  const mat = new THREE.SpriteMaterial({
-    map: muzzleTex,
-    blending: THREE.AdditiveBlending,
-    transparent: true,
-    depthWrite: false,
-    depthTest: false, // a 0.12 s flash may not be hidden by the shooter's own body
-    opacity: 1,
-  });
-  const s = new THREE.Sprite(mat);
-  s.position.copy(pos);
-  s.scale.setScalar(0.85);
-  s.renderOrder = 10;
-  scene.add(s);
-  fx.push({ obj: s, life: 0.12, max: 0.12, kind: 'flash' });
-}
-function updateFx(dt: number) {
-  for (let i = fx.length - 1; i >= 0; i--) {
-    const f = fx[i];
-    f.life -= dt;
-    const k = clamp(f.life / f.max, 0, 1);
-    f.obj.material.opacity = k;
-    if (f.kind === 'spark') f.obj.scale.setScalar(0.4 + k * 0.9);
-    if (f.kind === 'flash') f.obj.scale.setScalar(0.55 + (1 - k) * 0.45);
-    if (f.life <= 0) {
-      scene.remove(f.obj);
-      f.obj.geometry?.dispose();
-      f.obj.material?.dispose?.();
-      fx.splice(i, 1);
-    }
-  }
-}
+// effects: muzzle flashes, tracers and impact puffs live in one pooled system, so firing
+// writes into pre-allocated sprites/points instead of building a new object per shot
+const shotFx = new PooledShotFx(scene, renderer, camera);
+const muzzleScratch = new THREE.Vector3();
+const tracerFrom = new THREE.Vector3();
+const tracerTo = new THREE.Vector3();
+
 
 const ragdolls: Ragdoll[] = [];
 
@@ -995,14 +940,8 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
     const up = new THREE.Vector3().crossVectors(right, dir).normalize();
     dir.addScaledVector(right, Math.tan(a)).addScaledVector(up, Math.tan(b)).normalize();
   }
-  // gun muzzle: ahead of the shoulder (not inside the torso) so the flash is
-  // never hidden by the player model from the follow camera
-  const muzzleRight = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
-  const muzzle = new THREE.Vector3(
-    player.pos.x - Math.sin(camYaw) * 0.75 + muzzleRight.x * 0.28,
-    player.y + 1.32,
-    player.pos.z - Math.cos(camYaw) * 0.75 + muzzleRight.z * 0.28
-  );
+  // every pellet leaves from the same barrel tip the flash sits on
+  const muzzle = muzzlePos();
   const wallHit = rayVsColliders(origin, dir, range, city.colliders);
   let bestDist = wallHit ? wallHit.dist : range;
   let hitPoint = origin.clone().addScaledVector(dir, bestDist);
@@ -1064,6 +1003,7 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
       maxLife: 11,
       groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
     }));
+    shotFx.impact(hitPoint, dir, 'flesh');
     hud.hitmarker();
     addCash(25);
     police.addWanted(1);
@@ -1072,6 +1012,7 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
   } else if (hitKind === 'ped') {
     const v = dir.clone().multiplyScalar(11);
     v.y = Math.max(2.5, v.y + 4);
+    shotFx.impact(hitPoint, dir, 'flesh');
     ragdollPed(hitPed, v);
     hud.hitmarker();
     addCash(8 + dmg);
@@ -1079,21 +1020,21 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
     flags.chaos = true;
   } else if (hitKind === 'car') {
     hitCar.applyDamage(dmg);
-    addSpark(hitPoint, 0xffcf7a);
+    shotFx.impact(hitPoint, dir, 'metal');
     hud.hitmarker();
     police.addWanted(0.35);
     if (hitCar.wrecked) {
       explode(hitCar);
     }
   } else if (hitKind === 'wall') {
-    addSpark(hitPoint, 0xd8d8d8);
+    shotFx.impact(hitPoint, dir, 'concrete');
     audio.play('metal', { vol: 0.16, rate: 1.4 });
   }
 
   // the street reacts: everyone within earshot runs, the nearest bystander fetches the cops
   peds.onGunshot(player.pos.x, player.pos.z, hitKind === 'ped');
 
-  addTracer(muzzle, hitPoint);
+  shotFx.tracer(muzzle, hitPoint);
   window.__lastShot = {
     origin: origin.toArray().map((v) => +v.toFixed(2)),
     dir: dir.toArray().map((v) => +v.toFixed(3)),
@@ -1105,14 +1046,23 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
   if (player.mag === 0) startReload();
 }
 
-function muzzlePos() {
-  const right = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
-  return new THREE.Vector3(
-    player.pos.x - Math.sin(camYaw) * 0.75 + right.x * 0.28,
-    player.y + 1.32,
-    player.pos.z - Math.cos(camYaw) * 0.75 + right.z * 0.28
+/**
+ * Barrel tip of the equipped weapon in world space: the model's own muzzle offset pushed through
+ * the arm chain (`muzzleAnchor`), in the BODY's frame. The old version aimed a fixed 0.75 m
+ * ahead of the camera, so the flash was welded to the lens and 0.5 m behind the AK's barrel.
+ * Writes into one scratch vector: firing may not allocate.
+ */
+function muzzlePos(): THREE.Vector3 {
+  const anchor = muzzleAnchor(player.weapon);
+  const s = Math.sin(player.yaw);
+  const c = Math.cos(player.yaw);
+  return muzzleScratch.set(
+    player.pos.x + c * anchor.right + s * anchor.forward,
+    player.y + anchor.up,
+    player.pos.z - s * anchor.right + c * anchor.forward
   );
 }
+
 
 /** One trigger pull: spends a round (or swings), then fires every pellet of the weapon. */
 function shoot() {
@@ -1134,7 +1084,9 @@ function shoot() {
   audio.play(spec.sound, { vol: spec.soundVol, rate: spec.soundRate * rand(0.96, 1.04), pan: rand(-0.2, 0.2) });
   camPitch = clamp(camPitch - spec.recoil, -0.55, 1.05);
   setShake(spec.shake, 0.1);
-  addMuzzle(muzzlePos());
+  // 60 ms flash at the barrel tip, thrown down the body's forward axis
+  shotFx.flash(muzzlePos(), spec.flashScale, Math.sin(player.yaw), Math.cos(player.yaw));
+  (window as any).__lastMuzzleAt = performance.now();
   for (let i = 0; i < spec.pellets; i++) firePelletRaw(spec.spread, spec.damage, spec.range);
   hud.setWeapon(spec.name, spec.slot, ammoFor(player.weapon).reserve, spec.id);
   hud.setAmmo(player.mag, spec.magSize, false);
@@ -1202,7 +1154,7 @@ function explode(car: any) {
   audio.play('explosion', { vol: 0.8, rate: rand(0.9, 1.1) });
   for (let i = 0; i < 8; i++) {
     const p = new THREE.Vector3(car.pos.x + rand(-1.5, 1.5), car.y + rand(0.4, 2.2), car.pos.z + rand(-1.5, 1.5));
-    addSpark(p, pick([0xffa030, 0xff5a20, 0xffd070]));
+    shotFx.spark(p, pick([0xffa030, 0xff5a20, 0xffd070]), 6, 0.13);
   }
   if (car === player.inCar) {
     if (player.inCar) player.inCar.setDriverVisible(true);
@@ -1430,12 +1382,7 @@ function resetPeds() {
 
 /** Drop every transient effect (tracers, sparks, muzzle flashes, ragdolls). */
 function resetFx() {
-  for (const f of fx) {
-    scene.remove(f.obj);
-    f.obj.geometry?.dispose?.();
-    f.obj.material?.dispose?.();
-  }
-  fx.length = 0;
+  shotFx.reset();
   for (const r of ragdolls) r.dispose();
   ragdolls.length = 0;
 }
@@ -1764,9 +1711,9 @@ function updatePickups(dt: number) {
 // ---------------------------------------------------------------- cops shoot the player
 function copShoot(pos: any, dmg: any) {
   audio.play('shot_rifle', { vol: clamp(0.5 - pos.distanceTo(player.pos) / 90, 0.12, 0.45), rate: 1.1 });
-  const from = pos.clone().setY(1.4);
-  const to = new THREE.Vector3(player.pos.x, player.y + 1.1, player.pos.z);
-  addTracer(from, to);
+  tracerFrom.copy(pos).setY(pos.y + 1.4);
+  tracerTo.set(player.pos.x, player.y + 1.1, player.pos.z);
+  shotFx.tracer(tracerFrom, tracerTo);
   hurt(dmg);
 }
 
@@ -1842,7 +1789,7 @@ function update(dt: number) {
     onArrest: busted,
     onCopShoot: copShoot,
     onCopFire: (from: any, to: any) => {
-      addTracer(from.clone().setY(from.y + 1.3), to.clone().setY(to.y + 1.1));
+      shotFx.tracer(tracerFrom.copy(from).setY(from.y + 1.3), tracerTo.copy(to).setY(to.y + 1.1));
       audio.play('shot_pistol', { vol: 0.32, pan: 0 });
     },
     camYaw,
@@ -1899,7 +1846,7 @@ function update(dt: number) {
   }
 
   updatePickups(dt);
-  updateFx(dt);
+  shotFx.update(dt);
 
   // sun shadow + street lights follow the action
   const focus = player.inCar ? player.inCar.pos : player.pos;
@@ -1973,7 +1920,11 @@ function scheduleFrame() {
   else requestAnimationFrame(animate);
 }
 
+/** test hook: park the loop so a capture tool can hold one frame (a 60 ms flash must not expire) */
+let loopFrozen = false;
+
 function animate() {
+  if (loopFrozen) return;
   scheduleFrame();
   const rawDt = clock.getDelta();
   const dt = Math.min(0.05, rawDt);
@@ -1983,7 +1934,7 @@ function animate() {
   } else {
     // keep the scene alive while paused
     city.update(0, dayT);
-    updateFx(dt);
+    shotFx.update(dt);
     updateCamera(0.016);
   }
 
@@ -2083,7 +2034,7 @@ window.__game = {
       fov: +camera.fov.toFixed(2),
       speedKmh: player.inCar ? Math.round(player.inCar.kmh) : 0,
       shake: +shake.toFixed(3),
-      fxCount: fx.length,
+      fxCount: shotFx.stats().live,
       sceneChildren: scene.children.length,
       mapOpen: hud.mapOpen,
       settingsOpen: hud.settingsOpen,
@@ -2196,6 +2147,25 @@ window.__game = {
     },
     cinematic(on: boolean) {
       cinematic = !!on;
+    },
+    shotFx() {
+      return shotFx.stats();
+    },
+    /** one deterministic effect-only frame step, for harnesses that parked the loop */
+    stepFx(dt: number) {
+      shotFx.update(dt);
+    },
+    freezeLoop(on: boolean) {
+      // resuming calls animate() directly: a frozen loop schedules nothing, so nothing else
+      // would ever wake it up again
+      if (on) loopFrozen = true;
+      else if (loopFrozen) {
+        loopFrozen = false;
+        animate();
+      }
+    },
+    fxReset() {
+      shotFx.reset();
     },
     ragdollAt(x: number, y: number, z: number, vx = 0, vz = 0) {
       // spawn a body with velocity for visual QA of the ragdoll itself
