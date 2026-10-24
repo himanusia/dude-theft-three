@@ -271,6 +271,8 @@ let paused = true;
 let started = false;
 let pointerLocked = false;
 let suppressLockPauseUntil = 0; // ignore the unlock event our own lock request produces
+/** the death card owns the player from the hit that killed them until the screen comes back */
+let dying = false;
 
 const canvasEl = canvas as HTMLCanvasElement;
 canvasEl.addEventListener('click', () => {
@@ -284,7 +286,7 @@ canvasEl.addEventListener('click', () => {
 // headless runs, iframe embeds and some browsers, which used to make the gun dead.
 let suppressFireUntil = 0; // swallows the click that resumes the game
 function canShootNow() {
-  return started && !paused && !player.inCar && performance.now() >= suppressFireUntil;
+  return started && !paused && !dying && !player.inCar && performance.now() >= suppressFireUntil;
 }
 
 document.addEventListener('pointerlockchange', () => {
@@ -293,7 +295,9 @@ document.addEventListener('pointerlockchange', () => {
   // losing the pointer (alt-tab) pauses. Only a lock we actually held counts: a
   // refused request (headless, iframe, a navigation that still owned the lock)
   // arrives as an unlock event with no lock to lose and must not freeze the game.
-  if (hadLock && !pointerLocked && started && !paused && performance.now() > suppressLockPauseUntil) {
+  // Never while the death card is up: the player has no control to lose, and a pause
+  // menu over the card would freeze the respawn's own breath and hide the sequence.
+  if (hadLock && !pointerLocked && started && !paused && !dying && performance.now() > suppressLockPauseUntil) {
     paused = true;
     hud.showPause(true);
     saveGame();
@@ -405,6 +409,7 @@ const touch = new TouchControls({
 
 function togglePause(force?: boolean) {
   const next = force === undefined ? !paused : !!force;
+  if (next && dying) return; // the card runs on its own clock; a pause menu must not cover it
   paused = next;
   hud.showPause(next);
   if (next) saveGame();
@@ -1178,7 +1183,10 @@ function explode(car: any) {
 }
 
 // ---------------------------------------------------------------- damage & money
+/** No hit lands while the death card is up: a cop still shooting at the corpse must not
+ *  re-trigger the sequence, and the health bar during the card is the card's to own. */
 function hurt(n: number) {
+  if (dying) return;
   player.hp -= n;
   player.lastHit = performance.now();
   hud.damageFlash();
@@ -1190,9 +1198,26 @@ function addCash(n: number) {
   player.cash += n;
 }
 
-function wasted() {
+/**
+ * The death card: one 2.9 s clock, authored in index.html as four keyframe tracks that share
+ * one duration (the frame loses its colour, WASTED arrives on a slow scale, a hairline rule
+ * wipes under it, then black). The respawn happens under the black at 2.61 s and the black
+ * lifts by itself by 2.9 s, so the player is already standing at the spawn when the picture
+ * comes back. The bill is charged at the hit, not at the reveal: the card is the whole event.
+ *
+ * `_test.wastedSeek(ms)` parks this same clock on one millisecond for a capture, which is the
+ * only way to read a 4 fps SwiftShader frame at "0.3 s after death" and mean it.
+ */
+const DEATH_CARD_MS = 2900;
+const DEATH_RESPAWN_MS = 2610;
+let deathRespawnTimer = 0;
+let deathRevealTimer = 0;
+/** the health a parked capture found, handed back when the card is cleared */
+let parkedHp = -1;
+const deathCard = document.getElementById('wasted-screen') as HTMLElement;
+
+function respawnAfterDeath() {
   player.hp = 100;
-  player.cash = Math.max(0, player.cash - 100);
   player.pos.copy(city.getSpawn());
   player.vel.set(0, 0, 0);
   player.y = 0;
@@ -1201,8 +1226,27 @@ function wasted() {
   character.group.visible = true;
   police.clearWanted();
   police.clearAll();
-  hud.toast('WASTED — $100 hospital bill', 'bad', 3200);
+  hud.setHealth(100);
+}
+
+function wasted() {
+  if (dying) return; // one card per death, never two stacked
+  dying = true;
+  player.hp = 0; // the health bar reads the truth while the card is up
+  player.vel.set(0, 0, 0);
+  player.cash = Math.max(0, player.cash - 100);
+  hud.setHealth(0);
+  deathCard.classList.add('on');
+  document.body.classList.add('wasted');
+  audio.play('bodyfall', { vol: 0.6 });
   setShake(0.3, 0.25);
+  deathRespawnTimer = window.setTimeout(respawnAfterDeath, DEATH_RESPAWN_MS);
+  deathRevealTimer = window.setTimeout(() => {
+    dying = false;
+    deathCard.classList.remove('on');
+    document.body.classList.remove('wasted');
+    hud.toast('WASTED — $100 hospital bill', 'bad', 2600);
+  }, DEATH_CARD_MS);
 }
 
 function busted() {
@@ -1782,10 +1826,13 @@ function update(dt: number) {
     player.hp = Math.min(100, player.hp + 2.2 * dt);
   }
 
-  updateCombat(dt);
+  // the death card owns the player: no control, no fire, no driving until it lifts
+  if (!dying) {
+    updateCombat(dt);
 
-  if (player.inCar) updateDriving(dt);
-  else updateOnFoot(dt);
+    if (player.inCar) updateDriving(dt);
+    else updateOnFoot(dt);
+  }
 
   if (!player.inInterior) peds.update(dt, pedContext());
 
@@ -2061,6 +2108,45 @@ window.__game = {
     hurt,
     busted,
     wasted,
+    /**
+     * Park the death card on one millisecond and take the wall clock over, or `null` to clear
+     * it. Every stage shares one 2.9 s duration, so seeking each track to the same currentTime
+     * IS the frame at that millisecond — which is how a 4 fps SwiftShader run can be read at
+     * 0.3 s and mean it. The card owns the health bar while it is parked, exactly as `wasted()`
+     * owns it, and hands it back on `null`. Returns what it parked, for the capture's provenance.
+     */
+    wastedSeek(ms: number | null) {
+      window.clearTimeout(deathRespawnTimer);
+      window.clearTimeout(deathRevealTimer);
+      if (ms === null) {
+        dying = false;
+        deathCard.classList.remove('on');
+        document.body.classList.remove('wasted');
+        if (parkedHp >= 0) {
+          player.hp = parkedHp;
+          hud.setHealth(player.hp);
+          parkedHp = -1;
+        }
+        return null;
+      }
+      dying = true;
+      if (parkedHp < 0) parkedHp = player.hp;
+      player.hp = 0;
+      hud.setHealth(0);
+      deathCard.classList.add('on');
+      document.body.classList.add('wasted');
+      void deathCard.offsetWidth; // let the class land before the tracks are asked for
+      const anims = [
+        ...deathCard.getAnimations({ subtree: true }),
+        ...canvas.getAnimations(),
+        ...(document.getElementById('hud')?.getAnimations() ?? []),
+      ];
+      for (const a of anims) {
+        a.pause();
+        a.currentTime = ms;
+      }
+      return { ms, animations: anims.length };
+    },
     addCash,
     startReload,
     face(x: number, z: number) {

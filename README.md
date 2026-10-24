@@ -65,6 +65,12 @@ node tools/shoot-look-up.mjs       # headless: drags the look control (touch and
                                    # the MRT guideway, checking the saved PNG: sky where the
                                    # geometry says sky, deck where the guideway is. Writes
                                    # proof/look-up.png and look-up.json, fails below 50 deg
+node tools/shoot-wasted.mjs        # headless: kills the player and reads the death card. Parks the
+                                   # same four tracks on 300 / 1000 / 2500 ms (a headless frame
+                                   # costs ~0.8 s, so a wall-clock screenshot cannot land on a
+                                   # millisecond) and writes proof/wasted-0..2.png, then samples
+                                   # the LIVE clock every 60 ms to prove the stages fire in order
+                                   # and the player is back at the spawn inside 3 s
 ```
 
 `city.ojeks` lists every live bike with its real group position and the cargo box's local
@@ -195,7 +201,7 @@ the pendulum lift, so the planted foot always touches the ground — works for L
 Automated harness (`puppeteer-core`) drives the real page and asserts **state**, not screenshots:
 
 ```bash
-npm run test:qa        # 19/19 gameplay assertions
+npm run test:qa        # 21/21 gameplay assertions
 npm run test:interior  # 11/11 interior assertions
 npm run test:audit     # floating-geometry audit
 node tests/world/npc-behavior.mjs  # 13/13 pedestrian AI assertions (starts its own server on :8795)
@@ -203,9 +209,10 @@ node tests/world/ground.mjs        # 7/7 ground contract assertions (starts its 
 ```
 
 ```
-19/19 gameplay checks pass — boot, walk, sprint, jump+land, sidewalk step-up, enter/exit vehicle,
-acceleration, shooting + ammo, punch, ragdoll settle, police spawn/approach, death respawn,
-cash pickup, night lighting, pause/resume, perf budget, zero console errors
+21/21 gameplay checks pass — boot, walk, sprint, jump+land, sidewalk step-up, enter/exit vehicle,
+acceleration, shooting + ammo, punch, ragdoll settle, police spawn/approach, the wasted card
+raising + clearing, death respawn, cash pickup, night lighting, pause/resume, perf budget, zero
+console errors
 11/11 interior checks pass — doors registered, 4 reusable rooms, prompt, enter, walk inside,
 exit, all four kinds reachable, audit clean indoors
 audit: 0 floating actors, 0 floating props

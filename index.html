@@ -977,6 +977,61 @@
   /* on the phone stack the plate sits directly under the toast column, so there is no room for
      a silhouette: the weapon stays text-only there */
   body.hud-narrow #weapon-icon { display: none; }
+
+  /* ---------------------------------------------------------------- wasted
+     The death card. Four keyframe tracks and ONE 2.9 s duration: the frame loses
+     its colour, WASTED arrives on a slow scale, a hairline rule wipes under it,
+     then black. Sharing one clock is what lets _test.wastedSeek(ms) park the whole
+     sequence on a millisecond; no stage repeats, nothing bounces, no new face. */
+  body.wasted canvas#game,
+  body.wasted #hud { animation: wasted-desat 2.9s linear both; }
+  @keyframes wasted-desat {
+    0%   { filter: saturate(1)    brightness(1); }
+    16%  { filter: saturate(0.04) brightness(0.78); }
+    88%  { filter: saturate(0.04) brightness(0.78); }
+    100% { filter: saturate(0.9)  brightness(0.99); }
+  }
+
+  #wasted-screen {
+    position: fixed; inset: 0; z-index: 30; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+    visibility: hidden;
+  }
+  #wasted-screen.on { visibility: visible; }
+  .wasted-center { width: max-content; max-width: 84vw; text-align: center; }
+  .wasted-word {
+    white-space: nowrap;
+    font-size: clamp(38px, 10.5vw, calc(120px * var(--s))); line-height: 1; font-weight: 900;
+    letter-spacing: -.055em; text-transform: uppercase;
+    color: #ded9cf; text-shadow: 0 3px 24px rgba(0,0,0,.62);
+    transform-origin: 50% 58%;
+  }
+  #wasted-screen.on .wasted-word { animation: wasted-word 2.9s cubic-bezier(.22,.35,.18,1) both; }
+  @keyframes wasted-word {
+    0%, 4%    { opacity: 0; transform: scale(1.12); }
+    30%       { opacity: 1; }
+    52%, 100% { opacity: 1; transform: scale(1); }
+  }
+  .wasted-rule {
+    position: relative; height: 2px; margin-top: clamp(9px, 1.2vw, 16px);
+    background: rgba(222,217,207,.14); overflow: hidden;
+  }
+  .wasted-rule i {
+    display: block; height: 100%; background: #efeae0;
+    transform: scaleX(0); transform-origin: 0 50%;
+  }
+  #wasted-screen.on .wasted-rule i { animation: wasted-rule 2.9s linear both; }
+  @keyframes wasted-rule {
+    0%, 22%   { transform: scaleX(0); }
+    34%, 100% { transform: scaleX(1); }
+  }
+  .wasted-black { position: absolute; inset: 0; background: #05070a; opacity: 0; }
+  #wasted-screen.on .wasted-black { animation: wasted-black 2.9s linear both; }
+  @keyframes wasted-black {
+    0%, 62%  { opacity: 0; }
+    83%, 90% { opacity: 1; }
+    100%     { opacity: 0; }
+  }
 </style>
 </head>
 <body>
@@ -1014,6 +1069,14 @@
   <div id="hitmarker"></div>
   <div id="damage-flash"></div>
   <canvas id="minimap" width="196" height="196"></canvas>
+</div>
+
+<div id="wasted-screen" aria-hidden="true">
+  <div class="wasted-center">
+    <div class="wasted-word">WASTED</div>
+    <div class="wasted-rule"><i></i></div>
+  </div>
+  <div class="wasted-black"></div>
 </div>
 
 <div id="help-sheet" role="dialog" aria-modal="true" aria-label="Controls">

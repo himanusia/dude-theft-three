@@ -272,11 +272,23 @@ function check(name, ok, detail) {
   check('police spawn and close distance', chase.stars >= 3 && chase.cops >= 2 && chase.closest < 60, chase);
   await page.screenshot({ path: path.join(OUT, 'game-chase.png') });
 
-  // death + respawn
+  // death + respawn: the wasted card owns the player for ~2.6 s, so the respawn is not instant
   await page.evaluate(() => window.__game._test.hurt(500));
-  await sleep(600);
-  const dead = await page.evaluate(() => ({ hp: Math.round(window.__game.player.hp), wanted: +window.__game.police.wanted.toFixed(2), cops: window.__game.police.cars.length, pos: window.__game.player.pos.toArray().map(v => Math.round(v)) }));
-  check('death respawns with full hp and clears police', dead.hp === 100 && dead.wanted === 0 && dead.cops === 0, dead);
+  await sleep(150);
+  const raising = await page.evaluate(() => ({
+    card: document.getElementById('wasted-screen').classList.contains('on'),
+    hp: Math.round(window.__game.player.hp),
+  }));
+  check('death raises the wasted card and zeroes health', raising.card && raising.hp === 0, raising);
+  const tDied = Date.now();
+  await page.waitForFunction(
+    'window.__game.player.hp === 100 && !document.getElementById("wasted-screen").classList.contains("on")',
+    { timeout: 8000, polling: 50 }
+  );
+  const deathMs = Date.now() - tDied;
+  const dead = await page.evaluate(() => ({ hp: Math.round(window.__game.player.hp), wanted: +window.__game.police.wanted.toFixed(2), cops: window.__game.police.cars.length, pos: window.__game.player.pos.toArray().map(v => Math.round(v)), card: document.getElementById('wasted-screen').classList.contains('on') }));
+  check('death respawns with full hp and clears police', dead.hp === 100 && dead.wanted === 0 && dead.cops === 0 && !dead.card, dead);
+  check('the death card lifts inside 3 s', deathMs < 3300, { deathMs });
 
   // cash pickup - step out of the car first: a seated player is snapped back to the car every
   // frame, so a teleport onto the pickup never sticks
