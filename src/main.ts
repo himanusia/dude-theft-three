@@ -337,6 +337,10 @@ window.addEventListener('keydown', (e) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   keys.add(e.code);
   if (!started) return;
+  // the death card owns the player until it lifts (same rule as togglePause/hurt): a key that
+  // arrives during the 2.9 s must not walk into a shop, steal a car or swap weapon, because the
+  // respawn teleports the body out of a room the session would still think it is standing in
+  if (dying) return;
   if (e.code === 'KeyF') toggleVehicle();
   if (/^Digit[1-6]$/.test(e.code)) {
     const id = weaponBySlot(Number(e.code.slice(5)));
@@ -390,11 +394,11 @@ const touch = new TouchControls({
     togglePause();
   },
   vehicle() {
-    if (!started || paused) return;
+    if (!started || paused || dying) return;
     toggleVehicle();
   },
   interact() {
-    if (!started || paused) return;
+    if (!started || paused || dying) return;
     if (player.inInterior) exitInterior();
     else {
       const door = nearestShopDoor();
@@ -402,7 +406,7 @@ const touch = new TouchControls({
     }
   },
   punch() {
-    if (!started || paused) return;
+    if (!started || paused || dying) return;
     punch();
   },
 });
@@ -709,6 +713,9 @@ function nearestShopDoor(maxDist = 3.6) {
 function enterInterior(door: { kind: InteriorKind; name: string }) {
   const room = city.roomFor(door.kind);
   if (!room) return;
+  // the death card owns the player: entering a room during it is what parked a live room
+  // reference 612 m behind the respawn point, with the room's colliders replacing the city's
+  if (dying) return;
   // never leave the player in two worlds at once: seated in a car you must get out first
   if (player.inCar) {
     hud.toast('Keluar dari mobil dulu', 'warn', 1600);
@@ -728,13 +735,28 @@ function enterInterior(door: { kind: InteriorKind; name: string }) {
   hud.toast(`Masuk ${door.name}`, 'info', 1600);
 }
 
+/**
+ * Drop every trace of the shop: the shell, the reference and the door-side anchor. Anything
+ * that moves the body without going through the door (respawn, busted, save load, new game)
+ * must call this or the session keeps `inInterior` while standing in the street: the room's
+ * colliders then replace the city's every frame and `if (!player.inInterior)` keeps peds,
+ * traffic and police frozen forever, 600 m from a room that is still visible.
+ */
+function resetInterior() {
+  if (player.inInterior) player.inInterior.group.visible = false;
+  player.inInterior = null;
+  player.savedPos = undefined;
+  player.savedCamYaw = undefined;
+}
+
 function exitInterior() {
   const room = player.inInterior;
   if (!room) return;
-  room.group.visible = false;
-  player.inInterior = null;
-  if (player.savedPos) player.pos.copy(player.savedPos);
-  if (player.savedCamYaw !== undefined) camYaw = player.savedCamYaw;
+  const back = player.savedPos;
+  const backYaw = player.savedCamYaw;
+  resetInterior();
+  if (back) player.pos.copy(back);
+  if (backYaw !== undefined) camYaw = backYaw;
   player.y = 0;
   player.vel.set(0, 0, 0);
   audio.play('click', { vol: 0.4 });
@@ -1223,6 +1245,9 @@ const deathCard = document.getElementById('wasted-screen') as HTMLElement;
 
 function respawnAfterDeath() {
   player.hp = 100;
+  // the body is teleported to the street, so the room reference has to go with it: a shop that
+  // is 600 m away must not keep owning the colliders and the ped/traffic/police update gates
+  resetInterior();
   player.pos.copy(city.getSpawn());
   player.vel.set(0, 0, 0);
   player.y = 0;
@@ -1260,6 +1285,7 @@ function busted() {
   if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
   character.group.visible = true;
+  resetInterior(); // the same teleport-out rule as the death card
   player.pos.copy(city.getSpawn());
   player.vel.set(0, 0, 0);
   player.y = 0;
@@ -1362,7 +1388,7 @@ function applySave(data: SaveData) {
   player.yaw = data.player.yaw;
   if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
-  player.inInterior = null;
+  resetInterior(); // a save made inside a shop stores the street anchor, never the room
   player.hp = clamp(data.hp, 1, 100);
   player.cash = data.cash;
   player.mag = clamp(data.ammo, 0, data.magSize);
@@ -1469,9 +1495,7 @@ function newGame() {
   player.lastHit = 0;
   if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
-  player.inInterior = null;
-  player.savedPos = undefined;
-  player.savedCamYaw = undefined;
+  resetInterior();
 
   camYaw = Math.PI * 0.25;
   camPitch = 0.1;
