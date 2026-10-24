@@ -10,6 +10,10 @@
 //   c) >= 60% of the observed road crossings happen inside a crosswalk strip
 //   d) a `witness` event raises the wanted level by 1
 //   e) `audit().peds` is empty (nobody floats, nobody sinks below the pavement)
+//   f) 14 shots fired into the air (nobody hit) still panic the street, send more than three people
+//      for the cops and raise the wanted level: the shot event has to reach the crowd system
+//   g) a staffed cart serves at least one customer in 45 s with the player standing at it, and the
+//      vendors stand off the walking lane instead of in it
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -217,7 +221,9 @@ function stopServer() {
     if (m.type() === 'error' && !IGNORE.test(m.text())) errs.push('console: ' + m.text());
   });
 
-  await page.goto(URL_BASE + '/index.html', { waitUntil: 'domcontentloaded' });
+  // 30 s is the puppeteer default, and a cold vite transform of this scene on a loaded machine
+  // blows through it before the page even starts: the wait for window.__game below is the real gate
+  await page.goto(URL_BASE + '/index.html', { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
 
   // Shape probe: a stale/foreign game build used to make the first assertion die
@@ -688,13 +694,26 @@ function stopServer() {
       reset(alive[i], _o.x - 26 + fixture[i][0], _o.z + fixture[i][1], alive[i].walkSpeed);
     }
     await new Promise((r) => setTimeout(r, 400));
-    const camPos = g.camera.position;
-    const fwd = g.camera.getWorldDirection(g.player.pos.clone());
+    // Aim at the victim's chest before standing it on the sight line. The old fixed 0.02 rad pitch
+    // put the ray a few centimetres over a pedestrian's head at 17.8 m, so whether the murder shot
+    // landed at all was a coin toss once the ground under the victim changed height.
+    let camPos = g.camera.position;
+    let fwd = g.camera.getWorldDirection(g.player.pos.clone());
+    const vx0 = camPos.x + fwd.x * 17.8;
+    const vz0 = camPos.z + fwd.z * 17.8;
+    g._test.setCam(g.state.camYaw, Math.atan2(g.city.groundHeightAt(vx0, vz0) + 1.0 - camPos.y, 17.8));
+    await new Promise((r) => setTimeout(r, 150));
+    // the follow camera settles with the new pitch: place the victim on the axis it actually looks down
+    camPos = g.camera.position;
+    fwd = g.camera.getWorldDirection(g.player.pos.clone());
     const victim = g.peds.peds.filter((p) => !p.dead && !p.__witnessFixture)[0];
     reset(victim, camPos.x + fwd.x * 17.8, camPos.z + fwd.z * 17.8, 0.0001);
 
     const before = g.police.wanted;
     const beforeStats = { ...g.peds.stats };
+    // a fresh incident: this phase starts its own crime scene, so the "already reported" cooldown
+    // from the earlier shots is not part of what it measures
+    g.peds.reportCd = 0;
     const nearby = g.peds.peds.filter((p) => !p.dead && p.pos.distanceTo(g.player.pos) < 18).length;
     g._test.shoot();
     const shot = window.__lastShot;
@@ -718,6 +737,104 @@ function stopServer() {
     witness.hitKind === 'ped' && witness.witnessEvents >= 1 && witness.witnessWanted >= 1 && witness.delta >= 1 && witness.nearby >= 5 && witness.witnesses >= 1,
     witness
   );
+
+  // ---------------------------------------------------------------- (f) gunfire alone is reported
+  // Firing into the air hits nobody, and the old witness path only ran when a pedestrian was hit,
+  // so a shooter could empty the street without a single star. The crowd system has to receive the
+  // shot event, panic the people who see it and send the people who hear it for the cops.
+  const noise = await page.evaluate(async () => {
+    const g = window.__game;
+    g._test.cinematic(false);
+    g.police.clearWanted();
+    g.peds.reportCd = 0; // a fresh incident: the earlier shots' report cooldown is not part of this
+    g._test.setCam(0, 0.9); // muzzle up over the rooftops: nothing can be hit
+    const before = { ...g.peds.stats };
+    const wantedBefore = g.police.wanted;
+    const calls = [];
+    const orig = g.peds.onGunshot;
+    g.peds.onGunshot = function (x, z, sawVictim) {
+      calls.push({ z: +z.toFixed(1), sawVictim: !!sawVictim });
+      return orig.call(this, x, z, sawVictim);
+    };
+    const kinds = [];
+    for (let i = 0; i < 14; i++) {
+      g.player.mag = g.player.magSize;
+      g.player.shootCd = 0;
+      g.player.reloading = 0;
+      g._test.shoot();
+      kinds.push(window.__lastShot?.hitKind ?? null);
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    await new Promise((r) => setTimeout(r, 800));
+    g.peds.onGunshot = orig;
+    const live = g.peds.peds.filter((p) => !p.dead);
+    return {
+      calls: calls.length,
+      callZ: calls.slice(0, 2),
+      hitKinds: [...new Set(kinds)],
+      radii: g.peds.radii,
+      fleeEvents: g.peds.stats.fleeEvents - before.fleeEvents,
+      witnessEvents: g.peds.stats.witnessEvents - before.witnessEvents,
+      witnessWanted: g.peds.stats.witnessWanted - before.witnessWanted,
+      wantedDelta: +(g.police.wanted - wantedBefore).toFixed(2),
+      witnesses: live.filter((p) => p.state === 'witness').length,
+      officers: g.police.cars.length,
+    };
+  });
+  check(
+    'gunfire: 14 shots with no victim still flee, get reported and raise wanted',
+    noise.calls === 14 && noise.hitKinds.every((k) => k !== 'ped') && noise.fleeEvents > 5 && noise.witnessEvents > 3 && noise.wantedDelta > 0,
+    noise
+  );
+
+  // ---------------------------------------------------------------- (g) a staffed cart sells
+  // The audit found customers:0 with every cart staffed. Two measured causes: the vendor stood in
+  // the walking lane (0.03-0.25 m from the lane centre), and the crowd was only re-placed near
+  // zebras, so a mid-block warung was never walked past. Here the player stands at cart 0, the
+  // crowd streams for 45 s and the counter has to ring up at least one sale.
+  const shop = await page.evaluate(async () => {
+    const g = window.__game;
+    g.police.clearWanted();
+    const post = g.peds.cartPosts[0];
+    // the earlier phases pin their fixtures by zeroing their speed; a live street has to walk
+    for (const p of g.peds.peds) {
+      if (p.dead || p.vendor) continue;
+      if (p.speed < 0.05) p.speed = p.walkSpeed;
+    }
+    g._test.teleport(post.cx + 3, post.cz + 7);
+    const before = g.peds.stats.customers;
+    const dt = 1 / 60;
+    let closest = Infinity;
+    let walkers = 0;
+    for (let s = 0; s < 45 * 60; s++) {
+      const ctx = g._test.pedContext();
+      g.peds.update(dt, ctx);
+      if (s % 30 !== 0) continue;
+      walkers = 0;
+      for (const p of g.peds.peds) {
+        if (p.dead || p.vendor) continue;
+        const d = Math.hypot(p.pos.x - post.cx, p.pos.z - post.cz);
+        if (d < closest) closest = d;
+        if (d < 25 && p.mode === 'walk') walkers += 1;
+      }
+    }
+    let laneClear = Infinity;
+    for (const p of g.peds.peds) {
+      if (p.dead || !p.vendor || p.postIndex !== 0) continue;
+      laneClear = Math.min(laneClear, g.peds.nearestLeg(p.pos.x, p.pos.z).d);
+    }
+    return {
+      cart: post.cart,
+      staffed: g.peds.cartStaffed(0),
+      customers: g.peds.stats.customers - before,
+      closestWalker: +closest.toFixed(2),
+      walkersWithin25: walkers,
+      vendorLaneClearance: +laneClear.toFixed(2),
+      vendors: g.peds.peds.filter((p) => !p.dead && p.vendor).length,
+    };
+  });
+  check('carts: a staffed cart serves a customer inside 45 s', shop.staffed && shop.customers > 0, shop);
+  check('carts: the vendors stand off the walking lane', shop.vendorLaneClearance >= 0.5, shop);
 
   // ---------------------------------------------------------------- (e) nobody floats or sinks
   await sleep(1200);

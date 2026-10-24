@@ -21,6 +21,11 @@ const STRIP_HALF = 1.7; // half the depth of a zebra band, along the road it cro
 const STRIP_PAD = 1.4; // the band overhangs the kerb a little, like the painted stripes do
 const RADIUS = 0.4; // pedestrian body radius
 const FLEE_RADIUS = 18; // a gunshot scares everyone this close
+const HEAR_RADIUS = 36; // ...and it is still heard this far away, where someone runs for the cops
+const WITNESS_CALL_MAX = 2; // people who leave the scene to report one shot
+const WITNESS_PED_CD = 20; // seconds before the same person volunteers again
+const REPORT_CD = 6; // seconds between two reports that actually raise the wanted level
+const MURDER_RADIUS = 22; // a body on the pavement is a certainty this close
 const SPREAD_RADIUS = 12; // a fleeing pedestrian passes panic on
 const AIM_RADIUS = 14; // someone pointing a gun at you is enough
 const DETAIL_LOD = 40; // nose/cuff/hand detail inside this range; face and hair never drop
@@ -37,14 +42,20 @@ const STREET_REACH = 10; // a car this close along the crossing line holds me at
 // needs a cooldown before it queues again, so the crowd keeps moving.
 const VENDOR_RINGS = [1.5, 1.7, 1.9, 2.1, 2.3, 2.5]; // distances off the cart centre to try
 const VENDOR_ANGLES = 24; // spots sampled around each ring
+const VENDOR_CLEAR = 0.9; // the vendor stands this far off the walking lane, not in it
 const VENDOR_HOME = 0.45; // a vendor inside this radius of its post does not walk back
 const VENDOR_RETURN_SNAP = 12; // further away than this and it is put back, not walked back
 const CUSTOMER_RANGE = 3.2; // a walker this close to a staffed cart stops for food
+const CUSTOMER_PERSONAL = 0.55; // closer than this to the vendor is a collision, not a queue
 const CUSTOMER_STOP_MIN = 3; // seconds at the counter
 const CUSTOMER_STOP_MAX = 6;
 const CUSTOMER_CAP = 2; // carts serving a customer at once: a queue, not a crowd
 const CUSTOMER_COOLDOWN_MIN = 25; // seconds before the same pedestrian eats again
 const CUSTOMER_COOLDOWN_MAX = 70;
+const CART_LURE = 25; // a staffed cart this close to the player is where the crowd is re-placed
+const CART_TRAFFIC = 3; // walkers kept on that cart's own pavement lane
+const CART_WALK_MIN = 12; // a walker is dropped this far up the lane...
+const CART_WALK_MAX = 34; // ...and this far at most, on the side that walks toward the cart
 
 const _footV = new THREE.Vector3();
 const _scratch: any[] = [];
@@ -259,6 +270,8 @@ export class Ped {
   declare shopPost: number;
   declare shopX: number;
   declare shopZ: number;
+  /** seconds before this person is willing to run for the cops again */
+  declare witnessCd: number;
 
   constructor(scene: THREE.Scene, city: any, position: any, opts: any = {}) {
     this.scene = scene;
@@ -339,6 +352,7 @@ export class Ped {
     this.shopPost = -1;
     this.shopX = 0;
     this.shopZ = 0;
+    this.witnessCd = 0;
     if (this.vendor) {
       this.pos.set(this.postX, city.groundHeightAt(this.postX, this.postZ), this.postZ);
       this.yaw = this.postYaw;
@@ -483,7 +497,7 @@ export class Ped {
     void mgr;
   }
 
-  startWitness(x: number, z: number, mgr: any) {
+  startWitness(x: number, z: number, mgr: any, force = false) {
     // one call per murder seen: the witness runs for the cops and the call is logged.
     // A second murder while it is still running counts again, like a real bystander.
     this.witnessTimer = 9;
@@ -495,12 +509,16 @@ export class Ped {
     this.speed = this.runSpeed;
     this.shopTimer = 0;
     this.shopPost = -1;
-    // seeing a murder is worth a star: the nearest bystander runs for the cops
+    this.witnessCd = WITNESS_PED_CD;
+    // seeing a murder is worth a star: the nearest bystander runs for the cops. Gunfire alone is
+    // reported too, but a burst of shots is one call to the station, not one star per trigger pull
+    // (`REPORT_CD`), or a magazine of fourteen empties the whole police force onto the street.
     this.witnessFired = true;
     mgr.stats.witnessEvents += 1;
-    if (mgr.ctx && typeof mgr.ctx.addWanted === 'function') {
+    if (mgr.ctx && typeof mgr.ctx.addWanted === 'function' && (force || mgr.reportCd <= 0)) {
       mgr.ctx.addWanted(1);
       mgr.stats.witnessWanted += 1;
+      mgr.reportCd = REPORT_CD;
     }
   }
 
@@ -634,10 +652,12 @@ export class Ped {
       const dz = post.cz - this.pos.z;
       if (dx * dx + dz * dz > CUSTOMER_RANGE * CUSTOMER_RANGE) continue;
       if (!mgr.cartServed(post.i)) continue; // no vendor behind the counter, no customer
-      // stand beside the vendor, not inside him: the serving spot is often the same pavement lane
+      // stand beside the vendor, not inside him: the vendor now keeps VENDOR_CLEAR (0.9 m) off the
+      // lane, so a walker on the lane has room. The old 1.1 m gate rejected the natural spot right
+      // in front of the counter, which is where a customer actually stands.
       const vx = this.pos.x - post.x;
       const vz = this.pos.z - post.z;
-      if (vx * vx + vz * vz < 1.1 * 1.1) continue;
+      if (vx * vx + vz * vz < CUSTOMER_PERSONAL * CUSTOMER_PERSONAL) continue;
       if (mgr.cartBusy(post.i)) continue; // one customer per cart
       if (mgr.shoppers() >= CUSTOMER_CAP) return; // the street keeps moving
       this.shopTimer = rand(CUSTOMER_STOP_MIN, CUSTOMER_STOP_MAX);
@@ -1074,6 +1094,7 @@ export class Ped {
     if (this.cowerCd > 0) this.cowerCd = Math.max(0, this.cowerCd - dt);
     if (this.idleTimer > 0) this.idleTimer = Math.max(0, this.idleTimer - dt);
     if (this.shopCd > 0) this.shopCd = Math.max(0, this.shopCd - dt);
+    if (this.witnessCd > 0) this.witnessCd = Math.max(0, this.witnessCd - dt);
     if (this.idleCd > 0) this.idleCd = Math.max(0, this.idleCd - dt);
     else if (this.idler && this.idleTimer <= 0 && this.fleeTimer <= 0 && this.witnessTimer <= 0 && this.cowerTimer <= 0 && Math.random() < dt * 0.18) {
       this.idleTimer = rand(4, 9);
@@ -1178,6 +1199,8 @@ export class PedManager {
   declare count: any;
   declare respawnTimer: number;
   declare flowTimer: number;
+  /** seconds before another reported crime raises the wanted level again */
+  declare reportCd: number;
   declare grid: ColliderGrid;
   declare strips: Strip[];
   declare legs: Leg[];
@@ -1238,6 +1261,23 @@ export class PedManager {
     this.restaffVendors();
     this.respawnTimer = 0;
     this.flowTimer = 0;
+    this.reportCd = 0;
+  }
+
+  /**
+   * The radii the street reacts with. Published so a measurement can print the number it is
+   * actually testing instead of reading it out of the source.
+   */
+  get radii() {
+    return {
+      flee: FLEE_RADIUS,
+      hear: HEAR_RADIUS,
+      murder: MURDER_RADIUS,
+      spread: SPREAD_RADIUS,
+      witnessCallMax: WITNESS_CALL_MAX,
+      witnessPedCooldown: WITNESS_PED_CD,
+      reportCooldown: REPORT_CD,
+    };
   }
 
   /**
@@ -1549,7 +1589,13 @@ export class PedManager {
         if (!this.clearSpot(x, z)) continue;
         const lane = this.nearestLeg(x, z).d;
         const road = this.onCarriageway(x, z);
-        if (!road && (!best || lane < best.lane)) best = { x, z, lane };
+        // Off the walking line: measured on the real carts, "as close to the lane as the cart
+        // allows" put the vendor's body 0.03-0.25 m from the centre of the walking lane, so every
+        // passer-by walked through him and the customer gate rejected the ones who did not.
+        // VENDOR_CLEAR keeps him beside the lane, serving over the cart, and leaves the lane free.
+        if (!road && lane >= VENDOR_CLEAR && (!best || Math.abs(lane - VENDOR_CLEAR) < Math.abs(best.lane - VENDOR_CLEAR))) {
+          best = { x, z, lane };
+        }
         // a cart can be parked so tight against the kerb that every ring point is asphalt: the
         // vendor then stands in the parking lane rather than not existing at all
         if (!fallback || lane < fallback.lane) fallback = { x, z, lane };
@@ -1606,6 +1652,29 @@ export class PedManager {
     return n;
   }
 
+  /**
+   * A point on the cart's own pavement lane, 12-34 m up the side walkers approach from, so the
+   * walker passes the counter instead of turning off at the nearest zebra first. Null when that
+   * lane gives no room.
+   */
+  cartLanePoint(post: VendorPost) {
+    const near = this.nearestLeg(post.cx, post.cz);
+    const L = this.legs[near.leg];
+    const dir = this.legDirTowardCrossing(near.leg, near.t);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      // start behind the cart in the direction the lane walks, so the walker reaches the counter.
+      // Clamped to the leg instead of rejected: a cart near the end of a short lane used to find no
+      // room behind it and the street was left unseeded.
+      const back = rand(CART_WALK_MIN, CART_WALK_MAX);
+      const t = clamp(near.t + (dir > 0 ? -back : back), 0.5, L.len - 0.5);
+      const x = L.ax + L.ux * t;
+      const z = L.az + L.uz * t;
+      if (!this.clearOfBuildings(x, z)) continue;
+      return new THREE.Vector3(x, this.city.groundHeightAt(x, z), z);
+    }
+    return null;
+  }
+
   /** Put a vendor back on every post that has none (killed, or never staffed). */
   restaffVendors() {
     for (let i = 0; i < this.cartPosts.length; i++) {
@@ -1644,7 +1713,11 @@ export class PedManager {
       // 300 m stretch of boulevard in the middle of nowhere
       if (L.cross >= 0 && Math.min(Math.abs(t - L.cf), Math.abs(t - L.ct)) <= 16) nearCrossing.push(i);
     }
-    const pool = nearCrossing.length ? nearCrossing : all;
+    // Corners are where people cross, but the shops, the carts and the waiting customers live on
+    // the pavement *between* corners. Biasing every placement to a leg near a zebra left those
+    // mid-block stretches empty, so a food cart could stand staffed all day with nobody walking by.
+    // Half the placements keep the corner bias, half use every lane in range.
+    const pool = nearCrossing.length && rand(0, 1) < 0.5 ? nearCrossing : all;
     if (!pool.length) return null;
     for (let attempt = 0; attempt < 24; attempt++) {
       const leg = this.legs[pool[Math.floor(rand(0, pool.length))]];
@@ -1709,28 +1782,54 @@ export class PedManager {
       scared += 1;
     }
     this.stats.fleeEvents += scared;
+    // a murder is certain: the nearest bystander runs for the cops and that call costs a star
     if (sawVictim) {
-      let best: any = null;
-      let bd = 22 * 22;
-      for (let i = 0; i < this.peds.length; i++) {
-        const p = this.peds[i];
-        if (p.dead) continue;
-        const dx = p.pos.x - x;
-        const dz = p.pos.z - z;
-        const d = dx * dx + dz * dz;
-        if (d < bd) {
-          bd = d;
-          best = p;
-        }
-      }
-      if (best) best.startWitness(x, z, this);
+      const seen = this.nearestWithin(x, z, MURDER_RADIUS, null);
+      if (seen) seen.startWitness(x, z, this, true);
+    }
+    // A shot is heard further than the gun is seen. The people who are not close enough to bolt
+    // still run for a phone, which is the only way a crime in an empty-looking street reaches the
+    // police at all. `REPORT_CD` in startWitness keeps a burst of fire to one call to the station.
+    let sent = 0;
+    while (sent < WITNESS_CALL_MAX) {
+      const p = this.nearestWithin(x, z, HEAR_RADIUS, (ped: any) => {
+        if (ped.vendor) return false; // the vendor tends the cart; walkers do the reporting
+        if (ped.witnessCd > 0 || ped.witnessTimer > 0) return false;
+        // the ones inside FLEE_RADIUS are already running for their lives, not for a phone
+        const dx = ped.pos.x - x;
+        const dz = ped.pos.z - z;
+        return dx * dx + dz * dz > FLEE_RADIUS * FLEE_RADIUS;
+      });
+      if (!p) break;
+      p.startWitness(x, z, this);
+      sent += 1;
     }
     return scared;
+  }
+
+  /** Nearest living pedestrian to (x,z) inside `radius` that passes `keep`, or null. */
+  private nearestWithin(x: number, z: number, radius: number, keep: ((p: any) => boolean) | null) {
+    let best: any = null;
+    let bd = radius * radius;
+    for (let i = 0; i < this.peds.length; i++) {
+      const p = this.peds[i];
+      if (p.dead) continue;
+      if (keep && !keep(p)) continue;
+      const dx = p.pos.x - x;
+      const dz = p.pos.z - z;
+      const d = dx * dx + dz * dz;
+      if (d < bd) {
+        bd = d;
+        best = p;
+      }
+    }
+    return best;
   }
 
   update(dt: number, ctx: any) {
     this.ctx = ctx;
     this.simTime += dt;
+    if (this.reportCd > 0) this.reportCd = Math.max(0, this.reportCd - dt);
 
     for (let i = 0; i < this.peds.length; i++) this.peds[i].update(dt, ctx, this);
 
@@ -1762,6 +1861,38 @@ export class PedManager {
     this.flowTimer += dt;
     if (this.flowTimer > 2.2 && ctx.playerPos) {
       this.flowTimer = 0;
+      // A staffed cart the player is standing at gets foot traffic on its own lane. Re-placing the
+      // crowd on random lanes left a warung standing all day with nobody walking past it: measured
+      // 45 s at a cart, the closest walker stayed 17.6 m away and nothing was ever sold.
+      let lure: VendorPost | null = null;
+      let lureLeg = -1;
+      let lureT = 0;
+      let onLane = 0;
+      for (let c = 0; c < this.cartPosts.length; c++) {
+        const post = this.cartPosts[c];
+        if (Math.hypot(post.cx - ctx.playerPos.x, post.cz - ctx.playerPos.z) > CART_LURE) continue;
+        if (!this.cartServed(post.i)) continue;
+        lure = post;
+        const near = this.nearestLeg(post.cx, post.cz);
+        lureLeg = near.leg;
+        lureT = near.t;
+        break;
+      }
+      if (lure) {
+        // Count only the walkers on the cart's *own* lane coming *toward* it. A pedestrian 20 m away
+        // across the road is not a customer, and one walking away from the counter will never reach
+        // it either: counting those switched the lure off and left the cart unserved.
+        const LL = this.legs[lureLeg];
+        for (let i = 0; i < this.peds.length; i++) {
+          const p = this.peds[i];
+          if (p.dead || p.vendor || p.leg !== lureLeg) continue;
+          const dx = p.pos.x - lure.cx;
+          const dz = p.pos.z - lure.cz;
+          if (dx * dx + dz * dz > CART_WALK_MAX * CART_WALK_MAX) continue;
+          const t = (p.pos.x - LL.ax) * LL.ux + (p.pos.z - LL.az) * LL.uz;
+          if (p.dir > 0 ? t < lureT - 1 : t > lureT + 1) onLane += 1;
+        }
+      }
       for (let i = 0; i < this.peds.length; i++) {
         const p = this.peds[i];
         if (p.dead) continue;
@@ -1771,10 +1902,21 @@ export class PedManager {
         // and looks broken. The lane walk is what gets recycled.
         if (p.mode === 'cross') continue;
         if (p.pos.distanceTo(ctx.playerPos) > 80) {
-          const spot = this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 14, 48) ||
-            this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 8, 120);
-          // no pavement in reach: leave the body where it is rather than teleport it into a shop
-          if (spot) p.placeAt(spot.x, spot.z);
+          let placed = false;
+          if (lure && onLane < CART_TRAFFIC) {
+            const counter = this.cartLanePoint(lure);
+            if (counter) {
+              p.placeAt(counter.x, counter.z);
+              placed = true;
+              onLane += 1;
+            }
+          }
+          if (!placed) {
+            const spot = this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 14, 48) ||
+              this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 8, 120);
+            // no pavement in reach: leave the body where it is rather than teleport it into a shop
+            if (spot) p.placeAt(spot.x, spot.z);
+          }
         }
       }
     }

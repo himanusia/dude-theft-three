@@ -163,7 +163,9 @@ Automated harness (`puppeteer-core`) drives the real page and asserts **state**,
 npm run test:qa        # 19/19 gameplay assertions
 npm run test:interior  # 11/11 interior assertions
 npm run test:audit     # floating-geometry audit
-node tests/world/npc-behavior.mjs  # 13/13 pedestrian AI assertions (starts its own server on :8795)
+node tests/world/npc-behavior.mjs  # 16/16 pedestrian AI assertions (starts its own server on :9410)
+node tools/measure-npc-reaction.mjs  # the same street measured: 14 shots (flee, witnesses, wanted)
+                                     # and 45 s standing at a warung (customers)
 ```
 
 ```
