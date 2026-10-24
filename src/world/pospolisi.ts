@@ -16,7 +16,8 @@ import { canvasTexture, mergeStaticChildren } from '../core/utils';
 export interface PosCtx {
   group: THREE.Group;
   colliders: { minX: number; maxX: number; minZ: number; maxZ: number; h: number }[];
-  audit: { name: string; x: number; z: number; bottom: number }[];
+  /** `top` is optional: it publishes a building's own walking surface, for placement tests */
+  audit: { name: string; x: number; z: number; bottom: number; top?: number }[];
 }
 
 function boardTex(line1: string, line2: string): THREE.Texture {

@@ -11,7 +11,7 @@ import { buildRumahPadang } from './rumahpadang';
 import { buildMasjid } from './masjid';
 import { buildPasar } from './pasar';
 import { buildRonda } from './ronda';
-import { buildTerminal } from './terminal';
+import { buildTerminal, TERMINAL_DIMENSIONS } from './terminal';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB, rotatedFootprint, writeRotatedFootprint, FootprintBox } from '../core/utils';
@@ -1148,6 +1148,198 @@ export class City {
     return { x, z };
   }
 
+  /** every carriageway in the map, as a polyline with its half width */
+  private carriageways(): { name: string; path: [number, number][]; half: number }[] {
+    return [
+      ...ARTERIALS.map((a) => ({ name: a.name, path: a.path as [number, number][], half: a.width / 2 })),
+      { name: 'Ring Road', path: RING_ROAD as [number, number][], half: 10 },
+      ...LOCAL_STREETS.map((s, i) => ({ name: `Local Street ${i}`, path: s.path as [number, number][], half: s.width / 2 })),
+    ];
+  }
+
+  /** distance from a point to one polyline's centreline, in metres */
+  private distanceTo(path: [number, number][], x: number, z: number): number {
+    let best = Infinity;
+    for (let i = 1; i < path.length; i++) {
+      const [x1, z1] = path[i - 1];
+      const [x2, z2] = path[i];
+      const dx = x2 - x1, dz = z2 - z1;
+      const len2 = dx * dx + dz * dz || 1;
+      let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      best = Math.min(best, Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)));
+    }
+    return best;
+  }
+
+  /**
+   * The clearance from a *footprint* to the nearest carriageway edge, in metres.
+   *
+   * `onRoad()` answers for a point, and that is how a 48 x 32 m terminal stood in a lane with its
+   * centre 5 m clear of the kerb: the slab, not the centre, is what a player sees on the tarmac
+   * (owner report, t_accfc928). This samples the rectangle's outline, so a positive number means
+   * the whole apron misses every road by that much.
+   */
+  apronClearance(x: number, z: number, yaw: number, width: number, depth: number): number {
+    const cs = Math.cos(yaw), sn = Math.sin(yaw);
+    const hw = width / 2, hd = depth / 2;
+    // only roads whose centreline is near enough to matter: the apron's own circumradius
+    const reach = Math.hypot(hw, hd);
+    const near = this.carriageways().filter((r) => this.distanceTo(r.path, x, z) < r.half + reach + 6);
+    let best = Infinity;
+    const sample = (lx: number, lz: number) => {
+      const px = x + lx * cs + lz * sn;
+      const pz = z - lx * sn + lz * cs;
+      for (const r of near) best = Math.min(best, this.distanceTo(r.path, px, pz) - r.half);
+    };
+    const step = 2;
+    for (let u = -hw; u <= hw; u += step) { sample(u, -hd); sample(u, hd); }
+    for (let v = -hd; v <= hd; v += step) { sample(-hw, v); sample(hw, v); }
+    return best;
+  }
+
+  /** the closest point on any carriageway centreline to (x, z), with that road's half width */
+  private nearestRoad(x: number, z: number): { px: number; pz: number; half: number; dist: number } | null {
+    let best: { px: number; pz: number; half: number; dist: number } | null = null;
+    for (const r of this.carriageways()) {
+      for (let i = 1; i < r.path.length; i++) {
+        const [x1, z1] = r.path[i - 1];
+        const [x2, z2] = r.path[i];
+        const dx = x2 - x1, dz = z2 - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px = x1 + dx * t, pz = z1 + dz * t;
+        const dist = Math.hypot(x - px, z - pz);
+        if (!best || dist < best.dist) best = { px, pz, half: r.half, dist };
+      }
+    }
+    return best;
+  }
+
+  /**
+   * the ground's own fall under a rectangle, in metres, and how far its highest point rises above
+   * the sample the prop is seated on. 0 / 0 means a level slab can sit on it and nothing will
+   * stand through the concrete.
+   */
+  private footprintSpread(foot: { minX: number; maxX: number; minZ: number; maxZ: number }): { spread: number; rise: number } {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i <= 4; i++) {
+      for (let k = 0; k <= 4; k++) {
+        const x = foot.minX + ((foot.maxX - foot.minX) * i) / 4;
+        const z = foot.minZ + ((foot.maxZ - foot.minZ) * k) / 4;
+        const h = this.groundHeightAt(x, z);
+        if (h < lo) lo = h;
+        if (h > hi) hi = h;
+      }
+    }
+    const centre = this.groundHeightAt((foot.minX + foot.maxX) / 2, (foot.minZ + foot.maxZ) / 2);
+    return { spread: hi - lo, rise: hi - centre };
+  }
+
+  /**
+   * Is the driveway between the apron's street front and the kerb standing on a building?
+   *
+   * An apron that clears every carriageway is what the owner asked for, but it also has to be
+   * reachable: a driveway straight through a shophouse is not an entrance, so a site whose
+   * approach is blocked is rejected while the site is still being chosen.
+   */
+  private accessBlocked(x: number, z: number, yaw: number): boolean {
+    const frontX = x + Math.sin(yaw) * (TERMINAL_DIMENSIONS.depth / 2);
+    const frontZ = z + Math.cos(yaw) * (TERMINAL_DIMENSIONS.depth / 2);
+    const hit = this.nearestRoad(frontX, frontZ);
+    if (!hit) return true;
+    const nx = (frontX - hit.px) / (hit.dist || 1), nz = (frontZ - hit.pz) / (hit.dist || 1);
+    const ex = hit.px + nx * hit.half, ez = hit.pz + nz * hit.half;
+    const len = Math.hypot(frontX - ex, frontZ - ez);
+    const steps = Math.max(1, Math.ceil(len / 2));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const px = ex + (frontX - ex) * t, pz = ez + (frontZ - ez) * t;
+      if (this.colliders.some((c) => px > c.minX - 4 && px < c.maxX + 4 && pz > c.minZ - 4 && pz < c.maxZ + 4)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A short access run from the kerb of the nearest street to the terminal apron.
+   *
+   * The apron is deliberately clear of every carriageway, which leaves it an island; a terminal
+   * with no way in is not a terminal (card t_accfc928, deliverable 3). The run follows the
+   * *built* ground rather than the terrain line, because it has to climb the block plate and its
+   * kerb on the way to the apron instead of disappearing underneath them.
+   */
+  buildTerminalAccess(x: number, z: number, yaw: number) {
+    const accessWidth = 8;
+    // The run comes off the apron's street front, +Z in the terminal's own frame, and goes
+    // straight at the kerb: a driveway that left the back of the canopy would cross the building.
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const frontX = x + fx * (TERMINAL_DIMENSIONS.depth / 2);
+    const frontZ = z + fz * (TERMINAL_DIMENSIONS.depth / 2);
+    const hit = this.nearestRoad(frontX, frontZ);
+    if (!hit) return;
+    const toSite = hit.dist || 1;
+    const nx = (frontX - hit.px) / toSite, nz = (frontZ - hit.pz) / toSite;
+    // from the road edge, not its centreline: the run starts where the asphalt ends
+    const ex = hit.px + nx * hit.half, ez = hit.pz + nz * hit.half;
+    const ax = frontX, az = frontZ;
+    const run = Math.hypot(ax - ex, az - ez);
+    if (run < 1.5) return;      // the apron already meets the kerb; nothing to bridge
+    const path: [number, number][] = [[ex, ez], [ax, az]];
+    const geo = this.ribbonOnGround(path, accessWidth);
+    const asphalt = this.group.getObjectByName('road-local') as THREE.Mesh | null;
+    const mesh = new THREE.Mesh(
+      geo,
+      asphalt ? asphalt.material : new THREE.MeshStandardMaterial({ color: 0x282c32, roughness: 1 })
+    );
+    mesh.name = 'road-access';
+    mesh.receiveShadow = true;
+    this.group.add(mesh);
+    // Kept out of `this.roads` on purpose: the pedestrian walk-path generator and the police
+    // graph both walk every entry there, and a dead-end stub inside the apron's collider would
+    // send them into a wall. It is a forecourt, not a through street; the test reads it from
+    // `terminalAccess` instead.
+    this.terminalAccess = { path, width: accessWidth };
+  }
+
+  /**
+   * A ribbon that lies on the built surface under it instead of on the terrain line.
+   *
+   * `sweepSurface` lifts a ribbon from `terrainHeight`, which is right for a street but wrong for
+   * an entrance: the block plate and its kerb sit 26 cm over that line, so a terrain-lifted run
+   * to a terminal would pass underneath the block it is supposed to enter.
+   */
+  private ribbonOnGround(points: [number, number][], width: number, lift = 0.06, step = 2): THREE.BufferGeometry {
+    const stations: { x: number; z: number; y: number; u: number }[] = [];
+    let u = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const [x1, z1] = points[i];
+      const [x2, z2] = points[i + 1];
+      const len = Math.hypot(x2 - x1, z2 - z1);
+      const n = Math.max(1, Math.ceil(len / step));
+      for (let k = 0; k < n; k++) {
+        const t = k / n;
+        const px = x1 + (x2 - x1) * t, pz = z1 + (z2 - z1) * t;
+        stations.push({ x: px, z: pz, y: this.groundHeightAt(px, pz) + lift, u });
+        u += len / n;
+      }
+    }
+    const end = points[points.length - 1];
+    stations.push({ x: end[0], z: end[1], y: this.groundHeightAt(end[0], end[1]) + lift, u });
+    const rows: THREE.Vector3[][] = stations.map((s, i) => {
+      const prev = stations[Math.max(0, i - 1)];
+      const next = stations[Math.min(stations.length - 1, i + 1)];
+      const dx = next.x - prev.x, dz = next.z - prev.z;
+      const l = Math.hypot(dx, dz) || 1;
+      const nx = -dz / l, nz = dx / l;
+      return [
+        new THREE.Vector3(s.x - nx * (width / 2), s.y, s.z - nz * (width / 2)),
+        new THREE.Vector3(s.x + nx * (width / 2), s.y, s.z + nz * (width / 2)),
+      ];
+    });
+    return this.stripGeometry(rows, stations.map((s) => s.u / 4), [0, width / 4], undefined, 'road');
+  }
+
   /**
    * The kerbside slot nearest (x, z): on the paving, 0.3 m short of the shopfront line.
    *
@@ -1260,7 +1452,7 @@ export class City {
    */
   private surfaces(): THREE.Object3D[] {
     if (!this.surfaceCache) {
-      const wanted = new Set(['terrain', 'plate', 'lawn', 'lot', 'trotoar', 'kerb', 'gutter', 'kerb-ramp', 'road-arterial', 'road-local', 'road-shoulder']);
+      const wanted = new Set(['terrain', 'plate', 'lawn', 'lot', 'trotoar', 'kerb', 'gutter', 'kerb-ramp', 'road-arterial', 'road-local', 'road-shoulder', 'road-access']);
       this.surfaceCache = [];
       this.group.traverse((o) => {
         if (wanted.has(o.name)) this.surfaceCache!.push(o);
@@ -1691,7 +1883,14 @@ export class City {
           const cx = spot.x, cz = spot.z;
           if (this.nearLayang(cx, cz, 8)) continue;
           if (this.colliders.some((c) => cx > c.minX - 5 && cx < c.maxX + 5 && cz > c.minZ - 5 && cz < c.maxZ + 5)) continue;
-          const rg = buildRonda(ctx, cx, cz, Math.atan2(sp.x - cx, sp.z - cz));
+          const yaw = Math.atan2(sp.x - cx, sp.z - cz);
+          // the hut is a level platform on a flat plate, so a slot that straddles the plate edge
+          // or a grade leaves one side of it on air: that is the owner's "pos ronda miring"
+          const cs = Math.cos(yaw), sn = Math.sin(yaw);
+          const gy = [[-2.3, -1.6], [2.3, -1.6], [-2.3, 1.6], [2.3, 1.6]]
+            .map(([lx, lz]) => this.groundHeightAt(cx + lx * cs + lz * sn, cz - lx * sn + lz * cs));
+          if (Math.max(...gy) - Math.min(...gy) > 0.06) continue;
+          const rg = buildRonda(ctx, cx, cz, yaw);
           this.placeOnGround(rg, cx, cz);
           placed++;
         }
@@ -1723,30 +1922,55 @@ export class City {
     // elevated spines are only assigned by buildLayangRoad/buildMrt, which run *after* this pass,
     // so clearance is measured against the same map paths those builders use -- nearLayang() and
     // mrtSpine[] are still empty here and would pass every candidate (a check that cannot fail is
-    // not a clearance). 26 m from the layang deck, 30 m from the metro guideway, 17 m from every
+    // not a clearance). 26 m from the layang deck, 30 m from the metro guideway, 3 m from every
     // collider, and the exact footprint must clear every building rectangle.
+    //
+    // Two owner reports reshaped this pass (t_accfc928): "terminal blok m masih di tengah jalan",
+    // although the *centre* was 5 m clear of the kerb, and "terminal blok m miring", because a
+    // level slab was seated from one sample on ground that fell half a metre across its span. So
+    // the site is chosen by tests the old pass did not have:
+    //   - the whole footprint is pushed off every carriageway with pushOffRoad(), then measured
+    //     against every road as a rectangle rather than as a point,
+    //   - the terminal faces the street it belongs to, so its long side runs parallel to that
+    //     street and the apron stops at the kerb instead of poking a corner across it,
+    //   - the collider test is the apron plus a kerb (it used to be a 17 m ring around the
+    //     centre, which forbade neighbours on the long axis and allowed one inside the slab),
+    //   - the ground under the footprint has to be near-level, because the apron is one level
+    //     slab, and the flattest site wins rather than the first one found.
     {
       const tollPath = ARTERIALS[0].path as [number, number][];
       const metroPath = ARTERIALS[1].path as [number, number][];
       const metroOffset = (ARTERIALS[1].width ?? 20) / 2 + 5.5;   // guideway runs beside the artery
       const TW = 48, TD = 32;
-      for (const r of [58, 72, 88, 106, 124, 144]) {
-        let done = false;
-        for (let a = 0; a < 24 && !done; a++) {
-          const t = (a / 24) * Math.PI * 2 + 0.13;
-          const cx = sp.x + Math.cos(t) * r, cz = sp.z + 22 + Math.sin(t) * r;
+      const APRON_CLEAR = 4.0;      // metres of forecourt between the apron edge and any lane
+      let best: { x: number; z: number; yaw: number; spread: number; foot: { minX: number; maxX: number; minZ: number; maxZ: number } } | null = null;
+      for (const r of [58, 72, 88, 106, 124, 144, 168, 196, 228]) {
+        for (let a = 0; a < 36 && !(best && best.spread <= 0.02); a++) {
+          const t = (a / 36) * Math.PI * 2 + 0.13;
+          const raw = { x: sp.x + Math.cos(t) * r, z: sp.z + 22 + Math.sin(t) * r };
+          // pushOffRoad() moves a *point* out of the carriageways; the apron needs its own
+          // half-depth on top of that, or the slab the owner sees still hangs over a lane
+          const spot = this.pushOffRoad(raw.x, raw.z, TD / 2 + APRON_CLEAR);
+          const cx = spot.x, cz = spot.z;
           if (this.distToPath(cx, cz, tollPath) < 26) continue;
           if (this.distToPath(cx, cz, metroPath) < 30 + metroOffset) continue;
-          if (this.onRoad(cx, cz, 8) || isWater(cx, cz)) continue;
-          if (this.colliders.some((c) => cx > c.minX - 17 && cx < c.maxX + 17 && cz > c.minZ - 17 && cz < c.maxZ + 17)) continue;
-          const yaw = Math.atan2(sp.x - cx, sp.z - cz);
+          if (isWater(cx, cz)) continue;
+          // The terminal faces the street it belongs to, not the spawn: local +Z is the apron
+          // side, so the yaw comes from the kerb normal. That is also the only way a 48 m slab
+          // keeps a kerb's clearance inside a 112 m block grid, because then the apron's long
+          // side runs parallel to the road and its whole 48 x 32 rectangle projects inside the
+          // near kerb instead of poking a corner across it.
+          const kerb = this.nearestRoad(cx, cz);
+          if (!kerb) continue;
+          const yaw = Math.atan2((cx - kerb.px) / (kerb.dist || 1), (cz - kerb.pz) / (kerb.dist || 1));
+          if (this.apronClearance(cx, cz, yaw, TW, TD) < APRON_CLEAR) continue;
           const halfX = Math.abs(Math.cos(yaw)) * (TW / 2) + Math.abs(Math.sin(yaw)) * (TD / 2);
           const halfZ = Math.abs(Math.sin(yaw)) * (TW / 2) + Math.abs(Math.cos(yaw)) * (TD / 2);
-          // the apron is flat and cannot follow a hill: four corner samples have to agree
-          const corners = [[cx - halfX, cz - halfZ], [cx + halfX, cz - halfZ], [cx - halfX, cz + halfZ], [cx + halfX, cz + halfZ]]
-            .map(([qx, qz]) => this.groundHeightAt(qx, qz));
-          if (Math.max(...corners) - Math.min(...corners) > 0.6) continue;
           const foot = { minX: cx - halfX, maxX: cx + halfX, minZ: cz - halfZ, maxZ: cz + halfZ };
+          // The collider test used to be a 17 m ring around the centre, which both forbade a
+          // neighbour 40 m out on the apron's long axis and allowed one inside it on the short
+          // axis. The apron is what must stay clear, so the test is the footprint plus a kerb.
+          if (this.colliders.some((c) => foot.minX - 3 < c.maxX && foot.maxX + 3 > c.minX && foot.minZ - 3 < c.maxZ && foot.maxZ + 3 > c.minZ)) continue;
           if (this.footprints.some((f) => foot.minX < f.maxX && foot.maxX > f.minX && foot.minZ < f.maxZ && foot.maxZ > f.minZ)) continue;
           // the block-edge tree pass ran before this one, so trunks already stand on most verges.
           // A tree in the middle of the apron is the one thing a reserved lot cannot have.
@@ -1754,13 +1978,24 @@ export class City {
             const tx = m.elements[12], tz = m.elements[14];
             return tx > foot.minX && tx < foot.maxX && tz > foot.minZ && tz < foot.maxZ;
           })) continue;
-          const tg = buildTerminal(ctx, cx, cz, yaw);
-          this.placeOnGround(tg, cx, cz);
-          // reserve the lot, so nothing built later can stand on the apron
-          this.footprints.push(foot);
-          done = true;
+          // the entrance must not run through a shophouse: the driveway is sampled the way
+          // buildTerminalAccess() will draw it, and a blocked approach rejects the site
+          if (this.accessBlocked(cx, cz, yaw)) continue;
+          const { spread, rise } = this.footprintSpread(foot);
+          // a graded site is only taken when nothing flatter exists: the apron skirt is 0.8 m
+          // deep, so 0.3 m of fall is still hidden, but ground rising past the slab's own
+          // thickness would stand through the concrete, and that is the "miring" report
+          if (spread > 0.3 || rise > TERMINAL_DIMENSIONS.apron - 0.07) continue;
+          if (!best || spread < best.spread) best = { x: cx, z: cz, yaw, spread, foot };
         }
-        if (done) break;
+      }
+      if (best) {
+        const tg = buildTerminal(ctx, best.x, best.z, best.yaw);
+        this.placeOnGround(tg, best.x, best.z);
+        // reserve the lot, so nothing built later can stand on the apron
+        this.footprints.push(best.foot);
+        // an apron that clears every carriageway is an island without this
+        this.buildTerminalAccess(best.x, best.z, best.yaw);
       }
     }
 
@@ -1821,6 +2056,9 @@ export class City {
    */
   /** the deck the layang was built on, so a shop never ends up underneath it */
   layangSpine: [number, number][] = [];
+
+  /** the terminal's access run, so a test can prove the apron is not an island (t_accfc928) */
+  terminalAccess: { path: [number, number][]; width: number } | null = null;
 
   /** facade materials shared by colour, style and repeat, so their geometry can be merged */
   buildingMatCache = new Map<string, THREE.MeshStandardMaterial>();
@@ -4251,6 +4489,11 @@ export class City {
     const hutBase = box(2.4, 0.16, 2.4, 0xb4aea0);
     hutBase.position.set(rx, rg + 0.08, rz);
     this.group.add(hutBase);
+    // the block corner is on a grade, so the plinth takes up the drop on the low side: the hut is
+    // a level box and a base hanging over a slope is what reads as "pos ronda miring" (t_accfc928)
+    const hutSkirt = box(2.36, 0.6, 2.36, 0xa8a296);
+    hutSkirt.position.set(rx, rg - 0.3, rz);
+    this.group.add(hutSkirt);
     this.propAudit.push({ name: 'pos-ronda', x: rx, z: rz, bottom: rg });
     const hutBack = box(2.2, 2.0, 0.14, 0xe8e2d2);
     hutBack.position.set(rx, rg + 1.16, rz - 1.12);

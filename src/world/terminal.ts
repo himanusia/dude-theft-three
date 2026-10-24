@@ -28,7 +28,10 @@ import type { PosCtx } from './pospolisi';
 export const TERMINAL_DIMENSIONS = {
   width: 48,
   depth: 32,
-  apron: 0.18,
+  // The apron is the slab the terminal sits on, so its own thickness is also the margin between a
+  // level top and ground that is a few centimetres higher at one corner: a 12 cm apron let the
+  // pavement stand through the concrete (measured 0.001 m over, t_accfc928).
+  apron: 0.22,
   platform: 0.26,
   eave: 4.5,
   gantry: 9.0,
@@ -209,7 +212,11 @@ export function buildTerminal(ctx: PosCtx, x: number, z: number, yaw: number, na
   const g = new THREE.Group();
   g.name = 'terminal';
   g.position.set(x, 0, z);
-  g.rotation.y = yaw;
+  // Yaw only. The apron is one level slab and the canopy one level sheet: an X or Z here would
+  // lean the whole terminal, which is the owner's "terminal blok m miring" (t_accfc928). The
+  // building is level by construction and stays level whatever the ground does, because the site
+  // is chosen flat and the slab is skirted (see the apron skirt below).
+  g.rotation.set(0, yaw, 0);
 
   const W = TERMINAL_DIMENSIONS.width;      // 48 across the bays
   const D = TERMINAL_DIMENSIONS.depth;      // 32 from the street edge to the canopy
@@ -283,6 +290,11 @@ export function buildTerminal(ctx: PosCtx, x: number, z: number, yaw: number, na
 
   // ---------------------------------------------------------------- apron
   box(concrete, W, Y0, D, 0, Y0 / 2, 0);
+  // The apron skirt. A 48 x 32 m slab is level; the ground under it is allowed a few centimetres
+  // of fall, and without this the low corner of the apron hangs over the drop and the ground line
+  // cuts across the concrete diagonally, which is what the owner reads as a tilted terminal. The
+  // skirt is set 2 cm inside the apron so no face is coplanar with it.
+  box(concreteWorn, W - 0.04, 0.8, D - 0.04, 0, -0.4, 0);
   // expansion joints and the two worn wheel tracks that every terminal apron has
   for (const jz of [-2.4, 5.2, 12.8]) box(concreteWorn, W, 0.012, 0.12, 0, Y0 + 0.004, jz);
   for (const jx of [-8, 8]) box(concreteWorn, 0.12, 0.012, D, jx, Y0 + 0.004, 0);
@@ -333,11 +345,12 @@ export function buildTerminal(ctx: PosCtx, x: number, z: number, yaw: number, na
   }
   // purlins the roof sheets sit on
   for (const pz of [-14.3, -11.8, -9.3]) box(steel, 38.4, 0.12, 0.12, 0, EAVE - 0.02, pz);
-  // the roof itself: one long sheet with a slight fall to the street side, overhanging the
-  // platform edge so the shadow lands on the deck rather than on the buses
+  // the roof itself: one long level sheet overhanging the platform edge, so the shadow lands on
+  // the deck rather than on the buses. It used to carry a 2 degree fall to the street; on a low
+  // camera that slanted plane reads as the whole canopy leaning, which is half of the owner's
+  // "miring" report (t_accfc928), so the fall is gone and the gutter takes the rain instead.
   const roof = new THREE.Mesh(new THREE.BoxGeometry(38.8, 0.22, 7.8), zinc);
   roof.position.set(0, EAVE + 0.16, -11.3);
-  roof.rotation.x = 0.04;
   roof.castShadow = true;
   roof.receiveShadow = true;
   g.add(roof);
@@ -562,7 +575,9 @@ export function buildTerminal(ctx: PosCtx, x: number, z: number, yaw: number, na
 
   mergeStaticChildren(g);
   ctx.group.add(g);
-  ctx.audit.push({ name: 'terminal', x, z, bottom: 0 });
+  // `top` publishes the apron's walking height; the placement test measures the ground against
+  // it, so a level-seating check cannot drift from the slab's own thickness.
+  ctx.audit.push({ name: 'terminal', x, z, bottom: 0, top: Y0 });
   // The terminal is a lot you walk into, not a building: the apron is open parking and the only
   // things a body cannot pass are the boarding platform, the booth, the canopy columns, the gantry
   // legs, the water barriers and the two buses berthed in their bays. One collider for the whole

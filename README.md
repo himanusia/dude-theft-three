@@ -46,6 +46,15 @@ node tools/proof-bullets.mjs       # headless: 20 shots, then proves the muzzle 
                                    # surface, and firing allocates NOTHING after warm-up (scene
                                    # objects, GPU geometries and the pool's own counter all flat).
                                    # Writes screenshots/proof/muzzle-flash.png and bullet-impact.png
+node tests/world/terminal-level.mjs # 14/14: the Blok M terminal and every pos ronda stand level
+                                   # (group rotation zero on X and Z, the apron top on one plane),
+                                   # the whole 48 x 32 m apron misses every carriageway, its skirt
+                                   # reaches the ground, and the access run joins both the apron
+                                   # and the kerb. Reports the metres, not a verdict
+node tools/shoot-terminal-level.mjs # headless: a street-level frame of the terminal and one of a
+                                   # pos ronda, writes screenshots/proof/terminal-level.png and
+                                   # -ronda.png, and fails unless the subject is what changed the
+                                   # frame (with a drift control)
 node tests/world/ground.mjs        # 7/7: the player's sole, the crowd's soles and the ground
                                    # measure against the surface that is actually drawn (asphalt,
                                    # trotoar, kerb ramp), plus a full walking stride

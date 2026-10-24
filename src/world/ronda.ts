@@ -36,7 +36,10 @@ function noticeTex(): THREE.Texture {
 export function buildRonda(ctx: PosCtx, x: number, z: number, yaw: number): THREE.Group {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
-  g.rotation.y = yaw;
+  // Yaw only: the post is a level platform with a level roof, and any X or Z here stands the whole
+  // hut on its side (owner report "pos ronda miring", t_accfc928). The site is chosen on flat
+  // paving and the platform is skirted, so it reads level from any kerb.
+  g.rotation.set(0, yaw, 0);
 
   const maroon = new THREE.MeshStandardMaterial({ color: 0x5e2a26, roughness: 0.8, metalness: 0.25 });
   const zinc = new THREE.MeshStandardMaterial({ color: 0x8d9296, roughness: 0.75, metalness: 0.35, emissive: 0x1a1d1f, emissiveIntensity: 0.4 });
@@ -58,8 +61,10 @@ export function buildRonda(ctx: PosCtx, x: number, z: number, yaw: number): THRE
     return mesh;
   };
 
-  // platform and its two steps
+  // platform and its two steps; the 0.4 m skirt under the platform takes up the few centimetres a
+  // paving plate can drop at its edge, so the base never hangs on one side
   box(concrete, W, 0.5, D, 0, 0.25, 0);
+  box(concrete, W - 0.04, 0.4, D - 0.04, 0, -0.2, 0);
   box(concrete, W - 0.5, 0.28, 0.5, 0, 0.14, D / 2 + 0.25);
   box(concrete, W - 1.2, 0.14, 0.5, 0, 0.07, D / 2 + 0.75);
 
@@ -68,10 +73,11 @@ export function buildRonda(ctx: PosCtx, x: number, z: number, yaw: number): THRE
     for (const pz of [-D / 2 + 0.2, D / 2 - 0.2]) box(maroon, 0.13, PH, 0.13, px, 0.5 + PH / 2, pz);
   }
 
-  // zinc roof, tilted back, with the dark red fascia across the front
+  // zinc roof, level, with the dark red fascia across the front. It used to lean back 4 degrees,
+  // and from the street that one slanted plane is what made the hut look like it was falling over
+  // (owner report "pos ronda miring", t_accfc928).
   const roof = new THREE.Mesh(new THREE.BoxGeometry(W + 0.9, 0.1, D + 1.2), zinc);
   roof.position.set(0, 0.5 + PH + 0.18, 0);
-  roof.rotation.x = -0.07;
   roof.castShadow = true;
   g.add(roof);
   box(maroon, W + 0.9, 0.26, 0.1, 0, 0.5 + PH + 0.06, D / 2 + 0.55);
