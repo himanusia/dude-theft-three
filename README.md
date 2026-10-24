@@ -71,6 +71,11 @@ node tools/shoot-wasted.mjs        # headless: kills the player and reads the de
                                    # millisecond) and writes proof/wasted-0..2.png, then samples
                                    # the LIVE clock every 60 ms to prove the stages fire in order
                                    # and the player is back at the spawn inside 3 s
+node tools/probe-hud-overlap.mjs   # headless: earns three stars through the police system and
+                                   # measures every HUD box at 390x844, 414x896, 768x1024 and
+                                   # 1280x760, before and after the wanted row appears. Writes
+                                   # proof/hud-overlap-<label>.json (exit 2 on an overlap) and
+                                   # proof/phone-wanted.png
 ```
 
 `city.ojeks` lists every live bike with its real group position and the cargo box's local
