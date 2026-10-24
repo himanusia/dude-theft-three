@@ -1,3 +1,9 @@
+
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'world/overlap';
+suiteStart(SUITE);
+try {
 /**
  * Do any two buildings occupy the same ground?
  *
@@ -9,12 +15,11 @@
  * This measures oriented boxes: each candidate is rebuilt from its own axis, its corners are
  * pushed into the other building's frame, and the overlap is measured there.
  */
-import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const BASE = process.env.DTA_URL || 'http://127.0.0.1:8765';
 
-const browser = await puppeteer.launch({
+const browser = await launch({
   executablePath: CHROME,
   headless: 'new',
   args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio'],
@@ -22,7 +27,7 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 await page.setViewport({ width: 1000, height: 640 });
 await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
-await page.waitForFunction('window.__game !== undefined', { timeout: 90000 });
+await bootGate(page);
 await page.click('#start-btn');
 await new Promise((r) => setTimeout(r, 4500));
 
@@ -53,3 +58,7 @@ await browser.close();
 const ok = report.overlapPairs === 0;
 console.log(ok ? 'PASS no two buildings share ground' : `FAIL ${report.overlapPairs} pairs overlap, worst ${report.worst} m`);
 process.exit(ok ? 0 : 1);
+
+} catch (err) {
+  await crash(SUITE, err);
+}

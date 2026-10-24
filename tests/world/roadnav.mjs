@@ -14,7 +14,12 @@
 import { createServer } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { crash, suiteStart } from '../_harness.mjs';
 
+const SUITE = 'world/roadnav';
+suiteStart(SUITE);
+let server;
+try {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const MAX_LEG = 40; // the longest single leg a caller should ever receive
 const results = [];
@@ -23,7 +28,7 @@ const check = (name, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name} :: ${JSON.stringify(detail)}`);
 };
 
-const server = await createServer({ root: ROOT, logLevel: 'error', server: { middlewareMode: true }, appType: 'custom' });
+server = await createServer({ root: ROOT, logLevel: 'error', server: { middlewareMode: true }, appType: 'custom' });
 const { RoadNav } = await server.ssrLoadModule('/src/core/pathfinding.ts');
 const { ARTERIALS } = await server.ssrLoadModule('/src/world/jakartamap.ts');
 
@@ -207,3 +212,8 @@ await server.close();
 const pass = results.filter((r) => r.ok).length;
 console.log(`SUMMARY ${JSON.stringify({ pass, total: results.length })}`);
 process.exit(pass === results.length ? 0 : 1);
+
+} catch (err) {
+  if (server) await server.close().catch(() => {});
+  await crash(SUITE, err);
+}

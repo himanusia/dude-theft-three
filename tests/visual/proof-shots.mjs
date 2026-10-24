@@ -1,19 +1,24 @@
 
-import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 import fs from 'node:fs';
+
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'visual/proof-shots';
+suiteStart(SUITE);
+try {
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const URL_ = process.env.DTA_URL || 'http://127.0.0.1:8765';
 const OUT = '/Users/mac/Code/dude-theft-three/screenshots/proof';
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio','--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1600, height: 900 } });
+const b = await launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio','--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1600, height: 900 } });
 const p = await b.newPage();
 const errs = [];
 p.on('pageerror', e => errs.push(e.message));
 await p.goto(URL_ + '/index.html', { waitUntil: 'domcontentloaded' });
-await p.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+await bootGate(p);
 await sleep(1200);
 await p.click('#start-btn');
 await sleep(3000);
@@ -104,3 +109,7 @@ const state = await p.evaluate(() => ({
 }));
 console.log('STATE', JSON.stringify(state), 'errors', JSON.stringify(errs.slice(0,2)));
 await b.close();
+
+} catch (err) {
+  await crash(SUITE, err);
+}

@@ -15,10 +15,14 @@
  * plus a pause-panel and help-sheet fit check at the same viewport, and one
  * screenshot per viewport in screenshots/resp-<w>x<h>.png.
  */
-import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 import fs from 'node:fs';
 
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'ui/responsive';
+suiteStart(SUITE);
+try {
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const BASE = process.env.DTA_URL || 'http://127.0.0.1:8765';
 const OUT = new URL('../../screenshots', import.meta.url).pathname;
@@ -256,7 +260,7 @@ const fmt = (n) => (Math.round(n * 10) / 10).toFixed(1);
 
 (async () => {
   if (!fs.existsSync(OUT)) fs.mkdirSync(OUT, { recursive: true });
-  const browser = await puppeteer.launch({
+  const browser = await launch({
     executablePath: CHROME,
     headless: 'new',
     args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required'],
@@ -277,7 +281,7 @@ const fmt = (n) => (Math.round(n * 10) / 10).toFixed(1);
     });
     await page.setViewport({ width: vp.w, height: vp.h, deviceScaleFactor: 1, isMobile: vp.touch, hasTouch: vp.touch });
     await page.goto(BASE + '/index.html', { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+    await bootGate(page);
     await sleep(600);
 
     // start the game (audio init + pointer lock are irrelevant headless)
@@ -367,4 +371,10 @@ const fmt = (n) => (Math.round(n * 10) / 10).toFixed(1);
     console.error(`responsive: ${failed.length}/${results.length} checks failed`);
     process.exit(1);
   }
-})().catch((e) => { console.error('HARNESS FAIL', e.message); process.exit(1); });
+})().catch(async (e) => {
+  await crash(SUITE, e);
+});
+
+} catch (err) {
+  await crash(SUITE, err);
+}

@@ -7,9 +7,13 @@
  *
  * Writes screenshots/touch-portrait.png and screenshots/touch-landscape.png.
  */
-import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'ui/touch';
+suiteStart(SUITE);
+try {
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const BASE = process.env.DTA_URL || 'http://127.0.0.1:8765';
 const OUT = new URL('../../screenshots', import.meta.url).pathname;
@@ -93,7 +97,7 @@ const layout = (page) => page.evaluate(() => {
 });
 
 (async () => {
-  const b = await puppeteer.launch({
+  const b = await launch({
     executablePath: CHROME,
     headless: 'new',
     args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required'],
@@ -122,7 +126,7 @@ const layout = (page) => page.evaluate(() => {
     userAgent: IPHONE_UA,
   });
   await page.goto(BASE + '/index.html', { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
+  await bootGate(page);
   await sleep(800);
 
   // ---- activation (coarse pointer on load, or the first touch)
@@ -281,7 +285,7 @@ const layout = (page) => page.evaluate(() => {
   const desktop = await b.newPage();
   await desktop.setViewport({ width: 1500, height: 900 });
   await desktop.goto(BASE + '/index.html', { waitUntil: 'domcontentloaded' });
-  await desktop.waitForFunction('window.__game !== undefined', { timeout: 40000 });
+  await bootGate(desktop);
   await sleep(500);
   const desk = await desktop.evaluate(() => ({
     touchMode: document.body.classList.contains('touch-mode'),
@@ -303,4 +307,10 @@ const layout = (page) => page.evaluate(() => {
   console.log('VIEWPORTS ' + JSON.stringify({ portrait: portraitSize, landscape: { w: land.vw, h: land.vh } }));
   await b.close();
   if (results.some((r) => !r.ok)) process.exit(1);
-})().catch((e) => { console.error('HARNESS FAIL', e.message); process.exit(1); });
+})().catch(async (e) => {
+  await crash(SUITE, e);
+});
+
+} catch (err) {
+  await crash(SUITE, err);
+}

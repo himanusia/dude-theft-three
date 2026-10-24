@@ -8,10 +8,14 @@
  *
  * Writes screenshots/map-screen.png.
  */
-import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'ui/persistence';
+suiteStart(SUITE);
+try {
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const ROOT = new URL('../..', import.meta.url).pathname;   // tests/<group>/ -> repo root
 const OUT = path.join(ROOT, 'screenshots');
@@ -49,7 +53,7 @@ async function ensureServer() {
 
 const server = await ensureServer();
 
-const browser = await puppeteer.launch({
+const browser = await launch({
   executablePath: CHROME,
   headless: 'new',
   args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required'],
@@ -72,7 +76,7 @@ try {
 
   const boot = async () => {
     await page.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
+    await bootGate(page);
     await sleep(900);
   };
   const state = () => page.evaluate(() => window.__game.state);
@@ -493,4 +497,8 @@ try {
 } finally {
   await browser.close();
   if (server) server.kill('SIGTERM');
+}
+
+} catch (err) {
+  await crash(SUITE, err);
 }

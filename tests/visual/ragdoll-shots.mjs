@@ -1,13 +1,17 @@
 // Renders a ragdoll mid-fall and after it settles, on the road the player stands on, so limb
 // thickness and the fold of the body can be checked by eye instead of trusted.
-import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'visual/ragdoll-shots';
+suiteStart(SUITE);
+try {
 const CHROME = '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const URL = process.env.DTA_URL || 'http://127.0.0.1:8765/';
 fs.mkdirSync('screenshots/proof', { recursive: true });
 
-const browser = await puppeteer.launch({
+const browser = await launch({
   executablePath: CHROME,
   headless: 'new',
   args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required', '--window-size=1280,720'],
@@ -15,8 +19,8 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 await page.setViewport({ width: 1280, height: 720 });
 await page.bringToFront();
-await page.goto(URL, { waitUntil: 'networkidle2' });
-await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+await page.goto(URL, { waitUntil: 'domcontentloaded' });
+await bootGate(page);
 await page.click('#start-btn');
 await new Promise(r => setTimeout(r, 600));
 await page.evaluate(() => window.__game._test.cinematic(true));
@@ -73,3 +77,7 @@ const close = await shot('rag-03-closeup', 250, 1.1, 1.4);
 
 console.log(JSON.stringify({ spawn, air, settled, close }));
 await browser.close();
+
+} catch (err) {
+  await crash(SUITE, err);
+}

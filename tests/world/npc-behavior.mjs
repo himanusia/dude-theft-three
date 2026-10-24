@@ -14,8 +14,12 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import puppeteer from 'puppeteer-core';
 
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'world/npc-behavior';
+suiteStart(SUITE);
+try {
 const ROOT = new URL('../..', import.meta.url).pathname;   // tests/<group>/ -> repo root
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 // 87xx is crowded with leftover serve.py and vite processes from worktrees; sit above that
@@ -203,7 +207,7 @@ function stopServer() {
   await assertOwnServer(URL_BASE);
   console.log('server ' + URL_BASE);
 
-  const b = await puppeteer.launch({
+  const b = await launch({
     executablePath: CHROME,
     headless: 'new',
     args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required'],
@@ -218,7 +222,7 @@ function stopServer() {
   });
 
   await page.goto(URL_BASE + '/index.html', { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+  await bootGate(page);
 
   // Shape probe: a stale/foreign game build used to make the first assertion die
   // with "reading 'length' of undefined"; name the missing fields instead.
@@ -764,10 +768,9 @@ function stopServer() {
   await b.close();
   stopServer();
   process.exit(results.every((r) => r.ok) ? 0 : 1);
-})().catch((e) => {
-  console.error('HARNESS FAIL', e.message);
+})().catch(async (e) => {
   stopServer();
-  process.exit(1);
+  await crash(SUITE, e);
 });
 
 process.on('exit', stopServer);
@@ -775,3 +778,7 @@ process.on('SIGINT', () => {
   stopServer();
   process.exit(130);
 });
+
+} catch (err) {
+  await crash(SUITE, err);
+}

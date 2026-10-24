@@ -1,7 +1,12 @@
+
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'world/drift';
+suiteStart(SUITE);
+try {
 // Proves the car model has lateral slip, measured on the physics step itself (no traffic, no
 // kerbs): a hard turn keeps most of its momentum and slides a little, the handbrake slides a
 // lot, and straight-line input still tracks dead straight.
-import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const URL = process.env.DTA_URL || 'http://127.0.0.1:8765/';
@@ -12,7 +17,7 @@ const check = (name, ok, info) => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name} :: ${JSON.stringify(info)}`);
 };
 
-const browser = await puppeteer.launch({
+const browser = await launch({
   executablePath: CHROME,
   headless: 'new',
   args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required'],
@@ -20,8 +25,8 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 await page.setViewport({ width: 1280, height: 720 });
 await page.bringToFront();
-await page.goto(URL, { waitUntil: 'networkidle2' });
-await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+await page.goto(URL, { waitUntil: 'domcontentloaded' });
+await bootGate(page);
 await page.click('#start-btn');
 await sleep(600);
 
@@ -88,3 +93,7 @@ check('the handbrake keeps the car rolling', sim.handbrake.kmh > 25, { kmh: sim.
 
 console.log('SUMMARY ' + JSON.stringify({ pass: checks.filter((c) => c.ok).length, total: checks.length }));
 await browser.close();
+
+} catch (err) {
+  await crash(SUITE, err);
+}

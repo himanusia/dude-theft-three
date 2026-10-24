@@ -1,17 +1,21 @@
 
-import puppeteer from 'puppeteer-core';
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'gameplay/weapons-smoke';
+suiteStart(SUITE);
+try {
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const URL_ = process.env.DTA_URL || 'http://127.0.0.1:8765';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const results = [];
 const check = (n, ok, d) => { results.push({ n, ok }); console.log((ok ? 'PASS ' : 'FAIL ') + n + (d ? ' :: ' + JSON.stringify(d) : '')); };
 
-const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio','--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1400, height: 820 } });
+const b = await launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio','--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1400, height: 820 } });
 const p = await b.newPage();
 const errs = [];
 p.on('pageerror', e => errs.push(e.message));
 await p.goto(URL_ + '/index.html', { waitUntil: 'domcontentloaded' });
-await p.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+await bootGate(p);
 await sleep(1200); await p.click('#start-btn'); await sleep(2200);
 
 const slots = [];
@@ -65,3 +69,7 @@ check('no page errors', errs.length === 0, errs.slice(0, 3));
 console.log('SUMMARY ' + JSON.stringify({ pass: results.filter(r => r.ok).length, total: results.length }));
 await b.close();
 if (results.some(r => !r.ok)) process.exitCode = 1;
+
+} catch (err) {
+  await crash(SUITE, err);
+}

@@ -1,3 +1,9 @@
+
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'world/placement';
+suiteStart(SUITE);
+try {
 /**
  * Placement law. Every one of these failures reached the owner's screen before this file existed:
  *
@@ -9,12 +15,11 @@
  * Each was found by eye, after the fact, one at a time. These are the same questions asked by a
  * machine, against the live scene, so the next placement path cannot reintroduce them quietly.
  */
-import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const BASE = process.env.DTA_URL || 'http://127.0.0.1:8765';
 
-const browser = await puppeteer.launch({
+const browser = await launch({
   executablePath: CHROME,
   headless: 'new',
   args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio'],
@@ -22,7 +27,7 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 await page.setViewport({ width: 1000, height: 640 });
 await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
-await page.waitForFunction('window.__game !== undefined', { timeout: 90000 });
+await bootGate(page);
 await page.click('#start-btn');
 await new Promise((r) => setTimeout(r, 5000));
 
@@ -151,3 +156,7 @@ for (const [name, ok, detail] of checks) {
 console.log('SUMMARY', JSON.stringify({ pass, total: checks.length, named: report.named }));
 await browser.close();
 process.exit(pass === checks.length ? 0 : 1);
+
+} catch (err) {
+  await crash(SUITE, err);
+}

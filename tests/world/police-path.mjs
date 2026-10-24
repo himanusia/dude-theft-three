@@ -1,9 +1,14 @@
+
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'world/police-path';
+suiteStart(SUITE);
+try {
 // Focused police navigation test: a cruiser is put behind a building from the player
 // and has to drive around the block instead of through it.
 //
 // Asserts (a) the nearest cruiser closes to < 12 m, (b) no cruiser ever ends up
 // inside a building footprint (city.colliders with h > 3).
-import puppeteer from 'puppeteer-core';
 
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -17,7 +22,7 @@ const SAMPLES = 27; // 27 * 300 ms = 8.1 s
 const STEP = 300;
 
 (async () => {
-  const b = await puppeteer.launch({
+  const b = await launch({
     executablePath: CHROME,
     headless: 'new',
     args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required'],
@@ -31,7 +36,7 @@ const STEP = 300;
   });
 
   await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+  await bootGate(page);
   await sleep(1500);
   await page.click('#start-btn');
   await sleep(2000);
@@ -217,7 +222,10 @@ const STEP = 300;
   console.log('FAILED ' + JSON.stringify(results.filter((r) => !r.ok)));
   await b.close();
   process.exit(results.every((r) => r.ok) ? 0 : 1);
-})().catch((e) => {
-  console.error('HARNESS FAIL', e.message);
-  process.exit(1);
+})().catch(async (e) => {
+  await crash(SUITE, e);
 });
+
+} catch (err) {
+  await crash(SUITE, err);
+}

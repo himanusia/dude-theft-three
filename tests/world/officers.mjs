@@ -1,6 +1,11 @@
+
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'world/officers';
+suiteStart(SUITE);
+try {
 // Officers must actually leave the cruiser and come at the player on foot once it stops, and
 // must be killable from the player's gun.
-import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const URL = process.env.DTA_URL || 'http://127.0.0.1:8765/';
@@ -11,7 +16,7 @@ const check = (name, ok, info) => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name} :: ${JSON.stringify(info)}`);
 };
 
-const browser = await puppeteer.launch({
+const browser = await launch({
   executablePath: CHROME,
   headless: 'new',
   args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required'],
@@ -20,8 +25,8 @@ const page = await browser.newPage();
 await page.setViewport({ width: 1280, height: 720 });
 await page.bringToFront();
 page.on('pageerror', (e) => console.log('PAGEERROR', e.message.slice(0, 200)));
-await page.goto(URL, { waitUntil: 'networkidle2' });
-await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+await page.goto(URL, { waitUntil: 'domcontentloaded' });
+await bootGate(page);
 await page.click('#start-btn');
 await sleep(700);
 
@@ -117,3 +122,7 @@ check('officers go away when the wanted level clears', recall.after < recall.bef
 
 console.log('SUMMARY ' + JSON.stringify({ pass: checks.filter((c) => c.ok).length, total: checks.length }));
 await browser.close();
+
+} catch (err) {
+  await crash(SUITE, err);
+}

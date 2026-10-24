@@ -5,8 +5,15 @@
 //   visual    - screenshots and audio, run when the look changes
 //
 // Usage: node tests/run-all.mjs [group...]   (default: gameplay world ui)
+//
+// Every suite runs against one world seed (DTA_SEED, fixed by default) so a gate run is
+// reproducible, and gets DTA_BOOT_TIMEOUT_MS (180 s) to boot the game before it is
+// declared broken. A suite that dies before its own reporter still prints
+// `FAIL <suite> :: <error>`; this file also names any suite that produced no SUMMARY at
+// all, so "failed with no reason" cannot happen again.
 import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
+import { SEED, BOOT_TIMEOUT } from './_harness.mjs';
 
 const GROUPS = {
   gameplay: ['qa', 'playtest', 'weapons-smoke', 'fps'],
@@ -45,15 +52,24 @@ try {
 
 const run = (file) =>
   new Promise((resolve) => {
-    const child = spawn(process.execPath, [file], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [file], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, DTA_SEED: String(SEED) },
+    });
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (out += d));
     child.on('close', (code) => resolve({ code, out }));
   });
 
+const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
+const clock = (ms) => `${Math.floor(ms / 60000)}m${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}s`;
+
+console.log(`SEED ${SEED} (fixed world seed, override with DTA_SEED)  boot budget ${secs(BOOT_TIMEOUT)}`);
+
 let failed = 0;
 let total = 0;
+let totalMs = 0;
 const rows = [];
 for (const group of groups) {
   const dir = `tests/${group}`;
@@ -65,7 +81,10 @@ for (const group of groups) {
     // give the previous suite's browser and server a moment to disappear: the frame-rate
     // suite measures against wall clock and a departing Chrome drags it down
     await new Promise((r) => setTimeout(r, 1500));
+    const started = Date.now();
     const { code, out } = await run(`${dir}/${f}`);
+    const ms = Date.now() - started;
+    totalMs += ms;
     const m = out.match(/SUMMARY (\{[^}]*\})/g);
     const last = m ? JSON.parse(m[m.length - 1].slice(8)) : null;
     const pass = last ? last.pass : code === 0 ? 1 : 0;
@@ -77,17 +96,43 @@ for (const group of groups) {
     const failedChecks = out
       .split('\n')
       .filter((l) => l.startsWith('FAIL ') && !l.startsWith('FAILED '))
-      .map((l) => l.replace(/^FAIL /, '').slice(0, 120));
-    rows.push({ group, name, pass, count, ok, failedChecks });
-    console.log(`${pass}/${count}${code === 0 ? '' : ' (exit ' + code + ')'}`);
+      .map((l) => l.replace(/^FAIL /, '').slice(0, 160));
+    // a suite that never reached its reporter gets its own line: the reason is the point
+    const tail = out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('SUITE '))
+      .slice(-3)
+      .join(' | ')
+      .slice(0, 300);
+    const reason = last ? null : `no SUMMARY (exit ${code}): ${tail}`;
+    rows.push({ group, name, pass, count, ok, ms, failedChecks, reason });
+    console.log(`${pass}/${count} ${secs(ms)}${code === 0 ? '' : ' (exit ' + code + ')'}`);
   }
 }
 
-console.log('\n' + rows.map((r) => `${r.ok ? 'PASS' : 'FAIL'} ${r.group}/${r.name} ${r.pass}/${r.count}`).join('\n'));
+const w = (s, n) => String(s).padEnd(n);
+const nameWidth = Math.max(...rows.map((r) => `${r.group}/${r.name}`.length), 5) + 2;
+console.log(`\n${w('suite', nameWidth)}${w('checks', 10)}${w('time', 9)}status`);
+console.log('-'.repeat(nameWidth + 10 + 9 + 6));
 for (const r of rows) {
-  if (r.ok || !r.failedChecks.length) continue;
+  console.log(
+    w(`${r.group}/${r.name}`, nameWidth) +
+      w(`${r.pass}/${r.count}`, 10) +
+      w(secs(r.ms), 9) +
+      (r.ok ? 'PASS' : 'FAIL'),
+  );
+}
+console.log('-'.repeat(nameWidth + 10 + 9 + 6));
+console.log(
+  `${rows.filter((r) => r.ok).length}/${rows.length} suites green, ${total} checks, ` +
+    `${clock(totalMs)} total, seed ${SEED}`,
+);
+
+for (const r of rows) {
+  if (r.ok) continue;
   console.log(`\n  ${r.group}/${r.name}:`);
+  if (r.reason) console.log(`    - ${r.reason}`);
   for (const c of r.failedChecks) console.log(`    - ${c}`);
 }
-console.log(`\n${rows.filter((r) => r.ok).length}/${rows.length} suites green, ${total} checks`);
 process.exit(failed ? 1 : 0);

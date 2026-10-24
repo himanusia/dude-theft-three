@@ -2,9 +2,14 @@
 // trigger, camera state and the floating-geometry audit against a live build.
 // Run with: DTA_URL=http://localhost:8794 node tests/playtest.mjs
 
-import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 import fs from 'node:fs';
+
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'gameplay/playtest';
+suiteStart(SUITE);
+try {
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const URL_ = process.env.DTA_URL || 'http://127.0.0.1:8765';
 const OUT = new URL('../../screenshots', import.meta.url).pathname;
@@ -17,14 +22,14 @@ function check(name, ok, detail) {
   console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail !== undefined ? ' :: ' + JSON.stringify(detail) : ''));
 }
 
-const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio','--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1500, height: 900 } });
+const b = await launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio','--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1500, height: 900 } });
 const p = await b.newPage();
 const errs = [];
 p.on('pageerror', e => errs.push('pageerror: ' + e.message));
 const IGNORE = /ERR_CONNECTION_RESET|ERR_SOCKET_NOT_CONNECTED|ERR_ABORTED|Failed to load resource: net::/;
 p.on('console', m => { if (m.type() === 'error' && !IGNORE.test(m.text())) errs.push('console: ' + m.text()); });
 await p.goto(URL_ + '/index.html', { waitUntil: 'domcontentloaded' });
-await p.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+await bootGate(p);
 await sleep(1200);
 await p.click('#start-btn');
 await sleep(2500);
@@ -272,3 +277,7 @@ console.log('SUMMARY ' + JSON.stringify({ pass: checks.filter(c => c.ok).length,
 console.log('FAILED ' + JSON.stringify(checks.filter(c => !c.ok)));
 await b.close();
 if (checks.some(c => !c.ok)) process.exit(1);
+
+} catch (err) {
+  await crash(SUITE, err);
+}

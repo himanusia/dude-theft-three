@@ -9,10 +9,14 @@
  * The point is not a pretty number. It is to know which side of 30 fps the city falls on, and
  * whether the adaptive resolution the renderer already has actually engages.
  */
-import puppeteer from 'puppeteer-core';
 import path from 'path';
 import fs from 'fs';
 
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'perf/mobile';
+suiteStart(SUITE);
+try {
 const CHROME = '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const OUT = path.join(ROOT, 'screenshots/proof');
@@ -24,7 +28,7 @@ const check = (name, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name} :: ${JSON.stringify(detail)}`);
 };
 
-const browser = await puppeteer.launch({
+const browser = await launch({
   executablePath: CHROME,
   headless: 'new',
   args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio', '--autoplay-policy=no-user-gesture-required'],
@@ -38,7 +42,7 @@ for (const rate of [4, 6]) {
   await cdp.send('Emulation.setCPUThrottlingRate', { rate });
 
   await page.goto('http://127.0.0.1:8765/', { waitUntil: 'domcontentloaded', timeout: 90000 });
-  await page.waitForFunction('window.__game !== undefined', { timeout: 90000 });
+  await bootGate(page);
   await page.click('#start-btn');
   await new Promise((r) => setTimeout(r, 4000));
   // let the game warm up: shader compile and the first block culling pass are not the steady state
@@ -85,3 +89,7 @@ const pass = results.filter((r) => r.ok).length;
 console.log(`SUMMARY ${JSON.stringify({ pass, total: results.length })}`);
 console.log(`FAILED ${JSON.stringify(results.filter((r) => !r.ok))}`);
 process.exit(pass === results.length ? 0 : 1);
+
+} catch (err) {
+  await crash(SUITE, err);
+}

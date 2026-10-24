@@ -1,14 +1,18 @@
 
-import puppeteer from 'puppeteer-core';
+import { launch, bootGate, crash, suiteStart } from '../_harness.mjs';
+
+const SUITE = 'gameplay/d1-regression';
+suiteStart(SUITE);
+try {
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const URL_ = process.env.DTA_URL || 'http://127.0.0.1:8765';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio','--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1400, height: 820 } });
+const b = await launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox','--enable-unsafe-swiftshader','--mute-audio','--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1400, height: 820 } });
 const p = await b.newPage();
 const errs = [];
 p.on('pageerror', e => errs.push(e.message));
 await p.goto(URL_ + '/index.html', { waitUntil: 'domcontentloaded' });
-await p.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+await bootGate(p);
 await sleep(1000); await p.click('#start-btn'); await sleep(2000);
 
 // get into a car, then park it right on a shop door and press E
@@ -30,3 +34,7 @@ await sleep(700);
 const after = await p.evaluate(() => ({ inCar: !!window.__game.player.inCar, inInterior: !!window.__game.player.inInterior, prompt: document.getElementById('prompt')?.textContent || '' }));
 console.log(JSON.stringify({ setup, before, after, errs }, null, 1));
 await b.close();
+
+} catch (err) {
+  await crash(SUITE, err);
+}
