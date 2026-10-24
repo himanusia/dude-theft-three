@@ -759,6 +759,9 @@ function enterInterior(door: { kind: InteriorKind; name: string }) {
   player.savedCamYaw = camYaw;
   room.group.visible = true;
   player.inInterior = room;
+  // the street is behind a wall now: take the engine down through it rather than leaving the
+  // last drive note hanging at full level inside a shop
+  audio.engineUpdate({ on: false, muffle: engineMuffle() });
   player.pos.set(room.origin.x + room.spawn.x, 0, room.origin.z + room.spawn.z);
   player.y = 0;
   player.vel.set(0, 0, 0);
@@ -835,6 +838,16 @@ function toggleVehicle() {
   }
 }
 
+/**
+ * How much bodywork sits between the player's ear and the engine, 0..1: nothing in an open
+ * cockpit, the roof and glass of a closed cabin, and a shop's walls once the player walks
+ * inside one (the car they just left keeps fading out through them instead of cutting dead).
+ */
+function engineMuffle(car: any = player.inCar) {
+  if (player.inInterior) return 0.85;
+  return car && car.cabinClosed ? 0.45 : 0;
+}
+
 let squealCd = 0;
 function updateDriving(dt: number) {
   const car = player.inCar;
@@ -890,7 +903,12 @@ function updateDriving(dt: number) {
   // engine note: gear-stepped pitch from the real speed, volume swells with
   // both throttle and road speed instead of a flat idle drone
   const speed01 = clamp(Math.abs(car.speed) / car.maxSpeed, 0, 1);
-  audio.engineUpdate({ speed01: car.engineRpm01, throttle: throttle * (0.55 + 0.45 * speed01), on: true });
+  audio.engineUpdate({
+    speed01: car.engineRpm01,
+    throttle: throttle * (0.55 + 0.45 * speed01),
+    on: true,
+    muffle: engineMuffle(car),
+  });
 
   // headlights at night
   if (headlightAttached !== car) {
@@ -2255,6 +2273,24 @@ window.__game = {
       return [...keys];
     },
     pedContext,
+
+    /**
+     * The engine note as it actually stands: the graph, its live parameters, and the bodywork
+     * the mix thinks is in the way. A probe reads this instead of reaching into AudioSys fields,
+     * so a rename of the graph cannot make the probe pass by reading `undefined === undefined`.
+     */
+    audioState() {
+      return {
+        ...audio.engineState(),
+        inCar: !!player.inCar,
+        carType: player.inCar ? player.inCar.type : null,
+        cabinClosed: player.inCar ? !!player.inCar.cabinClosed : null,
+        inInterior: !!player.inInterior,
+        muffle: engineMuffle(),
+        kmh: player.inCar ? Math.round(player.inCar.kmh) : 0,
+        rpm01: player.inCar ? +player.inCar.engineRpm01.toFixed(3) : 0,
+      };
+    },
 
     // ---- floating geometry audit: every actor and prop must touch the ground ----
     audit() {

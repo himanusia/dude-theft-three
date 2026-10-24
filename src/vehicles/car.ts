@@ -23,6 +23,47 @@ const WRECK_DRAG = 1.6;
 const WHEELBASE = 2.6;
 const REVERSE_CAP = 0.42;
 
+// A closed cabin muffles the engine note and an open cockpit does not, so the mix needs the
+// fact. It is read off the body that was actually built (one probe per body shape) instead of
+// from the type name, because the procedural bodies and the Kenney kit vehicles do not agree
+// about which of them have a roof.
+const CABIN_CACHE = new Map<string, boolean>();
+
+/**
+ * Is there bodywork over the driver's seat? The probe point is the seat, 45 cm above its cushion:
+ * a sedan/taxi/van has a roof panel there, the open-cockpit muscle car has neither roof nor side
+ * glass, and only a panel that spans the cabin counts (a seat back and the driver's own hair both
+ * cover the point, and neither is a roof).
+ */
+function measureCabin(body: any, anchor: any, width: number, driver: any): boolean {
+  if (!body) return false;
+  const seatX = anchor ? anchor.x : -0.4;
+  const seatY = anchor ? anchor.y : 0.98;
+  const seatZ = anchor ? anchor.z : -0.22;
+  const aboveHead = seatY + 0.45;
+  const spans = width * 0.55;
+  body.updateMatrixWorld?.(true);
+  const local = new THREE.Matrix4().copy(body.matrixWorld).invert();
+  const box = new THREE.Box3();
+  const m = new THREE.Matrix4();
+  let roofed = false;
+  body.traverse((o: any) => {
+    if (roofed || !o.geometry) return;
+    // the driver rides in the same group; his head is not a roof
+    for (let p = o; p && p !== body; p = p.parent) if (p === driver) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    const bb = o.geometry.boundingBox;
+    if (!bb) return;
+    box.copy(bb).applyMatrix4(m.multiplyMatrices(local, o.matrixWorld));
+    if (box.max.y < aboveHead) return;
+    if (box.max.x - box.min.x < spans) return;
+    if (box.min.x > seatX || box.max.x < seatX) return;
+    if (box.min.z > seatZ || box.max.z < seatZ) return;
+    roofed = true;
+  });
+  return roofed;
+}
+
 export class Car {
   /** where the ground is under a given point; set by main from city.groundHeightAt */
   groundAt: ((x: number, z: number) => number) | null = null;
@@ -568,6 +609,21 @@ export class Car {
     const gear = Math.min(gears - 1, Math.floor(v / span));
     const inGear = clamp((v - gear * span) / span, 0, 1);
     return clamp((gear + inGear) / gears, 0, 1);
+  }
+
+  /**
+   * Is the driver shut inside the bodywork (roof over the seat) rather than in an open cockpit?
+   * One probe per body shape: the answer cannot change while the car exists, and rebuilding a
+   * body keeps the same shape.
+   */
+  get cabinClosed(): boolean {
+    const key = `${this.type}:${this.driverAnchor ? 'kit' : 'body'}`;
+    let closed = CABIN_CACHE.get(key);
+    if (closed === undefined) {
+      closed = measureCabin(this.mesh, this.driverAnchor, this.width, this.driver);
+      CABIN_CACHE.set(key, closed);
+    }
+    return closed;
   }
 
   /** A driver you can see through the windscreen: head, shoulders, hair, hands on the wheel.

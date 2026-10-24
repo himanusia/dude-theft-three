@@ -17,6 +17,9 @@ const SFX_FILES = {
   cash: 'audio/sfx/cash.ogg',
   click: 'audio/sfx/click.ogg',
   glass: 'audio/sfx/glass.ogg',
+  // the engine loop the repo already ships: 5.0 s, mono, 44.1 kHz Vorbis. It is a loop, not a
+  // sting, so it is loaded once and retuned per frame instead of retriggered.
+  engine: 'audio/sfx/engine.ogg',
 };
 
 const BGM = {
@@ -37,6 +40,12 @@ export class AudioSys {
   declare sirenNodes: any;
   declare master: any;
   declare sfx: any;
+  // what the engine graph was last asked for, so a probe (and the mute path) can tell a live
+  // engine from one that is only ramping towards a target
+  declare engineSeq: number;
+  declare engineMuffle: number;
+  declare engineGainTarget: number;
+  declare engineRateTarget: number;
   // mixer levels, 0..1, driven by the persisted settings panel
   declare masterVol: number;
   declare sfxVol: number;
@@ -50,6 +59,10 @@ export class AudioSys {
     this.bgmMode = null;
     this.bgmVolume = 0.28;
     this.engine = null;
+    this.engineSeq = 0;
+    this.engineMuffle = 0;
+    this.engineGainTarget = 0;
+    this.engineRateTarget = 0;
     this.sirenNodes = null;
     this.masterVol = 0.9;
     this.sfxVol = 1;
@@ -154,34 +167,90 @@ export class AudioSys {
     tick();
   }
 
+  /**
+   * The player's own engine, one looping source per session: the player can only drive one
+   * vehicle at a time, so everything that changes with the car (pitch, level, tone, how much
+   * bodywork is in the way) is a parameter on this one graph rather than a new node per car.
+   */
   engineStart() {
     if (!this.ready || this.engine) return;
+    // no buffer is silence, not a half-built graph a probe could mistake for a running engine
+    const buf = this.buffers.engine;
+    if (!buf) return;
     const src = this.ctx.createBufferSource();
-    src.buffer = this.buffers.engine || null;
-    if (!src.buffer) return;
+    src.buffer = buf;
     src.loop = true;
+    src.playbackRate.value = 0.75;
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 700;
+    filter.frequency.value = 320;
     const gain = this.ctx.createGain();
     gain.gain.value = 0;
     src.connect(filter);
     filter.connect(gain);
     gain.connect(this.sfx ?? this.master);
     src.start();
-    this.engine = { src, filter, gain };
+    this.engineSeq += 1;
+    this.engine = { src, filter, gain, id: this.engineSeq };
   }
 
-  engineUpdate({ speed01 = 0, throttle = 0, on = false }) {
+  /**
+   * Drive the engine note from real vehicle state. Called every frame, so every parameter is
+   * smoothed with `setTargetAtTime` instead of being stepped.
+   *
+   * @param speed01  gear-stepped rpm 0..1 (`Car#engineRpm01`): the pitch, so a shift drops the
+   *                 note instead of one flat drone climbing to redline
+   * @param throttle pedal 0..1, already scaled by road speed: the level
+   * @param muffle   0..1 how much bodywork sits between the player's ear and the engine: a
+   *                 closed cabin and a shop wall both cut the level and the top end first
+   */
+  engineUpdate(
+    { speed01 = 0, throttle = 0, on = false, muffle = 0 }: { speed01?: number; throttle?: number; on?: boolean; muffle?: number } = {}
+  ) {
+    const unit = (v: number) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0));
+    const rpm = unit(speed01);
+    const pedal = unit(throttle);
+    const wall = unit(muffle);
     if (!this.engine) {
-      if (on) this.engineStart();
+      if (!on) return;
+      this.engineStart();
       if (!this.engine) return;
     }
     const e = this.engine;
-    const target = on ? 0.22 + throttle * 0.16 : 0;
-    e.gain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.08);
-    e.src.playbackRate.setTargetAtTime(0.75 + speed01 * 1.5, this.ctx.currentTime, 0.1);
-    e.filter.frequency.setTargetAtTime(400 + speed01 * 1400 + throttle * 300, this.ctx.currentTime, 0.1);
+    const t = this.ctx.currentTime;
+    // idle, road speed and pedal all contribute, and the cabin eats a share of the total
+    const gainTarget = on ? (0.16 + 0.13 * rpm + 0.12 * pedal) * (1 - 0.6 * wall) : 0;
+    // the loop is a recording of one engine, so the note is the gear-stepped rpm: 0.75 at idle
+    // up to 1.9 at the top of fifth
+    const rateTarget = 0.75 + rpm * 1.15;
+    // a lowpass that opens with load is what makes a small loop read as a big engine; a closed
+    // cabin or a wall moves the cut-off down, which is the part you actually hear change
+    const cutoffTarget = Math.max(160, (320 + rpm * 1500 + pedal * 420) * (1 - 0.62 * wall));
+    this.engineMuffle = wall;
+    this.engineGainTarget = gainTarget;
+    this.engineRateTarget = rateTarget;
+    e.gain.gain.setTargetAtTime(gainTarget, t, 0.09);
+    e.src.playbackRate.setTargetAtTime(rateTarget, t, 0.12);
+    e.filter.frequency.setTargetAtTime(cutoffTarget, t, 0.12);
+  }
+
+  /** What the engine graph is doing right now, for the headless probe and for debugging. */
+  engineState() {
+    const e = this.engine;
+    return {
+      ready: this.ready,
+      hasBuffer: !!this.buffers.engine,
+      node: !!e,
+      nodeId: e ? e.id : 0,
+      ctxState: this.ctx ? this.ctx.state : null,
+      loop: e ? e.src.loop : false,
+      gain: e ? +e.gain.gain.value.toFixed(4) : 0,
+      gainTarget: +this.engineGainTarget.toFixed(4),
+      rate: e ? +e.src.playbackRate.value.toFixed(3) : 0,
+      rateTarget: +this.engineRateTarget.toFixed(3),
+      cutoff: e ? Math.round(e.filter.frequency.value) : 0,
+      muffle: this.engineMuffle,
+    };
   }
 
   siren(on: boolean) {

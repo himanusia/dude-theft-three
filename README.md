@@ -61,6 +61,10 @@ node tests/world/ground.mjs        # 7/7: the player's sole, the crowd's soles a
 node tests/world/death-interior.mjs # 15/15: E during the death card must not walk you into a shop,
                                    # and the respawn must drop the room, its colliders and its shell;
                                    # reports inInterior, room distance and whether peds/traffic move
+node tests/world/engine-audio.mjs  # 13/13: the engine loop that ships as audio/sfx/engine.ogg is
+                                   # decoded and audible while driving: one live looping node, level
+                                   # and pitch sampled at three road speeds, quieter in a closed
+                                   # cabin than in the open cockpit, silent behind a shop wall
 node tools/measure-ground.mjs      # prints foot / drawn surface / measure / terrain at three
                                    # points and fails if any foot-to-surface delta is over 2 cm
 node tools/shoot-feet.mjs          # headless: a pavement-level frame of the feet on the trotoar,
