@@ -1,7 +1,6 @@
 import { POIS } from './jakartamap';
 import { buildHalte } from './halte';
 import { buildKakiLima, buildSppg, buildKoperasi, KakiLimaKind } from './kakilima';
-import { TransjakartaBus } from '../vehicles/transjakarta';
 import { buildLayang } from './layang';
 import { buildMrtLine, buildMrtStation } from './mrt';
 import { buildKrl } from './krl';
@@ -1253,7 +1252,6 @@ export class City {
 
   buildStreetLife() {
     const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
-    let buses = 0;
 
     for (const poi of POIS) {
       if (poi.kind !== 'halte') continue;
@@ -1261,18 +1259,11 @@ export class City {
       if (!spot) continue;
       const g = buildHalte(ctx, spot.x, spot.z, spot.yaw);
       this.placeOnGround(g, spot.x, spot.z);
-      // a bus berthed beside the first two haltes, so the street shows the busway running
-      if (buses < 2) {
-        const bus = new TransjakartaBus({ simple: false });
-        const bx = spot.x - Math.sin(spot.yaw + Math.PI / 2) * 3.4;
-        const bz = spot.z - Math.cos(spot.yaw + Math.PI / 2) * 3.4;
-        bus.group.rotation.y = spot.yaw;
-        this.group.add(bus.group);
-        this.propAudit.push({ name: 'transjakarta', x: bx, z: bz, bottom: 0 });
-        this.placeOnGround(bus.group, bx, bz);
-        this.colliders.push({ minX: bx - 1.4, maxX: bx + 1.4, minZ: bz - 9, maxZ: bz + 9, h: 3.2 });
-        buses++;
-      }
+      // A bus is no longer parked here. The two `TransjakartaBus` props that used to stand
+      // beside the first two haltes were added to the scene without a position, so they sat at
+      // the world origin with an empty collider on the kerb; berthing one on the pavement in
+      // front of a halte only put an 18 m body across the walkway. The corridor runs now
+      // (see TransjakartaService), so the street sees buses that move.
     }
 
     const carts: KakiLimaKind[] = ['bakso', 'nasgor', 'sate'];

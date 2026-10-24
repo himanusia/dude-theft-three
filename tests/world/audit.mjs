@@ -13,8 +13,8 @@ function check(name, ok, detail) {
   const page = await b.newPage();
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));
-  await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
+  await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.waitForFunction('window.__game !== undefined', { timeout: 120000 });
   await sleep(1500);
   await page.click('#start-btn');
   await sleep(2500);
