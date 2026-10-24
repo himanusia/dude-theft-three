@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { canvasTexture, mergeStaticChildren } from '../core/utils';
+import { canvasTexture, mergeStaticChildren, rotatedFootprint } from '../core/utils';
 import type { PosCtx } from './pospolisi';
 
 /**
@@ -218,6 +218,11 @@ export function buildTerminal(ctx: PosCtx, x: number, z: number, yaw: number, na
   const EAVE = TERMINAL_DIMENSIONS.eave;
   const GANTRY = TERMINAL_DIMENSIONS.gantry;
   const DECK = Y0 + PLAT;                   // walking height of the boarding platform
+  // the canopy columns, and the half-widths of the two vehicles berthed in bays 1 and 4, shared
+  // with the collider list at the end so a body is stopped by the thing it can see
+  const COL_X = [-17, -11.33, -5.67, 0, 5.67, 11.33, 17];
+  const BERTH_BUS_HALF = 1.25;
+  const BERTH_ANGKOT_HALF = 0.89;
 
   const concrete = new THREE.MeshStandardMaterial({ color: 0x9d9a91, roughness: 1 });
   const concreteWorn = new THREE.MeshStandardMaterial({ color: 0x8c8880, roughness: 1 });
@@ -321,8 +326,7 @@ export function buildTerminal(ctx: PosCtx, x: number, z: number, yaw: number, na
   flat(concreteWorn, 41, 0.1, 0, -12.6, DECK + 0.006);   // panel joint down the deck
 
   // ---------------------------------------------------------------- canopy: long roof on steel columns
-  const colX = [-17, -11.33, -5.67, 0, 5.67, 11.33, 17];
-  for (const cx of colX) {
+  for (const cx of COL_X) {
     for (const cz of [-14.1, -9.5]) post(0.15, EAVE - PLAT, cx, DECK + (EAVE - PLAT) / 2, cz, steel, 8);
     // cross-bracket at the top of each column pair
     box(steel, 0.14, 0.14, 4.9, cx, EAVE - 0.12, -11.8);
@@ -559,9 +563,24 @@ export function buildTerminal(ctx: PosCtx, x: number, z: number, yaw: number, na
   mergeStaticChildren(g);
   ctx.group.add(g);
   ctx.audit.push({ name: 'terminal', x, z, bottom: 0 });
-  // one collider for the whole terminal: the apron is a building-sized reserved lot
-  const halfX = Math.abs(Math.cos(yaw)) * (W / 2) + Math.abs(Math.sin(yaw)) * (D / 2);
-  const halfZ = Math.abs(Math.sin(yaw)) * (W / 2) + Math.abs(Math.cos(yaw)) * (D / 2);
-  ctx.colliders.push({ minX: x - halfX, maxX: x + halfX, minZ: z - halfZ, maxZ: z + halfZ, h: GANTRY + 1 });
+  // The terminal is a lot you walk into, not a building: the apron is open parking and the only
+  // things a body cannot pass are the boarding platform, the booth, the canopy columns, the gantry
+  // legs, the water barriers and the two buses berthed in their bays. One collider for the whole
+  // 48 x 32 m lot reserved the apron as well, so the player was stopped 24 m out on the street and
+  // the terminal could not be walked up to at all. Everything here is registered at its own
+  // footprint, as a tile grid, because the whole assembly stands at the road's yaw.
+  const solids: { cx: number; cz: number; hx: number; hz: number; h: number }[] = [
+    { cx: 0, cz: -11.9, hx: 21, hz: 2.5, h: DECK + 0.06 },                    // boarding platform + kerb
+    { cx: 18.2, cz: -12.0, hx: 2.1, hz: 1.4, h: DECK + 2.62 },                 // operator booth
+    { cx: -15, cz: 0.6, hx: BERTH_BUS_HALF, hz: 5.2, h: 3.2 },                   // the berthed bus in bay 1
+    { cx: 15, cz: -2.2, hx: BERTH_ANGKOT_HALF, hz: 2.1, h: 2.4 },                // the angkot in bay 4
+    { cx: -22.4, cz: 12.6, hx: 0.13, hz: 0.13, h: 3.4 },                       // entrance sign pole
+  ];
+  for (let i = 0; i < 4; i++) solids.push({ cx: -17 + i * 9.4, cz: 15.1, hx: 1.0, hz: 0.21, h: 0.8 }); // water barriers
+  for (const cx of COL_X) for (const cz of [-14.1, -9.5]) solids.push({ cx, cz, hx: 0.15, hz: 0.15, h: EAVE });
+  for (const gx of [-22.8, 22.8]) solids.push({ cx: gx, cz: -6.2, hx: 0.4, hz: 0.4, h: GANTRY });
+  for (const s of solids) {
+    for (const b of rotatedFootprint(x, z, yaw, s.hx, s.hz, s.h, { cx: s.cx, cz: s.cz })) ctx.colliders.push(b);
+  }
   return g;
 }

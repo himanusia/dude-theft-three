@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { canvasTexture, mergeStaticChildren } from '../core/utils';
+import { canvasTexture, mergeStaticChildren, rotatedFootprint } from '../core/utils';
 import type { PosCtx } from './pospolisi';
 
 /**
@@ -104,8 +104,17 @@ export function buildRonda(ctx: PosCtx, x: number, z: number, yaw: number): THRE
   mergeStaticChildren(g);
   ctx.group.add(g);
   ctx.audit.push({ name: 'pos-ronda', x, z, bottom: 0 });
-  const hx = Math.abs(Math.cos(yaw)) * (W / 2 + 0.6) + Math.abs(Math.sin(yaw)) * (D / 2 + 1.6);
-  const hz = Math.abs(Math.sin(yaw)) * (W / 2 + 0.6) + Math.abs(Math.cos(yaw)) * (D / 2 + 1.6);
-  ctx.colliders.push({ minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz, h: PH + 0.6 });
+  // The shed is 4.6 x 3.2 m and stands at whatever angle faces the spawn street, so one AABB sized
+  // to the rotation (up to 8.4 x 8.6 m) reserved a square twice the shed and stopped the player a
+  // metre and a half from the wall. The footprint is the platform the shed stands on, including
+  // the two front steps and the painted kerb blocks: the deck is 0.5 m of concrete, which a body
+  // cannot step over. Registered as a tile grid so the boxes hug the deck at any yaw.
+  const deckMinZ = -D / 2;
+  const deckMaxZ = D / 2 + 1.55;                       // platform, two steps, kerb blocks
+  for (const b of rotatedFootprint(x, z, yaw, W / 2, (deckMaxZ - deckMinZ) / 2, 0.56, {
+    cz: (deckMaxZ + deckMinZ) / 2,
+  })) ctx.colliders.push(b);
+  // the corrugated back panel, so a shot from the street stops on the sheet and not in the bench
+  for (const b of rotatedFootprint(x, z, yaw, (W - 0.3) / 2, 0.05, 2.0, { cz: -D / 2 + 0.1 })) ctx.colliders.push(b);
   return g;
 }

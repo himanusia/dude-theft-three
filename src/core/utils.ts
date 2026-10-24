@@ -105,6 +105,112 @@ export function resolveCircleBox(x: number, z: number, r: number, b: AABB): Circ
   return { x, z: b.maxZ + r, nx: 0, nz: 1 };
 }
 
+export interface FootprintOptions {
+  /** rectangle centre in the object's own frame, metres (a shed's deck is not its group origin) */
+  cx?: number;
+  cz?: number;
+  /** width of a strip across the long side, metres. Smaller is tighter and costs more boxes. */
+  strip?: number;
+}
+
+/** A collider box with its height known, as every world builder registers one. */
+export interface FootprintBox extends AABB {
+  h: number;
+}
+
+/**
+ * How a rotated rectangle is cut before its pieces get axis-aligned boxes.
+ *
+ * A box that is turned cannot be one AABB: sized to the body it leaves the corners outside the
+ * collider (a body walks through them), sized to the turn it reserves the whole square around the
+ * body and stops a player a metre and a half from the wall, which reads in game as "this asset
+ * cannot be walked up to". So the rectangle is cut up and every piece gets its own AABB.
+ *
+ * A long body (a bus, a boarding platform) is cut into strips across its length: the pieces stay
+ * long and thin, and a strip only bulges by half its *narrow* side. A roughly square footprint (a
+ * 4.6 x 4.75 m guard post) is tiled both ways instead, because one wide strip of a square still
+ * bulges by half its width when it is turned.
+ */
+function footprintTiles(halfX: number, halfZ: number, strip: number) {
+  const nx = Math.max(1, Math.ceil((halfX * 2) / strip));
+  const nz = Math.max(1, Math.ceil((halfZ * 2) / strip));
+  const long = Math.max(halfX, halfZ);
+  const short = Math.min(halfX, halfZ);
+  // A footprint three times longer than it is deep (a bus, a boarding platform) is cut into strips
+  // across its length: each strip only bulges by half its *short* side. A roughly square footprint
+  // (a guard post) is tiled both ways, because one wide strip of a square still bulges by half its
+  // width when it is turned. Either way the pieces stay under the box budget.
+  if (long / short >= 2) {
+    return nx >= nz ? { nx: Math.min(60, nx), nz: 1 } : { nx: 1, nz: Math.min(60, nz) };
+  }
+  const budget = 60;
+  if (nx * nz <= budget) return { nx, nz };
+  const k = Math.sqrt(budget / (nx * nz));
+  return { nx: Math.max(1, Math.ceil(nx * k)), nz: Math.max(1, Math.ceil(nz * k)) };
+}
+
+/**
+ * Cover a rotated rectangle with axis-aligned boxes, writing into `out` in place.
+ *
+ * The tile count depends only on the size, so `out` can be rewritten forever: that is how a
+ * collider follows a moving vehicle without being re-registered in `city.colliders` every frame.
+ */
+export function writeRotatedFootprint(
+  out: AABB[],
+  x: number,
+  z: number,
+  yaw: number,
+  halfX: number,
+  halfZ: number,
+  h: number,
+  opts: FootprintOptions = {}
+): AABB[] {
+  const { nx, nz } = footprintTiles(halfX, halfZ, opts.strip ?? 1.0);
+  const cx = opts.cx ?? 0;
+  const cz = opts.cz ?? 0;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const shx = halfX / nx;
+  const shz = halfZ / nz;
+  // the widest a turned tile's own bounding box can be, on either axis
+  const ex = Math.abs(cos) * shx + Math.abs(sin) * shz;
+  const ez = Math.abs(sin) * shx + Math.abs(cos) * shz;
+  let k = 0;
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < nz; j++) {
+      const lx = cx - halfX + (2 * i + 1) * shx;
+      const lz = cz - halfZ + (2 * j + 1) * shz;
+      const wx = x + lx * cos + lz * sin;
+      const wz = z - lx * sin + lz * cos;
+      const b = out[k] ?? { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+      b.minX = wx - ex;
+      b.maxX = wx + ex;
+      b.minZ = wz - ez;
+      b.maxZ = wz + ez;
+      b.h = h;
+      out[k] = b;
+      k++;
+    }
+  }
+  return out;
+}
+
+/** Fresh boxes for a rotated footprint, ready to push into an existing collider array. */
+export function rotatedFootprint(
+  x: number,
+  z: number,
+  yaw: number,
+  halfX: number,
+  halfZ: number,
+  h: number,
+  opts: FootprintOptions = {}
+): FootprintBox[] {
+  const { nx, nz } = footprintTiles(halfX, halfZ, opts.strip ?? 1.0);
+  const out: FootprintBox[] = [];
+  for (let i = 0; i < nx * nz; i++) out.push({ minX: 0, maxX: 0, minZ: 0, maxZ: 0, h });
+  return writeRotatedFootprint(out, x, z, yaw, halfX, halfZ, h, opts) as FootprintBox[];
+}
+
 // ray vs collider AABB (2.5D slabs, box from y=0 to y=h)
 export interface RayHit {
   dist: number;

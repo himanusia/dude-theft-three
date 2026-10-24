@@ -14,7 +14,7 @@ import { buildRonda } from './ronda';
 import { buildTerminal } from './terminal';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
+import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB, rotatedFootprint, writeRotatedFootprint, FootprintBox } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
 import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater, pointInPoly } from './jakartamap';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
@@ -287,6 +287,24 @@ export class City {
    */
   declare propAudit: { name: string; x: number; z: number; bottom: number; bx?: number; bz?: number }[];
 
+  /**
+   * The berthed TransJakarta buses and the collider boxes that belong to them.
+   *
+   * A bus is 17.9 m of solid bodywork, and it used to have a fixed axis-aligned box registered
+   * beside the halte while the bus itself was left standing at the world origin: the body was
+   * walk-through at the haltes and a phantom wall stood in the busway. The boxes here are rewritten
+   * from the group's own transform in `update`, so the collider is always on the bus (and stays on
+   * it if the bus is ever driven, towed or nudged).
+   */
+  declare buses: {
+    group: THREE.Group;
+    boxes: FootprintBox[];
+    halfWidth: number;
+    halfLength: number;
+    height: number;
+    audit: { name: string; x: number; z: number; bottom: number };
+  }[];
+
   declare streetSpines: { ax: number; az: number; bx: number; bz: number; half: number; walkW: number }[];
 
   /**
@@ -364,6 +382,7 @@ export class City {
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.colliders = [];
+    this.buses = [];
     this.blockGroups = [];
     this.blocks = [];
     this.grounds = [];
@@ -1353,16 +1372,44 @@ export class City {
       if (!spot) continue;
       const g = buildHalte(ctx, spot.x, spot.z, spot.yaw);
       this.placeOnGround(g, spot.x, spot.z);
-      // a bus berthed beside the first two haltes, so the street shows the busway running
+      // A bus berthed at the first two haltes, so the street shows the busway running.
+      //
+      // Two things were wrong here. The body was rotated and then only given a *height*
+      // (`placeOnGround` writes y and nothing else), so every bus in the city stood at the world
+      // origin while a fixed axis-aligned box was registered 70 m away beside the halte: the body
+      // was walk-through and the busway had a phantom wall in it. And the berth itself was picked
+      // on the wrong side of the shelter, which on this map put 17.9 m of bus inside a shophouse -
+      // a body walking at it was stopped by the building two metres before the bumper.
+      //
+      // So the berth is the carriageway side of the shelter (the direction of the nearest mapped
+      // road), the body is placed there, and the berth is only used if the bus's own footprint is
+      // clear of everything already standing on the ground.
       if (buses < 2) {
+        const road = this.nearestRoadPoint(spot.x, spot.z);
+        const side = Math.cos(spot.yaw) * (road.x - spot.x) - Math.sin(spot.yaw) * (road.z - spot.z) < 0 ? -1 : 1;
         const bus = new TransjakartaBus({ simple: false });
-        const bx = spot.x - Math.sin(spot.yaw + Math.PI / 2) * 3.4;
-        const bz = spot.z - Math.cos(spot.yaw + Math.PI / 2) * 3.4;
+        const { halfWidth, halfLength, height } = bus.footprint;
+        let berth: { x: number; z: number; boxes: FootprintBox[] } | null = null;
+        for (const along of [0, 7, -7, 14, -14]) {
+          const bx = spot.x + Math.cos(spot.yaw) * 3.4 * side + Math.sin(spot.yaw) * along;
+          const bz = spot.z - Math.sin(spot.yaw) * 3.4 * side + Math.cos(spot.yaw) * along;
+          if (!this.onRoad(bx, bz, 8) || isWater(bx, bz)) continue;
+          const boxes = rotatedFootprint(bx, bz, spot.yaw, halfWidth, halfLength, height);
+          const clear = boxes.every((b) => !this.colliders.some((o) =>
+            b.minX < o.maxX + 0.3 && b.maxX > o.minX - 0.3 && b.minZ < o.maxZ + 0.3 && b.maxZ > o.minZ - 0.3));
+          if (!clear) continue;
+          berth = { x: bx, z: bz, boxes };
+          break;
+        }
+        if (!berth) continue;            // no clear berth at this shelter: no bus, not a bus in a wall
         bus.group.rotation.y = spot.yaw;
+        bus.group.position.set(berth.x, 0, berth.z);
         this.group.add(bus.group);
-        this.propAudit.push({ name: 'transjakarta', x: bx, z: bz, bottom: 0 });
-        this.placeOnGround(bus.group, bx, bz);
-        this.colliders.push({ minX: bx - 1.4, maxX: bx + 1.4, minZ: bz - 9, maxZ: bz + 9, h: 3.2 });
+        const audit = { name: 'transjakarta', x: berth.x, z: berth.z, bottom: 0 };
+        this.propAudit.push(audit);
+        this.placeOnGround(bus.group, berth.x, berth.z);
+        for (const b of berth.boxes) this.colliders.push(b);
+        this.buses.push({ group: bus.group, boxes: berth.boxes, halfWidth, halfLength, height, audit });
         buses++;
       }
     }
@@ -1607,6 +1654,35 @@ export class City {
       }
     }
     return false;
+  }
+
+  /**
+   * The nearest point on the mapped carriageway, and how far away it is.
+   *
+   * `onRoad` only answers yes/no with a margin; a vehicle that has to be berthed on the asphalt
+   * side of a kerbside shelter needs the direction of the road, not just membership.
+   */
+  nearestRoadPoint(x: number, z: number): { x: number; z: number; dist: number } {
+    const roads: { path: [number, number][] }[] = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][] })),
+      { path: RING_ROAD },
+    ];
+    let best = { x, z, dist: Infinity };
+    for (const { path } of roads) {
+      for (let i = 1; i < path.length; i++) {
+        const [x1, z1] = path[i - 1];
+        const [x2, z2] = path[i];
+        const dx = x2 - x1;
+        const dz = z2 - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        const t = clamp(((x - x1) * dx + (z - z1) * dz) / len2, 0, 1);
+        const px = x1 + dx * t;
+        const pz = z1 + dz * t;
+        const d = Math.hypot(x - px, z - pz);
+        if (d < best.dist) best = { x: px, z: pz, dist: d };
+      }
+    }
+    return best;
   }
 
   /** true when (x, z) is within `pad` metres of the elevated deck's centreline */
@@ -4540,6 +4616,16 @@ export class City {
 
     const dist = 130;
     this.sun.position.set(sunX * dist, Math.max(8, sunY * 130), 42);
+
+    // a bus collider belongs to the bus, wherever the bus is: rewrite the same boxes from its
+    // transform, so the wall a body walks into is the wall it can see
+    for (const bus of this.buses) {
+      const p = bus.group.position;
+      writeRotatedFootprint(bus.boxes, p.x, p.z, bus.group.rotation.y, bus.halfWidth, bus.halfLength, bus.height);
+      bus.audit.x = p.x;
+      bus.audit.z = p.z;
+      bus.audit.bottom = p.y;
+    }
   }
 
 }

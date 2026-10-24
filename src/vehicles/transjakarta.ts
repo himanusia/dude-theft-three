@@ -247,6 +247,18 @@ export class TransjakartaBus {
     width: W,
     height: TRANSJAKARTA_DIMENSIONS.height,
   };
+  /**
+   * Half extents of the bodywork, for the world's collision. A bus is 17.9 m of solid bodywork and
+   * the player used to walk straight through it: the world placed a fixed box beside the halte
+   * instead of on the bus, and the box did not turn with the vehicle. The collider belongs on this
+   * footprint, in the group's own frame, so it can be rewritten from the transform every frame.
+   */
+  readonly footprint = {
+    halfWidth: HW,
+    halfLength: TRANSJAKARTA_DIMENSIONS.length / 2,
+    /** the body plus its roof band, not the AC pod: a head must not pass through the flank */
+    height: ROOF + 0.04,
+  };
   readonly wheels: Axle[] = [];
   private readonly disposables: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
 

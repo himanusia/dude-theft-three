@@ -608,14 +608,19 @@ function updateOnFoot(dt: number) {
   // never rest below the surface, whatever the step-up/jump bookkeeping says
   player.y = Math.max(player.y, groundY);
 
-  // collision: room walls/furniture while inside, city colliders outside
+  // collision: room walls/furniture while inside, city colliders outside.
+  // Two passes, because a rotated footprint is a row of strips: being pushed out of one strip can
+  // leave the body a few centimetres inside its neighbour, and one pass then drops it through the
+  // seam between two boxes that are meant to be one wall.
   const colliders = player.inInterior ? player.inInterior.colliders : city.colliders;
-  for (const b of colliders) {
-    if (b.h < 0.4) continue;
-    const r = resolveCircleBox(player.pos.x, player.pos.z, 0.42, b);
-    if (r) {
-      player.pos.x = r.x;
-      player.pos.z = r.z;
+  for (let pass = 0; pass < 2; pass++) {
+    for (const b of colliders) {
+      if (b.h < 0.4) continue;
+      const r = resolveCircleBox(player.pos.x, player.pos.z, 0.42, b);
+      if (r) {
+        player.pos.x = r.x;
+        player.pos.z = r.z;
+      }
     }
   }
   if (!player.inInterior) {
