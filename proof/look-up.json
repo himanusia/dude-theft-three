@@ -1,0 +1,283 @@
+{
+  "generatedAt": "2026-10-24T01:02:36.298Z",
+  "base": "http://127.0.0.1:8978",
+  "shot": "proof/look-up.png",
+  "stops": {
+    "upByTouch": -0.96,
+    "downByTouch": 1.05,
+    "lockGranted": true,
+    "upByMouse": -0.96,
+    "downByMouse": 1.05,
+    "upTouchDeg": -55,
+    "downTouchDeg": 60.2,
+    "upMouseDeg": -55,
+    "downMouseDeg": 60.2
+  },
+  "attempts": [
+    {
+      "stance": {
+        "i": 0,
+        "d": 8.5,
+        "x": -597.47,
+        "z": -180.2,
+        "ground": 0.35,
+        "deckX": -589.97,
+        "deckZ": -184.2,
+        "eNear": 68.2,
+        "eFar": 39.9,
+        "score": 64.46
+      },
+      "viewPitchDeg": 55,
+      "camY": 1.42,
+      "camGroundGap": 0.75,
+      "near": 0.1,
+      "insideCollider": null,
+      "measure": {
+        "width": 1280,
+        "height": 800,
+        "meanLuma": 129.6,
+        "skyRef": "rgb(53,168,240)",
+        "skySamples": 195,
+        "deckSamples": 26,
+        "otherSamples": 94,
+        "skyShare": 0.619,
+        "deckShare": 0.083,
+        "deckFrameShare": 0.102,
+        "agreement": 0.955,
+        "skyPixels": 185,
+        "deckPixels": 26,
+        "wrong": [
+          {
+            "nx": -0.19,
+            "ny": -0.533,
+            "kind": "sky",
+            "got": [
+              65,
+              66,
+              70
+            ],
+            "deckChanged": true
+          },
+          {
+            "nx": 0,
+            "ny": -0.4,
+            "kind": "sky",
+            "got": [
+              65,
+              66,
+              70
+            ],
+            "deckChanged": true
+          },
+          {
+            "nx": 0.095,
+            "ny": -0.4,
+            "kind": "sky",
+            "got": [
+              65,
+              66,
+              70
+            ],
+            "deckChanged": true
+          },
+          {
+            "nx": 0.286,
+            "ny": -0.4,
+            "kind": "sky",
+            "got": [
+              116,
+              117,
+              116
+            ],
+            "deckChanged": true
+          },
+          {
+            "nx": 0.19,
+            "ny": -0.267,
+            "kind": "sky",
+            "got": [
+              98,
+              96,
+              95
+            ],
+            "deckChanged": true
+          },
+          {
+            "nx": -0.476,
+            "ny": 0.4,
+            "kind": "sky",
+            "got": [
+              173,
+              206,
+              222
+            ],
+            "deckChanged": false
+          },
+          {
+            "nx": -0.571,
+            "ny": 0.533,
+            "kind": "sky",
+            "got": [
+              65,
+              76,
+              88
+            ],
+            "deckChanged": false
+          },
+          {
+            "nx": -0.476,
+            "ny": 0.533,
+            "kind": "sky",
+            "got": [
+              65,
+              76,
+              88
+            ],
+            "deckChanged": false
+          }
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "accepted": {
+    "stance": {
+      "i": 0,
+      "d": 8.5,
+      "x": -597.47,
+      "z": -180.2,
+      "ground": 0.35,
+      "deckX": -589.97,
+      "deckZ": -184.2,
+      "eNear": 68.2,
+      "eFar": 39.9,
+      "score": 64.46
+    },
+    "viewPitchDeg": 55,
+    "camPitchDeg": -55,
+    "camY": 1.42,
+    "camGroundGap": 0.75,
+    "camToPlayer": 3.52,
+    "near": 0.1,
+    "fov": 58,
+    "counts": {
+      "sky": 195,
+      "deck": 26,
+      "other": 94
+    },
+    "measure": {
+      "width": 1280,
+      "height": 800,
+      "meanLuma": 129.6,
+      "skyRef": "rgb(53,168,240)",
+      "skySamples": 195,
+      "deckSamples": 26,
+      "otherSamples": 94,
+      "skyShare": 0.619,
+      "deckShare": 0.083,
+      "deckFrameShare": 0.102,
+      "agreement": 0.955,
+      "skyPixels": 185,
+      "deckPixels": 26,
+      "wrong": [
+        {
+          "nx": -0.19,
+          "ny": -0.533,
+          "kind": "sky",
+          "got": [
+            65,
+            66,
+            70
+          ],
+          "deckChanged": true
+        },
+        {
+          "nx": 0,
+          "ny": -0.4,
+          "kind": "sky",
+          "got": [
+            65,
+            66,
+            70
+          ],
+          "deckChanged": true
+        },
+        {
+          "nx": 0.095,
+          "ny": -0.4,
+          "kind": "sky",
+          "got": [
+            65,
+            66,
+            70
+          ],
+          "deckChanged": true
+        },
+        {
+          "nx": 0.286,
+          "ny": -0.4,
+          "kind": "sky",
+          "got": [
+            116,
+            117,
+            116
+          ],
+          "deckChanged": true
+        },
+        {
+          "nx": 0.19,
+          "ny": -0.267,
+          "kind": "sky",
+          "got": [
+            98,
+            96,
+            95
+          ],
+          "deckChanged": true
+        },
+        {
+          "nx": -0.476,
+          "ny": 0.4,
+          "kind": "sky",
+          "got": [
+            173,
+            206,
+            222
+          ],
+          "deckChanged": false
+        },
+        {
+          "nx": -0.571,
+          "ny": 0.533,
+          "kind": "sky",
+          "got": [
+            65,
+            76,
+            88
+          ],
+          "deckChanged": false
+        },
+        {
+          "nx": -0.476,
+          "ny": 0.533,
+          "kind": "sky",
+          "got": [
+            65,
+            76,
+            88
+          ],
+          "deckChanged": false
+        }
+      ]
+    }
+  },
+  "gate": {
+    "upStopDeg": -55,
+    "upStopOk": true,
+    "touchMatchesMouse": true,
+    "viewPitchOk": true,
+    "nearOk": true,
+    "boomOk": true
+  },
+  "pageErrors": []
+}

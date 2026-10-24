@@ -51,6 +51,12 @@ node tools/shoot-facades.mjs       # headless: searches the city's own facade au
                                    # screenshots/proof/facade-archetypes.png, raycast-confirms each
                                    # type it counts, and fails if fewer than five are legible or if
                                    # the frame costs 1600+ draw calls
+node tools/shoot-look-up.mjs       # headless: drags the look control (touch and pointer-locked
+                                   # mouse) to its stop and measures the pitch it reaches, then
+                                   # photographs the frame at max up-pitch from a pavement under
+                                   # the MRT guideway, checking the saved PNG: sky where the
+                                   # geometry says sky, deck where the guideway is. Writes
+                                   # proof/look-up.png and look-up.json, fails below 50 deg
 ```
 
 `city.ojeks` lists every live bike with its real group position and the cargo box's local

@@ -149,12 +149,16 @@ export function rayVsColliders(
       }
     }
     if (ok) {
-      // y
+      // y: a collider stands on the street and blocks from its base upward, so the slab is
+      // open-ended BELOW street level. A closed [0, h] slab let a steeply descending camera boom
+      // dive under the building it was about to enter: at 55 deg of up-look the boom is only
+      // 0.75 m off the road by the time it reaches a wall 1.6 m behind the player, and the hit
+      // was missed, which put the camera inside the facade.
       const top = b.h ?? 30;
       if (Math.abs(dir.y) < 1e-8) {
-        if (origin.y > top || origin.y < 0) ok = false;
+        if (origin.y > top) ok = false;
       } else {
-        let t1 = (0 - origin.y) / dir.y;
+        let t1 = (-Infinity - origin.y) / dir.y;
         let t2 = (top - origin.y) / dir.y;
         if (t1 > t2) [t1, t2] = [t2, t1];
         tmin = Math.max(tmin, t1);

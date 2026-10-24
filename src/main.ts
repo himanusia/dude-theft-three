@@ -252,6 +252,17 @@ const keys = new Set();
 const mouse = { dx: 0, dy: 0, left: false, right: false, down: false, firedSinceDown: false };
 let camYaw = Math.PI * 0.25;
 let camPitch = 0.1;
+/**
+ * Elevation limits, in radians, of the camera BOOM (the arm from the player to the camera) — not
+ * of the view. A negative boom elevation puts the camera below the player and looks up; positive
+ * puts it overhead and looks down. `PITCH_UP` is the limit that made the owner say "gw ga bisa
+ * ngadep ke atas": at -0.55 rad the boom reached 31.5 deg and the camera could not see the sky,
+ * a 12 m guideway or the top of a tower. -0.96 rad is 55 deg of up-look, which clears the soffit
+ * of the 12 m MRT deck from the street with room to spare, and still stops short of the zenith
+ * where a follow camera has nothing left to frame. The down limit is untouched.
+ */
+const PITCH_UP = -0.96; // -55.0 deg
+const PITCH_DOWN = 1.05; // +60.2 deg
 let camDist = 5.8;
 let shake = 0;
 let shakeRate = 2.2; // amplitude units per second, set by setShake()
@@ -412,6 +423,8 @@ let dayT = 0.34;
 // ---------------------------------------------------------------- camera
 const camTarget = new THREE.Vector3();
 const camGoal = new THREE.Vector3();
+const camAim = new THREE.Vector3();
+const camAimTarget = new THREE.Vector3();
 const camOffset = new THREE.Vector3(Math.sin(Math.PI * 0.25) * 5.7, 1.15, Math.cos(Math.PI * 0.25) * 5.7);
 const camShoulder = new THREE.Vector3();
 const _camTmp = new THREE.Vector3();
@@ -440,7 +453,7 @@ function updateCamera(dt: number) {
   // mouse look: the settings multiplier scales both axes, invert flips the pitch only
   const sens = (aiming ? 0.0009 : 0.0022) * settings.sensitivity;
   camYaw -= mouse.dx * sens;
-  camPitch = clamp(camPitch + mouse.dy * sens * 0.85 * (settings.invertY ? -1 : 1), -0.55, 1.05);
+  camPitch = clamp(camPitch + mouse.dy * sens * 0.85 * (settings.invertY ? -1 : 1), PITCH_UP, PITCH_DOWN);
   mouse.dx = 0;
   mouse.dy = 0;
 
@@ -485,7 +498,13 @@ function updateCamera(dt: number) {
   camDistActual = lerp(camDistActual, allowed, clamp(dt * (allowed < camDistActual ? 20 : 4.5), 0, 1));
 
   camGoal.copy(camTarget).addScaledVector(dir, camDistActual).add(camShoulder);
-  camGoal.y = Math.max(camGoal.y, 0.75);
+  // The boom may not sink into the street, but the floor must not flatten the look either:
+  // clamping y and still aiming at the player turned a full up-look into a look-down, because at
+  // PITCH_UP the boom's own end is 4.7 m below the target and the cap caught it. The cap is
+  // ground-relative (an interior has its own floor at y = 0), so it holds on the southern rise
+  // where an absolute 0.75 m is metres underground.
+  const floorY = player.inInterior ? 0.75 : city.groundHeightAt(camGoal.x, camGoal.z) + 0.75;
+  camGoal.y = Math.max(camGoal.y, floorY);
 
   // smooth the camera-local offset rather than the world position, so the
   // framing stays glued to the player while the boom settles
@@ -498,7 +517,18 @@ function updateCamera(dt: number) {
     camera.position.z += rand(-shake, shake);
     shake = Math.max(0, shake - dt * shakeRate);
   }
-  camera.lookAt(camTarget);
+  // Aim horizontally at the player, so the shoulder offset still converges on him, but at the
+  // elevation the player asked for rather than at whatever elevation the boom ended up with.
+  // Where the floor is not in the way this is the same ray `lookAt(camTarget)` drew; where it is,
+  // the camera stops descending and the view keeps climbing to PITCH_UP.
+  camAim.copy(camTarget).sub(camera.position);
+  camAim.y = 0;
+  if (camAim.lengthSq() < 1e-6) camAim.set(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+  camAim.normalize().multiplyScalar(Math.cos(camPitch));
+  camAim.y = -Math.sin(camPitch);
+  camAimTarget.copy(camera.position).addScaledVector(camAim, 10);
+
+  camera.lookAt(camAimTarget);
 
   // small FOV kick once the car is properly moving (never on foot)
   const speed01 = player.inCar ? clamp(Math.abs(player.inCar.speed) / player.inCar.maxSpeed, 0, 1) : 0;
@@ -1082,7 +1112,7 @@ function shoot() {
   player.aimHold = 1.4; // keep the weapon up between shots
   player.shootCd = 60 / spec.rpm;
   audio.play(spec.sound, { vol: spec.soundVol, rate: spec.soundRate * rand(0.96, 1.04), pan: rand(-0.2, 0.2) });
-  camPitch = clamp(camPitch - spec.recoil, -0.55, 1.05);
+  camPitch = clamp(camPitch - spec.recoil, PITCH_UP, PITCH_DOWN);
   setShake(spec.shake, 0.1);
   // 60 ms flash at the barrel tip, thrown down the body's forward axis
   shotFx.flash(muzzlePos(), spec.flashScale, Math.sin(player.yaw), Math.cos(player.yaw));

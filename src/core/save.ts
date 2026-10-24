@@ -132,7 +132,8 @@ function normalizeSave(v: any): SaveData {
       z: clampNum(p.z, -1000, 1000, 0),
       yaw: clampNum(p.yaw, -Math.PI * 2, Math.PI * 2, 0),
       camYaw: clampNum(p.camYaw, -Math.PI * 2, Math.PI * 2, 0),
-      camPitch: clampNum(p.camPitch, -0.55, 1.05, 0.1),
+      // same range as the camera clamp in main.ts: a saved up-look may not be reset on load
+      camPitch: clampNum(p.camPitch, -0.96, 1.05, 0.1),
     },
     cash: clampNum(v.cash, 0, 1e9, 250),
     hp: clampNum(v.hp, 1, 100, 100),
