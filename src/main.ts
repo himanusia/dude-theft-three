@@ -358,6 +358,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') toggleMap();
   if (e.code === 'KeyN') {
     const muted = audio.toggleMute();
+    touch.setMuted(muted);
     hud.toast(muted ? 'Audio muted' : 'Audio on');
   }
   if (e.code === 'KeyO') toggleSettings();
@@ -380,6 +381,17 @@ window.addEventListener('blur', () => keys.clear());
 // ---------------------------------------------------------------- touch
 // The on-screen layer only feeds the state above: axes for walking, deltas for
 // the camera, hooks for the discrete actions. Desktop never activates it.
+/** the six slots the phone picker shows, in the order Digit1..Digit6 use */
+const TOUCH_SLOTS = WEAPON_ORDER.map((id) => {
+  const spec = WEAPONS[id];
+  return {
+    id,
+    slot: spec.slot,
+    name: spec.name,
+    short: spec.name.replace('Micro ', '').replace('-47', ''),
+    glyph: spec.glyph,
+  };
+});
 const touch = new TouchControls({
   activate() {
     hud.setTouchMode(true);
@@ -397,6 +409,28 @@ const touch = new TouchControls({
     if (!started || paused || dying) return;
     toggleVehicle();
   },
+  reload() {
+    if (!started || paused) return;
+    startReload();
+  },
+  map() {
+    if (!started) return;
+    toggleMap();
+  },
+  mute() {
+    const muted = audio.toggleMute();
+    hud.toast(muted ? 'Audio muted' : 'Audio on');
+    return muted;
+  },
+  weapon(slot: number) {
+    if (!started || paused) return;
+    const id = weaponBySlot(slot);
+    if (id) equipWeapon(id);
+  },
+  // the picker asks instead of being pushed: a slot change from any path lands
+  currentSlot() {
+    return WEAPONS[player.weapon].slot;
+  },
   interact() {
     if (!started || paused || dying) return;
     if (player.inInterior) exitInterior();
@@ -409,7 +443,7 @@ const touch = new TouchControls({
     if (!started || paused || dying) return;
     punch();
   },
-});
+}, TOUCH_SLOTS);
 
 function togglePause(force?: boolean) {
   const next = force === undefined ? !paused : !!force;
@@ -1605,6 +1639,8 @@ function toggleMap(force?: boolean) {
   if (open && !started) return;
   if (open === hud.mapOpen) return;
   hud.showMap(open);
+  // the phone's MAP chip is the only way back out: it has to stay lit and pressable
+  touch.setMapOpen(open);
   if (open) {
     mapWasPaused = paused;
     paused = true;
@@ -1957,22 +1993,34 @@ function update(dt: number) {
     hud.setSpeed(0, false);
   }
 
-  // prompts
+  // prompts: name the control the player actually has. A phone has no E or F key,
+  // so the chip prints the on-screen button the action is bound to instead.
+  const keyed = (kb: string, onTouch: string) => (touch.state.active ? onTouch : kb);
   if (player.inInterior) {
     const nearExit = player.pos.distanceTo(new THREE.Vector3(
       player.inInterior.origin.x + player.inInterior.exit.x,
       0,
       player.inInterior.origin.z + player.inInterior.exit.z
     )) < 3.2;
-    hud.setPrompt(nearExit ? 'E — keluar toko' : 'E — keluar toko (dekat pintu)');
+    hud.setPrompt(
+      nearExit
+        ? keyed('E — keluar toko', 'tap USE — keluar toko')
+        : keyed('E — keluar toko (dekat pintu)', 'tap USE — keluar toko (dekat pintu)')
+    );
   } else if (player.inCar) {
-    hud.setPrompt('F — exit vehicle');
+    hud.setPrompt(keyed('F — exit vehicle', 'tap CAR — exit vehicle'));
   } else if (nearestShopDoor() && !player.inCar) {
     const door = nearestShopDoor()!;
-    hud.setPrompt(`E — masuk ${door.name}`);
+    hud.setPrompt(keyed(`E — masuk ${door.name}`, `tap USE — masuk ${door.name}`));
   } else {
     const near = nearestCar(4.6);
-    hud.setPrompt(near ? (near.car.isPolice ? 'F — steal police cruiser' : 'F — enter vehicle') : '');
+    hud.setPrompt(
+      near
+        ? near.car.isPolice
+          ? keyed('F — steal police cruiser', 'tap CAR — steal police cruiser')
+          : keyed('F — enter vehicle', 'tap CAR — enter vehicle')
+        : ''
+    );
   }
 
   // music state: chase track while wanted

@@ -797,6 +797,80 @@
   .t-btn-fire .t-btn-label { font-size: max(12px, calc(var(--t-btn) * .23)); color: #ff9b93; }
   .t-btn-fire.active { background: rgba(255,59,48,.45); border-color: var(--danger); }
 
+  /* ------------------------------------------------------- secondary controls
+     Reload, map, mute and the weapon picker are needed between fights, not every
+     second, so they sit in a half-size rail directly above the six thumb buttons
+     instead of taking a third cluster row. One tap each, no menu in between. */
+  body.touch-mode {
+    --t-mini: clamp(38px, 11.3vw, 44px);
+    --t-rail: calc(var(--t-mini) + var(--t-gap));
+  }
+  #touch-rail {
+    position: absolute; right: calc(14px + env(safe-area-inset-right, 0px));
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px) + var(--t-row) + var(--t-gap));
+    display: flex; gap: var(--t-gap); pointer-events: auto;
+  }
+  .t-mini {
+    width: var(--t-mini); height: var(--t-mini); padding: 0; border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    border: 1.5px solid var(--stroke); background: var(--panel); color: #fff;
+    font-family: var(--font); backdrop-filter: blur(10px); box-shadow: 0 4px 14px rgba(0,0,0,.34);
+    pointer-events: auto; -webkit-tap-highlight-color: transparent;
+    transition: transform .08s ease, background .12s ease, border-color .12s ease;
+  }
+  .t-mini-label { font-size: max(9px, calc(var(--t-mini) * .27)); font-weight: 800; letter-spacing: .02em; line-height: 1; }
+  .t-mini-state { font-size: max(8px, calc(var(--t-mini) * .22)); font-weight: 800; line-height: 1; color: var(--accent); min-height: 8px; }
+  .t-mini.on { border-color: rgba(255,204,51,.9); background: rgba(14,12,7,.9); }
+  .t-mini.active { transform: scale(.9); background: rgba(255,204,51,.34); border-color: var(--accent); }
+
+  /* weapon picker: three slots per row, the same cell size as the thumb buttons */
+  #touch-weapons {
+    position: absolute; right: calc(14px + env(safe-area-inset-right, 0px));
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px) + var(--t-row) + var(--t-gap) + var(--t-rail) + var(--t-gap));
+    display: none; grid-template-columns: repeat(3, var(--t-btn)); gap: var(--t-gap); padding: var(--t-gap);
+    border-radius: 14px; background: rgba(8,10,14,.82); border: 1px solid var(--stroke);
+    backdrop-filter: blur(10px); box-shadow: 0 12px 30px rgba(0,0,0,.46); pointer-events: auto;
+  }
+  #touch-weapons.open { display: grid; }
+  .t-slot {
+    width: var(--t-btn); height: var(--t-btn); padding: 0; border-radius: 10px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    border: 1.5px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06); color: #fff;
+    font-family: var(--font); pointer-events: auto; -webkit-tap-highlight-color: transparent;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .t-slot-num { font-size: max(9px, calc(var(--t-btn) * .2)); font-weight: 800; line-height: 1; color: rgba(255,255,255,.46); }
+  .t-slot-name { font-size: max(8px, calc(var(--t-btn) * .18)); font-weight: 800; letter-spacing: .02em; line-height: 1; }
+  .t-slot.on { border-color: var(--accent); background: rgba(14,12,7,.92); }
+  .t-slot.on .t-slot-num { color: var(--accent); }
+
+  /* the prompt chip's own centring: the merged #prompt rule drops the X transform, and a
+     phone prompt ("tap USE — masuk …") is wide enough to run off the edge without it */
+  body.touch-mode #prompt { transform: translateX(-50%) translateY(8px); }
+  body.touch-mode #prompt.show { transform: translateX(-50%) translateY(0); }
+  /* the picker covers the bottom-centre lane while it is open: those two chips would
+     read straight through it */
+  body.touch-weapons #prompt, body.touch-weapons #speedo { opacity: 0; }
+
+  /* the map is full-screen (z 50): on a phone the MAP chip is the way back out, so the
+     rail rides over it while everything else in the thumb band stays out of the way */
+  body.touch-mode.map-open #touch-ui { z-index: 55; }
+  body.touch-mode.map-open #touch-stick,
+  body.touch-mode.map-open #touch-actions,
+  body.touch-mode.map-open #touch-weapons { display: none; }
+
+  /* landscape phones: 390 px of height leaves no room for a third row on the right,
+     where the minimap stack already ends. The rail takes the free strip between the
+     stick and the cluster, and the picker opens over it. */
+  body.touch-mode.hud-short #touch-rail {
+    right: auto; left: 50%; transform: translateX(-50%);
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  }
+  body.touch-mode.hud-short #touch-weapons {
+    right: auto; left: 50%; transform: translateX(-50%);
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px) + var(--t-rail) + var(--t-gap));
+  }
+
   /* ------------------------------------------------------ layout modes
      narrow: phones in portrait. The right stack moves under the cash chip so
      the bottom corners stay free for the thumbs and the minimap never sits on
@@ -1032,6 +1106,20 @@
     83%, 90% { opacity: 1; }
     100%     { opacity: 0; }
   }
+
+  /* ------------------------------------------------------- touch: the thumb band
+     The six thumb buttons, the secondary rail and the weapon picker own the bottom
+     strip. The merged narrow/short sheets park the prompt and the health chip just
+     above the stick, which is inside that strip now, so both are re-seated here.
+     Deliberately last: those sheets use the same selectors. */
+  body.touch-mode #prompt,
+  body.touch-mode.hud-narrow #prompt,
+  body.touch-mode.hud-short #prompt {
+    bottom: calc(var(--t-foot) + var(--t-row) + var(--t-gap) + var(--t-rail) + 14px);
+    max-width: 76vw;
+  }
+  /* a 120 px bar reaches under the rail; 88 px keeps the readout clear of the chips */
+  body.touch-mode #health-bar { width: 88px; }
 </style>
 </head>
 <body>
@@ -1088,10 +1176,12 @@
       <kbd class="kb-only">Click</kbd><span class="kb-only">Shoot</span><kbd class="touch-only">FIRE</kbd><span class="touch-only">Shoot</span>
       <kbd class="kb-only">Mouse</kbd><span class="kb-only">Look / aim</span><kbd class="touch-only">Drag</kbd><span class="touch-only">Look / aim</span>
       <kbd class="kb-only">Q</kbd><span class="kb-only">Melee</span><kbd class="touch-only">PUNCH</kbd><span class="touch-only">Melee</span>
-      <kbd class="kb-only">R</kbd><span class="kb-only">Reload</span><kbd class="touch-only">RELOAD</kbd><span class="touch-only">Reload</span>
-      <kbd class="kb-only">1 – 6</kbd><span class="kb-only">Weapon slots / vehicle</span><kbd class="touch-only">CAR</kbd><span class="touch-only">Weapon slots / vehicle</span>
+      <kbd class="kb-only">1 – 6</kbd><span class="kb-only">Weapon slots</span><kbd class="touch-only">WPN</kbd><span class="touch-only">Weapon slots</span>
+      <kbd class="kb-only">R</kbd><span class="kb-only">Reload</span><kbd class="touch-only">RLD</kbd><span class="touch-only">Reload</span>
+      <kbd class="kb-only">F</kbd><span class="kb-only">Enter / exit a car</span><kbd class="touch-only">CAR</kbd><span class="touch-only">Enter / exit a car</span>
       <kbd class="kb-only">E</kbd><span class="kb-only">Enter a shop</span><kbd class="touch-only">USE</kbd><span class="touch-only">Enter a shop</span>
-      <kbd class="kb-only">M</kbd><span class="kb-only">City map</span><kbd class="touch-only">Map</kbd><span class="touch-only">City map</span>
+      <kbd class="kb-only">M</kbd><span class="kb-only">City map</span><kbd class="touch-only">MAP</kbd><span class="touch-only">City map</span>
+      <kbd class="kb-only">N</kbd><span class="kb-only">Mute audio</span><kbd class="touch-only">SND</kbd><span class="touch-only">Mute audio</span>
       <kbd class="kb-only">Esc</kbd><span class="kb-only">Pause</span><kbd class="touch-only">2 fingers</kbd><span class="touch-only">Pause</span>
     </div>
     <button id="help-close" type="button">Got it</button>
