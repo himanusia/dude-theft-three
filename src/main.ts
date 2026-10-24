@@ -199,6 +199,10 @@ for (let i = 0; i < 14; i++) {
 // writes into pre-allocated sprites/points instead of building a new object per shot
 const shotFx = new PooledShotFx(scene, renderer, camera);
 const muzzleScratch = new THREE.Vector3();
+/** Scratch for the shot's near plane: the shooter's chest, projected onto the aim ray. */
+const _shotNear = new THREE.Vector3();
+/** Height of the shot's near plane on the shooter, in metres above his feet. */
+const CHEST_Y = 1.2;
 const tracerFrom = new THREE.Vector3();
 const tracerTo = new THREE.Vector3();
 
@@ -1034,22 +1038,34 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
   }
   // every pellet leaves from the same barrel tip the flash sits on
   const muzzle = muzzlePos();
-  const wallHit = rayVsColliders(origin, dir, range, city.colliders);
+  // A third-person shot is aimed down the camera ray, and the camera sits 1.4-5.8 m BEHIND the man
+  // pulling the trigger, so the near end of that ray is not the muzzle: everything nearer than his
+  // own chest is behind the shot. That boundary used to be the fixed `MIN_T = 2.2`, which is how a
+  // round aimed at a body standing on the barrel skipped him (his sphere started 1.4 m from the
+  // camera) and flew on into the wall 1.9 m behind. It is measured from the shooter instead, and
+  // applies once to the wall and to every actor: a panel the camera boom has been pushed into no
+  // longer answers `bestDist = 0` and eats the round, and a body walking behind the player is
+  // still not in the line of fire because his CENTRE sits behind the same plane.
+  const nearDist = Math.max(
+    0,
+    _shotNear.set(player.pos.x, player.y + CHEST_Y, player.pos.z).sub(origin).dot(dir) - 0.15
+  );
+  const wallHit = rayVsColliders(origin, dir, range, city.colliders, nearDist);
   let bestDist = wallHit ? wallHit.dist : range;
   let hitPoint = origin.clone().addScaledVector(dir, bestDist);
   let hitKind = wallHit ? 'wall' : null;
-  // ignore targets hugging the camera (they are behind/beside the player, not in the line of fire)
-  const MIN_T = 2.2;
 
   // pedestrians
   let hitPed = null;
   for (const ped of peds.peds) {
     if (ped.dead) continue;
     const center = new THREE.Vector3(ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
-    const t = raySphere(origin, dir, center, 0.75);
-    if (t !== null && t > MIN_T && t < bestDist) {
+    const t = raySphere(origin, dir, center, 0.75, nearDist);
+    if (t !== null && t < bestDist) {
       bestDist = t;
-      hitPoint = origin.clone().addScaledVector(dir, t);
+      // a body hugged by the player reaches its sphere nearer than his chest plane; the impact
+      // belongs on that plane, never behind the camera
+      hitPoint = origin.clone().addScaledVector(dir, Math.max(t, nearDist));
       hitKind = 'ped';
       hitPed = ped;
     }
@@ -1057,7 +1073,7 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
 
   // officers on foot
   let hitOfficer = null;
-  const copHit = police.raycastOfficer(origin, dir, bestDist);
+  const copHit = police.raycastOfficer(origin, dir, bestDist, nearDist);
   if (copHit) {
     bestDist = copHit.dist;
     hitPoint = origin.clone().addScaledVector(dir, copHit.dist);
@@ -1070,10 +1086,12 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
   const carsAll = allCars();
   for (const c of carsAll) {
     const center = new THREE.Vector3(c.pos.x, c.y + 0.9, c.pos.z);
-    const t = raySphere(origin, dir, center, 1.6);
-    if (t !== null && t > MIN_T && t < bestDist) {
+    const t = raySphere(origin, dir, center, 1.6, nearDist);
+    if (t !== null && t < bestDist) {
       bestDist = t;
-      hitPoint = origin.clone().addScaledVector(dir, t);
+      // a body hugged by the player reaches its sphere nearer than his chest plane; the impact
+      // belongs on that plane, never behind the camera
+      hitPoint = origin.clone().addScaledVector(dir, Math.max(t, nearDist));
       hitKind = 'car';
       hitCar = c;
     }
@@ -1184,12 +1202,20 @@ function shoot() {
   hud.setAmmo(player.mag, spec.magSize, false);
 }
 
-function raySphere(origin: any, dir: any, center: any, radius: number) {
+/**
+ * Entry distance of a sphere along a ray, or null. `minCenterT` is how far down the ray the
+ * shooter's own chest sits: a body whose CENTRE is behind that plane is behind the shot (a
+ * pedestrian walking behind the player), while a body standing on the barrel has its centre level
+ * with the chest plane and is point-blank. Testing the centre rather than the sphere's entry is
+ * what keeps those two apart, because a body hugged by the player reaches its sphere a metre
+ * nearer than the camera even when it is in front of the gun.
+ */
+function raySphere(origin: any, dir: any, center: any, radius: number, minCenterT = 0) {
   const ox = center.x - origin.x;
   const oy = center.y - origin.y;
   const oz = center.z - origin.z;
   const tca = ox * dir.x + oy * dir.y + oz * dir.z;
-  if (tca < 0) return null;
+  if (tca < minCenterT) return null;
   const d2 = ox * ox + oy * oy + oz * oz - tca * tca;
   const r2 = radius * radius;
   if (d2 > r2) return null;

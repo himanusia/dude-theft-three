@@ -289,8 +289,18 @@ export class Police {
     return officer;
   }
 
-  /** Nearest officer along a shot ray, so the player can actually hit them. */
-  raycastOfficer(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number): { officer: Officer; dist: number } | null {
+  /**
+   * Nearest officer along a shot ray, so the player can actually hit them. `minCenterT` is how far
+   * down the ray the shooter's own body sits: an officer whose CENTRE is behind that plane is
+   * behind the shot, while one standing on the barrel is point-blank and counts. (It used to be a
+   * fixed `t < 1.5` skip, which swallowed an officer a metre in front of the gun.)
+   */
+  raycastOfficer(
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    maxDist: number,
+    minCenterT = 0
+  ): { officer: Officer; dist: number } | null {
     let best: { officer: Officer; dist: number } | null = null;
     for (const o of this.officers) {
       if (o.dead) continue;
@@ -298,7 +308,7 @@ export class Police {
       const cy = o.pos.y + 1.1 - origin.y;
       const cz = o.pos.z - origin.z;
       const t = cx * dir.x + cy * dir.y + cz * dir.z;
-      if (t < 1.5 || t > maxDist) continue;
+      if (t < minCenterT || t > maxDist) continue;
       const px = origin.x + dir.x * t - o.pos.x;
       const py = origin.y + dir.y * t - (o.pos.y + 1.1);
       const pz = origin.z + dir.z * t - o.pos.z;

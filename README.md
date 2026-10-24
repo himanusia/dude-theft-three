@@ -46,6 +46,11 @@ node tools/proof-bullets.mjs       # headless: 20 shots, then proves the muzzle 
                                    # surface, and firing allocates NOTHING after warm-up (scene
                                    # objects, GPU geometries and the pool's own counter all flat).
                                    # Writes screenshots/proof/muzzle-flash.png and bullet-impact.png
+node tests/world/pointblank-shots.mjs # 10/10: a body 0.02 m from the barrel takes the round. 30
+                                   # one-round shots, half with the wall 1.8 m behind the body and
+                                   # half with the camera pushed inside the building behind the
+                                   # player: 30 hit, 30 die, 0 spent on a bestDist-0 wall
+                                   # (starts its own server on :9420)
 node tests/world/terminal-level.mjs # 14/14: the Blok M terminal and every pos ronda stand level
                                    # (group rotation zero on X and Z, the apron top on one plane),
                                    # the whole 48 x 32 m apron misses every carriageway, its skirt

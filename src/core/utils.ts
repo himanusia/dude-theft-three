@@ -218,11 +218,19 @@ export interface RayHit {
   point: THREE.Vector3;
 }
 
+/**
+ * Nearest collider face along a ray. `minDist` is the near end of the ray in metres: a box that
+ * already contains the origin answers `tmin = 0`, which is right for a camera boom (it must not
+ * travel through the wall it is buried in) and wrong for a shot (a camera pushed into a facade
+ * would answer 0 and the round would be spent on nothing). `minDist` is also how a shot skips the
+ * geometry behind the shooter.
+ */
 export function rayVsColliders(
   origin: THREE.Vector3,
   dir: THREE.Vector3,
   maxDist: number,
-  colliders: AABB[]
+  colliders: AABB[],
+  minDist = 0
 ): RayHit | null {
   let best: RayHit | null = null;
   for (let i = 0; i < colliders.length; i++) {
@@ -272,7 +280,7 @@ export function rayVsColliders(
         if (tmin > tmax) ok = false;
       }
     }
-    if (ok && tmin >= 0 && (!best || tmin < best.dist)) {
+    if (ok && tmin >= minDist && (!best || tmin < best.dist)) {
       best = {
         dist: tmin,
         collider: b,
