@@ -87,6 +87,16 @@ node tools/shoot-wasted.mjs        # headless: kills the player and reads the de
                                    # millisecond) and writes proof/wasted-0..2.png, then samples
                                    # the LIVE clock every 60 ms to prove the stages fire in order
                                    # and the player is back at the spawn inside 3 s
+node tools/probe-shop-boards.mjs   # one city load: enterable shops vs name plates (unmarked must
+                                   # be 0), each plate's text against its own room, doors that sit
+                                   # on their facade instead of inside the building, frontage
+                                   # shopfronts with a door in their street face, and the draw calls
+                                   # the shop signage costs. Writes nothing unless asked, exits 2 on
+                                   # a defect
+node tools/shoot-shop-boards.mjs   # headless: searches the city for the stance where the most
+                                   # shop plates land legibly in frame, photographs it from across
+                                   # the street and measures the saved PNG (ink inside each plate's
+                                   # projected rect). Writes proof/shop-boards.png
 ```
 
 `city.ojeks` lists every live bike with its real group position and the cargo box's local

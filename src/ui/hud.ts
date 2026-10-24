@@ -506,8 +506,10 @@ export class HUD {
       ctx.strokeRect(mx(b.x) - side / 2, my(b.z) - side / 2, side, side);
     }
 
-    // shop doors
+    // shop doors: only the ones inside the map's own span, because there is now a door on every
+    // shopfront in the city and the ones off-map were painted yellow over the map furniture
     for (const d of state.shops || []) {
+      if (Math.abs(d.x - ox) > SPAN || Math.abs(d.z - oz) > SPAN) continue;
       ctx.fillStyle = '#ffcc33';
       ctx.fillRect(mx(d.x) - 2.5, my(d.z) - 2.5, 5, 5);
     }

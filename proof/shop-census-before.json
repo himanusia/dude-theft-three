@@ -1,0 +1,35 @@
+{
+ "url": "http://localhost:8952",
+ "at": "2026-10-24T07:34:38.795Z",
+ "errors": [],
+ "enterable": 1258,
+ "doors": 1896,
+ "boards": 647,
+ "legacyBoards": 647,
+ "signsRecorded": 0,
+ "unmarked": 611,
+ "mismatched": 0,
+ "doorNameMismatch": 0,
+ "buriedDoors": 103,
+ "buriedWorst": 2.64,
+ "sample20Ok": 0,
+ "frontage": {
+  "total": 796,
+  "shop": 526,
+  "shopWithDoor": 0,
+  "shopPlated": 0,
+  "plain": 270,
+  "plainWithShopStyling": null,
+  "sample30Ok": 0
+ },
+ "drawCalls": 804,
+ "triangles": 822871,
+ "signMeshes": 1294,
+ "signCalls": 285,
+ "signBlock": {
+  "blockMeshes": 12,
+  "frameCalls": 537,
+  "signCalls": 18
+ },
+ "facadeCount": 2692
+}

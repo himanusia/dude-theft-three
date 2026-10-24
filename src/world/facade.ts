@@ -88,7 +88,11 @@ export const ARCHETYPES: Record<ArchetypeId, ArchetypeSpec> = {
     walls: [0xd8d2c2, 0xc7bfae, 0xd5c9b6, 0xbfb6a4],
     trims: [0xe9e4d6, 0x8d8a80, 0xcfc8b6],
     roof: 'parapet',
-    retail: false,
+    // a walk-up's base is a stair core, two unit doors AND a warung in the corner bay (see
+    // buildWalkUp): the bay is a shopfront, so it is a shop you can walk into, with its own name
+    // over it. Leaving it non-retail left 566 shop bays per city with a shutter, an awning and a
+    // poster name that opened nothing.
+    retail: true,
     tile: 'balcony',
   },
   colonial: {
@@ -490,59 +494,75 @@ export function tileBoxUV(geo: THREE.BufferGeometry, rx: number, ry: number) {
   uv.needsUpdate = true;
 }
 
-// ---- sign + advertising atlases -------------------------------------------------------------
+// ---- advertising atlas ---------------------------------------------------------------------
 
-/** Plesetan, not real brands: the city's own shop names. */
-export const SHOP_WORDS = [
-  'ALFAMURTI', 'INDOMERET', 'WARTEG BAHARI', 'BAKSO PAK TJE', 'MIE GACUAN', 'SATE SENAYUN',
-  'PULSA PERDANU', 'APOTEK SEHAT', 'BENGKEL AHOS', 'KOPI TUBRUK', 'TOKO EMAS MULYA', 'LAUNDRY KILAT',
-  'PANGKAS RAMBUT', 'MARTABAK BANGKOK', 'NASI PADANG SELONGSOR', 'JAMU GENDONG', 'SERVIS AC',
-  'TOKO BANGUNAN', 'OPTIK TERANG', 'FOTOKOPI JAYA', 'KREDIT MOTOR', 'SEMBAKO LANCAR', 'ES TEH MANIS',
-  'GORENGAN BU TUTI', 'KUE BASAH', 'SALON AYU', 'CETAK SPANDUK', 'BATAGOR',
-];
+// ---- the plate atlas: one cell per room the city actually built --------------------------------
 
-const SIGN_COLS = 4;
-const SIGN_ROWS = 4;
-const SIGN_BG = ['#e0b23c', '#c0392b', '#2f6f9f', '#3f7a4a', '#f0efe8', '#8a3ad9', '#e2663c', '#1f7a55'];
-let signTex: THREE.Texture | null = null;
+const PLATE_COLS = 2;
+const PLATE_ROWS = 4;
+const PLATE_CW = 512;
+const PLATE_CH = 148;
+let plateTex: THREE.CanvasTexture | null = null;
+let plateCanvas: HTMLCanvasElement | null = null;
+let plateKey = '';
+let plateMat: THREE.MeshStandardMaterial | null = null;
 
 /**
- * Sixteen signboards in one canvas.
+ * The names on the shopfronts come from the rooms the city built, not from a word list.
  *
- * Every building used to get its own 256x64 canvas and its own material for four sign meshes, so a
- * street of shops was dozens of materials and hundreds of draw calls for text you read once. One
- * atlas, one material, and the sign quad carries the UV of its cell: the whole city's signboards
- * are one draw call, and a block still has sixteen different names on it.
+ * The old plate picked one of sixteen poster words by building seed, so a bengkel door could read
+ * "BAKSO PAK TJE": the board was decoration that happened to hang over a shop. The city hands this
+ * atlas its room names once per load, in InteriorKind order, and `shopNameCell` addresses the cell;
+ * a plate can then only ever carry the name of the room behind its door. It stays one texture and
+ * one material for the whole city, so every shopfront name in Jakarta costs one draw call.
  */
-export function signAtlas(): THREE.Texture {
-  if (signTex) return signTex;
-  signTex = canvasTexture(1024, 512, (ctx, w, h) => {
-    const cw = w / SIGN_COLS;
-    const ch = h / SIGN_ROWS;
-    for (let r = 0; r < SIGN_ROWS; r++) {
-      for (let c = 0; c < SIGN_COLS; c++) {
-        const word = SHOP_WORDS[(r * SIGN_COLS + c) % SHOP_WORDS.length];
-        const bg = SIGN_BG[(r * SIGN_COLS + c) % SIGN_BG.length];
-        const x = c * cw;
-        const y = r * ch;
-        ctx.fillStyle = bg;
-        ctx.fillRect(x, y, cw, ch);
-        // painted metal: a lighter top edge and a shadow along the bottom
-        ctx.fillStyle = 'rgba(255,255,255,0.16)';
-        ctx.fillRect(x, y, cw, 4);
-        ctx.fillStyle = 'rgba(0,0,0,0.28)';
-        ctx.fillRect(x, y + ch - 10, cw, 10);
-        const dark = bg === '#f0efe8';
-        ctx.fillStyle = dark ? '#231f1a' : '#fff8e7';
-        fitFont(ctx, word, cw - 18, 40);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(word, x + cw / 2, y + ch / 2 - 3);
-      }
-    }
+export function setShopNames(entries: { name: string; bg: string }[]) {
+  const key = entries.map((e) => `${e.bg}|${e.name}`).join(';');
+  if (key === plateKey && plateTex) return;
+  plateKey = key;
+  if (!plateCanvas) {
+    plateCanvas = document.createElement('canvas');
+    plateCanvas.width = PLATE_CW * PLATE_COLS;
+    plateCanvas.height = PLATE_CH * PLATE_ROWS;
+    plateTex = new THREE.CanvasTexture(plateCanvas);
+    plateTex.colorSpace = THREE.SRGBColorSpace;
+    plateTex.anisotropy = 4;
+  }
+  const ctx = plateCanvas.getContext('2d')!;
+  ctx.clearRect(0, 0, plateCanvas.width, plateCanvas.height);
+  entries.forEach((e, i) => {
+    const c = i % PLATE_COLS;
+    const r = Math.floor(i / PLATE_COLS);
+    if (r >= PLATE_ROWS) return;
+    const x = c * PLATE_CW;
+    const y = r * PLATE_CH;
+    ctx.fillStyle = e.bg;
+    ctx.fillRect(x, y, PLATE_CW, PLATE_CH);
+    // painted metal: a lit top edge and the shadow the fascia casts on its own plate
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(x, y, PLATE_CW, 5);
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.fillRect(x, y + PLATE_CH - 12, PLATE_CW, 12);
+    ctx.fillStyle = '#fff8e7';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    fitFont(ctx, e.name, PLATE_CW - 36, 68);
+    ctx.fillText(e.name, x + PLATE_CW / 2, y + PLATE_CH / 2 - 2);
   });
-  signTex.wrapS = signTex.wrapT = THREE.ClampToEdgeWrapping;
-  return signTex;
+  plateTex!.needsUpdate = true;
+  if (plateMat) {
+    plateMat.map = plateTex;
+    plateMat.emissiveMap = plateTex;
+    plateMat.needsUpdate = true;
+  }
+}
+
+/** The UV rect of one room's plate. Cell order is the city's room order, so index i is room i. */
+export function shopNameCell(i: number): [number, number, number, number] {
+  const idx = Math.max(0, Math.min(PLATE_COLS * PLATE_ROWS - 1, Math.floor(i)));
+  const c = idx % PLATE_COLS;
+  const r = Math.floor(idx / PLATE_COLS);
+  return [c / PLATE_COLS, 1 - (r + 1) / PLATE_ROWS, 1 / PLATE_COLS, 1 / PLATE_ROWS];
 }
 
 const AD_TEXT = [
@@ -700,14 +720,18 @@ export function facadeMaterial(key: string): THREE.Material {
         });
       case 'counter':
         return new THREE.MeshStandardMaterial({ color: 0xd8c9a8, roughness: 0.7 });
-      case 'sign':
-        return new THREE.MeshStandardMaterial({
-          map: signAtlas(),
+      case 'shopname':
+        // the shop's own name, one cell of the plate atlas: the cell is chosen by the room the
+        // door opens into, so this plate cannot advertise a shop that is not behind it
+        if (!plateTex) setShopNames([]);
+        plateMat = new THREE.MeshStandardMaterial({
+          map: plateTex,
           roughness: 0.55,
           emissive: 0xffffff,
-          emissiveMap: signAtlas(),
-          emissiveIntensity: 0.05,
+          emissiveMap: plateTex,
+          emissiveIntensity: 0.16,
         });
+        return plateMat;
       case 'ad':
         return new THREE.MeshStandardMaterial({
           map: adAtlas(),
@@ -722,9 +746,9 @@ export function facadeMaterial(key: string): THREE.Material {
   });
 }
 
-/** Materials that should light up after dark (signs, painted ads). */
+/** Materials that should light up after dark (signs, painted ads, shop name plates). */
 export function facadeEmissiveKeys(): string[] {
-  return ['sign', 'ad'];
+  return ['shopname', 'ad'];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -772,12 +796,18 @@ class Batch {
   }
 }
 
-/** A UV cell for a panel in the sign atlas; the index is per building so neighbours differ. */
-function signCell(seed: number): [number, number, number, number] {
-  const i = Math.abs(Math.floor(seed)) % (SIGN_COLS * SIGN_ROWS);
-  const c = i % SIGN_COLS;
-  const r = Math.floor(i / SIGN_COLS);
-  return [c / SIGN_COLS, 1 - (r + 1) / SIGN_ROWS, 1 / SIGN_COLS, 1 / SIGN_ROWS];
+/**
+ * The plate on a shopfront: one call site per archetype, always the name of the room behind that
+ * frontage's door.
+ *
+ * The plate used to be a decorative cell of a sixteen-poster atlas picked by building seed, which
+ * is how a bengkel door came to read "BAKSO PAK TJE". There is no decorative branch left: a
+ * frontage either has a shop and names it, or has no plate at all (`office` is the only archetype
+ * with no shopfront, and it wears no sign either).
+ */
+function shopPlate(b: Batch, p: FacadePlan, w: number, h: number, x: number, y: number, z: number) {
+  if (!p.shop) return;
+  b.face('shopname', w, h, x, y, z, shopNameCell(p.shop.cell));
 }
 
 function adCell(seed: number): [number, number, number, number] {
@@ -789,6 +819,28 @@ const trimKey = (c: number) => `trim:${c.toString(16)}`;
 const coreKey = (c: number) => `core:${c.toString(16)}`;
 const awningKey = (c: number) => `awning:${c.toString(16)}`;
 const AWNINGS = [0xc0392b, 0x2f6f9f, 0xd9a02c, 0x3f7a4a];
+
+/**
+ * Where a shop's own entrance sits along its frontage, as a fraction of that frontage.
+ *
+ * The door instance, the name plate above it and the shop's sign all use this one number, so the
+ * plate is over the door you walk through instead of over the middle of a wall. Each value is the
+ * bay the archetype's ground floor already reserved: the glazed bay between two ruko shutters, the
+ * shuttered bay behind a colonial arcade, the kiosk shutter under the warung awning, the mid-rise
+ * lobby glazing. A non-shop gets the same number (it is not used; its door is a side entrance).
+ */
+export function entranceOffset(id: ArchetypeId, seed: number): number {
+  switch (id) {
+    case 'warung':
+      return -0.28;
+    case 'walkup':
+      return -0.06;   // the corner bay: the roller shutter under the small awning
+    case 'midrise':
+      return (seed % 2 === 0 ? -1 : 1) * 0.08;
+    default:
+      return 0;
+  }
+}
 
 export interface FacadePlan {
   /** building centre in world space, at ground level */
@@ -807,6 +859,12 @@ export interface FacadePlan {
   seed: number;
   /** which generator placed it: a block lot or a street frontage row (for the mix audit) */
   source?: 'block' | 'frontage';
+  /**
+   * The shop this frontage belongs to: the room its door opens into and the cell of that room's
+   * name in the plate atlas. Set for every retail frontage, because every retail frontage gets an
+   * enterable door. A plate for a building without a shop stays decorative.
+   */
+  shop?: { kind: string; cell: number };
 }
 
 /** Local -> world for this building. */
@@ -928,7 +986,7 @@ function buildRuko(b: Batch, p: FacadePlan, T: string, front: number) {
   b.box('glass', w * 0.2, 2.4, 0.1, 0, 1.4, front - 0.02);
   // the signboard band: a backing board with the name plate in front of it
   b.box(T, w * 0.96, 1.05, 0.16, 0, 3.55, front - 0.06);
-  b.face('sign', Math.min(w * 0.88, 3.1), Math.min(0.92, w * 0.13), 0, 3.55, front - 0.15, signCell(seed * 7 + 3));
+  shopPlate(b, p, Math.min(w * 0.88, 3.1), Math.min(0.92, w * 0.13), 0, 3.55, front - 0.15);
   // a projecting canopy over the pavement, as every ruko in Jakarta has
   b.tilted(T, w * 0.92, 1.7, 0, 4.15, front - 0.75, 0.18);
   // slab edges on the floors above, which is what gives a row of ruko its horizontal rhythm
@@ -1004,7 +1062,6 @@ function buildWalkUp(b: Batch, p: FacadePlan, T: string, front: number) {
   b.box(coreKey(0x9a958a), w * 0.24, storey, 0.5, w * 0.3, storey / 2, front + 0.1);
   b.box('glass', 1.7, 2.3, 0.12, w * 0.3, 1.25, front - 0.1);
   b.box(T, 3.0, 0.22, 1.5, w * 0.3, 2.85, front - 0.6);
-  b.face('sign', 2.3, 0.7, -w * 0.28, 2.6, front - 0.06, signCell(seed * 5 + 11));
   // unit doors on the ground floor, with a step and a meter cupboard beside each
   for (let i = 0; i < 2; i++) {
     const dx = -w * 0.28 + i * w * 0.22;
@@ -1015,6 +1072,8 @@ function buildWalkUp(b: Batch, p: FacadePlan, T: string, front: number) {
   // one bay of the base is a shop: a roller shutter and its awning, so the block meets the street
   b.box('shutter', w * 0.26, 2.2, 0.1, -w * 0.06, 1.2, front - 0.02);
   b.tilted(T, w * 0.3, 1.1, -w * 0.06, 2.55, front - 0.5, 0.16);
+  // the name plate hangs on the awning's own lip, over the shutter it names
+  shopPlate(b, p, Math.min(w * 0.3, 3.0), 0.6, -w * 0.06, 2.78, front - 1.08);
   // roof: two water tanks, because every rooftop in Jakarta has them
   b.box('ac', 1.5, 1.3, 1.5, -w * 0.2, h + 1.0, -d * 0.2);
   b.box('ac', 1.2, 1.1, 1.2, w * 0.12, h + 0.9, d * 0.14);
@@ -1037,7 +1096,7 @@ function buildColonial(b: Batch, p: FacadePlan, T: string, front: number) {
   b.box(T, w + 0.6, 0.22, 1.5, 0, 0.12, front - 0.75);
   // the wall between the piers is recessed and glazed: a shop behind the arcade
   b.box('shutter', w * 0.86, 2.5, 0.1, 0, 1.45, front - 0.06);
-  b.face('sign', Math.min(w * 0.62, 4.0), 0.72, 0, 3.0, front - 0.12, signCell(seed * 3 + 5));
+  shopPlate(b, p, Math.min(w * 0.62, 4.0), 0.72, 0, 3.0, front - 0.12);
   // upper floor: shuttered windows with a white surround and a lintel over each
   const wins = Math.max(2, bays);
   const wy = arcadeH + 1.5;
@@ -1078,7 +1137,7 @@ function buildWarung(b: Batch, p: FacadePlan, T: string, front: number) {
   b.box('counter', w * 0.78, 1.05, 0.55, 0, 0.55, front - 0.28);
   b.box('glass', w * 0.7, 0.5, 0.4, 0, 1.35, front - 0.28);
   // hand-painted name plate on the fascia, and the shop's own colours on the shutters
-  b.face('sign', Math.min(w * 0.82, 2.6), 0.62, 0, 2.62, front - 2.18, signCell(seed * 11 + 7));
+  shopPlate(b, p, Math.min(w * 0.82, 2.6), 0.62, 0, 2.62, front - 2.18);
   b.box('shutter', w * 0.34, 1.9, 0.1, -w * 0.28, 1.15, front - 0.02);
   // crates stacked against the wall — the thing every warung has outside it
   for (let i = 0; i < 2 + (seed % 3); i++) {
@@ -1105,7 +1164,7 @@ function buildMidrise(b: Batch, p: FacadePlan, T: string, front: number) {
   // ground floor: lobby behind a canopy, and a signboard at the first-floor line
   b.box('glass', w * 0.6, 3.9, 0.14, -side * w * 0.08, 2.1, front - 0.04);
   b.box(T, w * 0.72, 0.3, 1.4, -side * w * 0.08, 4.3, front - 0.6);
-  b.face('sign', Math.min(w * 0.5, 4.2), 0.8, -side * w * 0.08, 3.65, front - 0.12, signCell(seed * 13 + 2));
+  shopPlate(b, p, Math.min(w * 0.5, 4.2), 0.8, -side * w * 0.08, 3.65, front - 0.12);
   // floor bands every four storeys: the horizontal that stops a 30 m wall reading as one slab
   for (let y = 12.5; y < h - 2; y += 12.5) b.box(T, w + 0.1, 0.2, 0.3, 0, y, front - 0.06);
   // lift overrun on the roof

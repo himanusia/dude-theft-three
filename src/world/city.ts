@@ -36,8 +36,10 @@ import {
   FacadePlan,
   archetypeBody,
   buildFacadeDetail,
+  entranceOffset,
   facadeEmissiveKeys,
   facadeMaterial,
+  setShopNames,
   tileBoxUV,
   trimFor,
   windowTexture,
@@ -173,17 +175,6 @@ const KIND_MAT: Record<InteriorKind, number> = {
   laundry: 0x2f6f9f,
   salon: 0x8a4a5f,
 };
-
-function fitFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, startSize: number) {
-  let size = startSize;
-  ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
-  while (size > 10 && ctx.measureText(text).width > maxWidth) {
-    size -= 2;
-    ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
-  }
-}
-
-
 
 /** The lit-window mask. One canvas for the whole city: the tiling comes from the geometry UVs. */
 let emissiveTextureCache: THREE.Texture | null = null;
@@ -403,6 +394,16 @@ export class City {
     box: { center: THREE.Vector3; size: THREE.Vector3 } | null;
   }[];
   declare shopDoors: { x: number; z: number; nx: number; nz: number; kind: InteriorKind; name: string }[];
+  /**
+   * Every name plate on a shopfront, in world space: where it hangs and what it says.
+   *
+   * The plates are merged into one mesh with the rest of the facade detail, so the scene graph
+   * cannot answer "does this door have a board, and does the board name its room". This is that
+   * answer, written by the same call that draws the plate.
+   */
+  declare shopSigns: { x: number; y: number; z: number; kind: InteriorKind; name: string }[];
+  /** welcome mats, painted per kind, merged into a single mesh once the city is laid out */
+  declare shopMatGeos: THREE.BufferGeometry[];
   declare interiors: PlacedInterior[];
   declare clouds: THREE.Group;
   declare starMat: THREE.PointsMaterial;
@@ -454,11 +455,14 @@ export class City {
     scene.add(this.group);
 
     this.shopDoors = [];
+    this.shopSigns = [];
+    this.shopMatGeos = [];
     this.interiors = [];
     this.facades = [];
     this.dressingSpots = [];
     this.shopDoorKindCursor = randInt(0, SHOP_KINDS.length - 1);
     this.buildInteriors();
+    this.buildShopSignage();
     this.dayT = 0.32; // 0..1, 0.25 = sunrise, 0.5 = noon
     this.buildLights();
     this.buildClouds();
@@ -526,6 +530,46 @@ export class City {
 
   roomFor(kind: InteriorKind) {
     return this.interiors.find((r) => r.kind === kind);
+  }
+
+  /**
+   * Hand the facade kit the rooms this city actually built, so a fascia plate can only carry the
+   * name of the shop behind its door.
+   *
+   * Seven rooms, seven cells, one texture: the plates cost one draw call for the whole city. The
+   * cell order is the room order, which is the same order `nextShop` cycles through, so a plate's
+   * cell and the kind of the door under it cannot drift apart.
+   */
+  buildShopSignage() {
+    setShopNames(this.interiors.map((r) => ({ name: r.name, bg: KIND_SIGN[r.kind] })));
+  }
+
+  /**
+   * The next shop identity: the room its door opens into, that room's name, and the plate cell
+   * that says so.
+   *
+   * Shop kinds cycle, so all seven rooms are reachable however the city is randomised; what
+   * changed is that the identity is decided once, before the facade is drawn, and then used for
+   * the plate, the door and the door's registration alike.
+   */
+  nextShop(): { kind: InteriorKind; name: string; cell: number } | null {
+    const kind = SHOP_KINDS[this.shopDoorKindCursor++ % SHOP_KINDS.length];
+    const room = this.roomFor(kind);
+    if (!room) return null;
+    return { kind, name: room.name, cell: this.interiors.findIndex((r) => r.kind === kind) };
+  }
+
+  /** Paint a geometry one colour so a thousand shop mats merge into a single mesh. */
+  tint(geo: THREE.BufferGeometry, hex: number) {
+    const c = new THREE.Color(hex);
+    const n = geo.attributes.position.count;
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      arr[i * 3] = c.r;
+      arr[i * 3 + 1] = c.g;
+      arr[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
   }
 
   /**
@@ -970,6 +1014,22 @@ export class City {
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
       this.group.add(mesh);
+    }
+
+    // Welcome mats: every enterable shop has one, each in its own kind's colour, and they used to
+    // be one mesh and one material per shop. Merged into a single vertex-coloured mesh, because
+    // one mat per shopfront is hundreds of draw calls for a 2 m slab of painted rubber.
+    if (this.shopMatGeos.length) {
+      const merged = mergeGeometries(this.shopMatGeos, false);
+      if (merged) {
+        const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }));
+        mesh.name = 'shop-mats';       // named so a probe can price the whole city's mats as one call
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+        this.group.add(mesh);
+      }
+      for (const g of this.shopMatGeos) g.dispose();
+      this.shopMatGeos = [];
     }
   }
 
@@ -2079,8 +2139,12 @@ export class City {
   /**
    * What was actually built, so the proof harness can count distinct types in one frame instead of
    * trusting that the palette varied. Written by addFacade, read by tools/shoot-facades.mjs.
+   *
+   * `retail` is the archetype's own contract (its ground floor is a shop) and `shop` records that
+   * this lot actually got one: a named plate, a door and a room. The census in
+   * tools/probe-shop-boards.mjs reads both, so "a shopfront with no door" is a countable defect.
    */
-  facadeAudit: { archetype: string; source: 'block' | 'frontage'; x: number; y: number; z: number; yaw: number; w: number; d: number; h: number; wall: number; trim: number }[] = [];
+  facadeAudit: { archetype: string; source: 'block' | 'frontage'; x: number; y: number; z: number; yaw: number; w: number; d: number; h: number; wall: number; trim: number; retail: boolean; shop: boolean }[] = [];
 
   /** per-block / per-row archetype pickers, so a run of lots never repeats one type */
   facadeMixers = new Map<string, ArchetypeMixer>();
@@ -3804,7 +3868,24 @@ export class City {
     bucket.set(matKey, entry);
     this.buildingBuckets.set(this.group, bucket);
 
-    buildFacadeDetail(plan, (key, geo) => this.pushFacadeDetail(key, geo));
+    buildFacadeDetail(plan, (key, geo) => {
+      if (key === 'shopname' && plan.shop) {
+        // The plate is drawn by the facade kit, in world space, so this is the one place that can
+        // record where it hangs. A shop's board and the shop it names are written together.
+        geo.computeBoundingBox();
+        const c = geo.boundingBox!.getCenter(new THREE.Vector3());
+        this.shopSigns.push({
+          x: c.x,
+          // the detail is built in the frame of the group it merges into, and a block group is
+          // lifted to its terrain height: a proof camera reading a local y aims one hill too low
+          y: c.y + this.group.position.y,
+          z: c.z,
+          kind: plan.shop.kind as InteriorKind,
+          name: this.roomFor(plan.shop.kind as InteriorKind)?.name ?? '',
+        });
+      }
+      this.pushFacadeDetail(key, geo);
+    });
     this.facadeAudit.push({
       archetype: spec.id,
       source: plan.source || 'block',
@@ -3820,6 +3901,8 @@ export class City {
       h: plan.h,
       wall,
       trim: plan.trim,
+      retail: spec.retail,
+      shop: !!plan.shop,
     });
   }
 
@@ -3879,9 +3962,21 @@ export class City {
     const doorYaw = Math.atan2(nx, nz);
     const tx = nz; // tangent along the facade
     const tz = -nx;
-    // a shop's door is in the middle of its frontage; anything else gets a side entrance
-    const offAlong = spec.retail ? 0 : faceX ? -fd * 0.22 : -fw * 0.22;
-    const doorX = faceX ? x + nx * (fw / 2 + 0.02) : x + offAlong;
+    // The shop's identity is decided HERE, before its facade is drawn: the plate on the wall, the
+    // door under it and the room it opens into are the same shop, so they cannot disagree.
+    const seed = Math.round(x * 7 + z * 13);
+    const shop = spec.retail ? this.nextShop() : null;
+    // a shop's door is in the bay its ground floor reserved for the entrance; anything else gets
+    // a side entrance
+    // the entrance of anything that is not a shop is off-centre, and it is also measured along the
+    // frontage (fw), not into the depth: the two axes were swapped here as well
+    const offAlong = shop ? entranceOffset(spec.id, seed) * fw : -fw * 0.22;
+    // The door sits on the facade's street face, which is half the DEPTH from the centre — the
+    // facade's local -Z is the outward normal. It used to be half the frontage WIDTH, so on every
+    // lot whose depth exceeded its width (ruko and colonial: 292 of 1278 block shops on one load)
+    // the door and its shop marker were buried inside the building, up to 4.9 m deep, and the shop
+    // could not be entered from the street at all.
+    const doorX = faceX ? x + nx * (fd / 2 + 0.02) : x + offAlong;
     const doorZ = faceX ? z + offAlong : z + nz * (fd / 2 + 0.02);
 
     // local -Z is the street face, so the row is turned by the outward normal
@@ -3896,58 +3991,28 @@ export class City {
       wall,
       trim,
       spec,
-      seed: Math.round(x * 7 + z * 13),
+      seed,
       source: 'block',
+      shop: shop ? { kind: shop.kind, cell: shop.cell } : undefined,
     });
 
     this.doorMatrices.push(new THREE.Matrix4().makeRotationY(doorYaw).setPosition(doorX + nx * 0.06, 1.42, doorZ + nz * 0.06));
     this.handleMatrices.push(
       new THREE.Matrix4().makeTranslation(doorX + tx * 0.45 + nx * 0.14, 1.35, doorZ + tz * 0.45 + nz * 0.14)
     );
-    // remember this entrance as an enterable shop
-    if (spec.retail && fw > 6.5 && fd > 6.5) {
-      const kind = SHOP_KINDS[this.shopDoorKindCursor++ % SHOP_KINDS.length];
-      const room = this.roomFor(kind);
-      if (room) {
-        // two doors inside a few metres make "nearest shop" ambiguous, so only the first one
-        // becomes enterable; the shopfront sign still goes up either way
-        const ex = doorX + nx * 1.1;
-        const ez = doorZ + nz * 1.1;
-        const crowded = this.shopDoors.some((dd) => Math.hypot(dd.x - ex, dd.z - ez) < 8);
-        if (!crowded) this.shopDoors.push({ x: ex, z: ez, nx, nz, kind, name: room.name });
-        // physical shop sign above the door so the street reads Indonesian, and so the shop you
-        // are about to enter is named on the wall
-        const boardTex = canvasTexture(512, 96, (ctx, cw, ch) => {
-          ctx.fillStyle = KIND_SIGN[kind];
-          ctx.fillRect(0, 0, cw, ch);
-          ctx.fillStyle = '#ffffff';
-          fitFont(ctx, room.name, cw - 40, 46);
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(room.name, cw / 2, ch / 2 + 1);
-        });
-        const withBoard = Math.random() < 0.5;
-        const board = new THREE.Mesh(
-          new THREE.BoxGeometry(4.4, 0.9, 0.16),
-          new THREE.MeshStandardMaterial({ map: boardTex, emissive: 0xffffff, emissiveMap: boardTex, emissiveIntensity: 0.25, roughness: 0.55 })
-        );
-        if (withBoard) {
-          board.position.set(doorX + nx * 0.2, 2.95, doorZ + nz * 0.2);
-          board.rotation.y = doorYaw;
-          board.castShadow = true;
-          this.group.add(board);
-        }
-        // welcome mat
-        const mat2 = new THREE.Mesh(
-          new THREE.BoxGeometry(2.0, 0.04, 0.8),
-          new THREE.MeshStandardMaterial({ color: KIND_MAT[kind], roughness: 0.95 })
-        );
-        if (withBoard) {
-          mat2.position.set(doorX + nx * 0.55, 0.29, doorZ + nz * 0.55);
-          mat2.rotation.y = doorYaw;
-          this.group.add(mat2);
-        }
-      }
+    // A retail frontage is a shop you can walk into, full stop. The old gate opened only the first
+    // door of a cluster and left its neighbours closed while still drawing their shutters and
+    // their fascia, and it left every door under 6.5 m shut; that is the "shops that only pretend"
+    // half of this card. `nearestShopDoor` picks the closest door the player is standing outside
+    // of, so two doors a few metres apart resolve without either one going dark.
+    if (shop) {
+      this.shopDoors.push({ x: doorX + nx * 1.1, z: doorZ + nz * 1.1, nx, nz, kind: shop.kind, name: shop.name });
+      // welcome mat in the shop's own colour, collected for one merged mesh
+      const mat = new THREE.BoxGeometry(2.0, 0.04, 0.8);
+      mat.rotateY(doorYaw);
+      mat.translate(doorX + nx * 0.55, 0.29, doorZ + nz * 0.55);
+      this.tint(mat, KIND_MAT[shop.kind]);
+      this.shopMatGeos.push(mat);
     }
 
     for (let s2 = 0; s2 < 2; s2++) {
@@ -4681,6 +4746,9 @@ export class City {
               // row was rotated by the direction of travel, so every shopfront plate and window
               // faced down the road and the street saw a blank flank.
               const yaw = Math.atan2(side * nx, side * nz);
+              const seed = Math.round(px * 7 + pz * 13);
+              // the shop identity comes before the facade, for the same reason as on a block lot
+              const shop = spec.retail ? this.nextShop() : null;
               this.addFacade({
                 x: px,
                 y: terrainHeight(px, pz) + 0.3,
@@ -4692,9 +4760,46 @@ export class City {
                 wall,
                 trim,
                 spec,
-                seed: Math.round(px * 7 + pz * 13),
+                seed,
                 source: 'frontage',
+                shop: shop ? { kind: shop.kind, cell: shop.cell } : undefined,
               });
+              /**
+               * A frontage shop is a shop you can walk into.
+               *
+               * These rows are 540 of the ~790 shopfronts per city that carried a fascia, roller
+               * shutters and a canopy over a wall with no door instance in it: the street said
+               * "shop" and pressing E did nothing. The door goes in the bay the archetype already
+               * reserved for its entrance (`entranceOffset`), which is the bay the plate names, so
+               * the plate, the door and the room are one shop.
+               */
+              if (shop) {
+                const gy = terrainHeight(px, pz) + 0.3;   // the plinth the facade stands on
+                const outX = -Math.sin(yaw);
+                const outZ = -Math.cos(yaw);
+                const tanX = Math.cos(yaw);
+                const tanZ = -Math.sin(yaw);
+                const along = entranceOffset(spec.id, seed) * w;
+                const doorX = px + tanX * along + outX * (d / 2 + 0.06);
+                const doorZ = pz + tanZ * along + outZ * (d / 2 + 0.06);
+                const doorYaw = yaw + Math.PI;
+                // the door's bottom sits on the same plinth course the block lots use: the detail
+                // is built 0.3 m above the terrain, so a door placed on the terrain would sink
+                this.doorMatrices.push(
+                  new THREE.Matrix4().makeRotationY(doorYaw).setPosition(doorX, gy + 1.22, doorZ)
+                );
+                this.handleMatrices.push(
+                  new THREE.Matrix4().makeTranslation(doorX + tanX * 0.45 + outX * 0.14, gy + 1.15, doorZ + tanZ * 0.45 + outZ * 0.14)
+                );
+                this.shopDoors.push({
+                  x: doorX + outX * 1.1,
+                  z: doorZ + outZ * 1.1,
+                  nx: outX,
+                  nz: outZ,
+                  kind: shop.kind,
+                  name: shop.name,
+                });
+              }
               // collider in world space (axis-aligned box around the rotated footprint)
               const halfX = (Math.abs(Math.cos(yaw)) * w + Math.abs(Math.sin(yaw)) * d) / 2;
               const halfZ = (Math.abs(Math.sin(yaw)) * w + Math.abs(Math.cos(yaw)) * d) / 2;
