@@ -3,6 +3,7 @@ import { Car } from '../vehicles/car';
 import { LANE, RoadNav } from '../core/pathfinding';
 import { clamp, angleDelta, rand, roundedBox } from '../core/utils';
 import { Character } from '../actors/character';
+import { plantOnGround } from '../actors/plant';
 
 // A police officer is the same Character asset the player and the crowd are built from: navy
 // shirt, navy trousers, the same head, hands and shoes. Only the colours and the peaked cap are
@@ -32,24 +33,13 @@ function makeCap(): THREE.Group {
   return cap;
 }
 
-const _soleV = new THREE.Vector3();
 /**
- * Sit an officer so the lower sole touches the road. The walk cycle lifts one foot, so the height
- * is measured off the shoes instead of a sine bob on the whole group (which is what the box body
- * needed because it had no legs to swing).
+ * Sit an officer so the lower sole touches the road.
+ *
+ * The same shared measure the player and the crowd use: the planted shoe's real lowest corner, not
+ * the shoe centre minus half its height (see `src/actors/plant.ts`). The walk cycle lifts one foot, so
+ * the height is measured off the shoes instead of a sine bob on the whole group.
  */
-function plantFeet(char: any, groundY: number) {
-  char.group.position.y = groundY;
-  let lowest = Infinity;
-  for (const leg of [char.legL, char.legR]) {
-    const shoe = leg?.children?.[1];
-    if (!shoe) continue;
-    shoe.getWorldPosition(_soleV);
-    lowest = Math.min(lowest, _soleV.y - 0.075 * (char.scale ?? 1));
-  }
-  if (lowest === Infinity) return;
-  char.group.position.y += groundY - lowest;
-}
 
 // Cruisers navigate the road grid instead of aiming at the player through walls:
 // RoadNav gives a lane-accurate waypoint list, this module drives the list with the
@@ -503,7 +493,7 @@ export class Police {
         o.char.phase += (neutral - o.char.phase) * Math.min(1, dt * 7);
       }
       o.char.animate(dt, walking ? 0.5 : 0, { aiming: los });
-      plantFeet(o.char, o.pos.y);
+      plantOnGround(o.char, o.pos.y);
 
       if (los) {
         o.fireCd -= dt;

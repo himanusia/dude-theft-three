@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { City, PITCH, WORLD_HALF } from './world/city';
 import { Character } from './actors/character';
+import { plantOnGround, soleY } from './actors/plant';
 import { Car, driverLook } from './vehicles/car';
 import { loadCarModels } from './vehicles/carmodels';
 import { districtAt } from './world/jakarta';
@@ -540,32 +541,9 @@ function updateCamera(dt: number) {
 }
 
 // ---------------------------------------------------------------- ground contact
-const _footV = new THREE.Vector3();
-
-/**
- * Sit a character so its lowest sole touches `groundY` exactly.
- * `character.footLift` approximates that shift but ignores the shoe's forward
- * offset and its own tilt, which let the planted foot sink a few millimetres
- * into the road. Measuring the real shoe transforms keeps the feet ground-exact
- * for every stride angle, including the frozen LOD poses.
- */
-function plantFeet(ch: any, groundY: number) {
-  if (!ch?.legL || !ch?.legR) return;
-  const scale = ch.scale ?? 1;
-  ch.group.position.y = groundY;
-  let lowest = Infinity;
-  for (const leg of [ch.legL, ch.legR]) {
-    const shoe = leg.children?.[1];
-    if (!shoe) continue;
-    shoe.getWorldPosition(_footV);
-    lowest = Math.min(lowest, _footV.y - 0.075 * scale);
-  }
-  if (lowest === Infinity) return;
-  // relative shift from where the group already sits. The old form added groundY a second
-  // time, which was invisible while the world was flat (groundY = 0) and put every character
-  // twice the ground height into the air once the city had terrain.
-  ch.group.position.y += groundY - lowest;
-}
+// The measure (`city.groundHeightAt`) says what is built under a point; `plantOnGround` sits the
+// body's real sole on it. Both are shared with the pedestrians, so the player and the crowd cannot
+// disagree about where the pavement is.
 
 // ---------------------------------------------------------------- player on foot
 const WALK = 4.7;
@@ -672,7 +650,7 @@ function updateOnFoot(dt: number) {
   character.group.rotation.y = player.yaw;
   const weaponUp = aiming || player.aimHold > 0;
   character.animate(dt, clamp(speed / RUN, 0, 1), { aiming: weaponUp, airborne: !player.grounded, tilt: -player.vel.dot(new THREE.Vector3(right.x, 0, right.z)) * 0.01 });
-  plantFeet(character, player.y);
+  plantOnGround(character, player.y);
 
   // footsteps
   if (speed > 1.2 && player.grounded) {
@@ -2118,17 +2096,12 @@ window.__game = {
     // ---- floating geometry audit: every actor and prop must touch the ground ----
     audit() {
       const report: { peds: any[]; cars: any[]; player: number | null; ragdolls: any[]; props: any[]; buildings: any[] } = { peds: [], cars: [], player: null, ragdolls: [], props: [], buildings: [] };
-      const v = new THREE.Vector3();
 
       for (const ped of peds.peds) {
         if (ped.dead) continue;
         // a walking dude lifts one foot; the planted foot is what must touch the ground
-        const bottoms = [ped.char.legL.children[1], ped.char.legR.children[1]].map((shoe) => {
-          shoe.getWorldPosition(v);
-          return v.y - 0.075 * (ped.char.scale ?? 1);
-        });
         const ground = city.groundHeightAt(ped.pos.x, ped.pos.z);
-        const gap = Math.min(...bottoms) - ground;
+        const gap = soleY(ped.char) - ground;
         if (gap > 0.06 || gap < -0.05) report.peds.push({ gap: +gap.toFixed(3), pos: ped.pos.toArray().map((n: number) => +n.toFixed(1)) });
       }
 
@@ -2146,12 +2119,7 @@ window.__game = {
 
       // lowest sole of the on-foot model vs the logical foot height: this is the
       // number that used to go negative when the planted shoe sank into the road
-      let playerLowest = Infinity;
-      for (const shoe of [character.legL.children[1], character.legR.children[1]]) {
-        shoe.getWorldPosition(v);
-        playerLowest = Math.min(playerLowest, v.y - 0.075 * (character.scale ?? 1));
-      }
-      report.player = +(playerLowest - player.y).toFixed(3);
+      report.player = +(soleY(character) - player.y).toFixed(3);
 
       for (const r of ragdolls) {
         let minY = Infinity;

@@ -46,6 +46,14 @@ node tools/proof-bullets.mjs       # headless: 20 shots, then proves the muzzle 
                                    # surface, and firing allocates NOTHING after warm-up (scene
                                    # objects, GPU geometries and the pool's own counter all flat).
                                    # Writes screenshots/proof/muzzle-flash.png and bullet-impact.png
+node tests/world/ground.mjs        # 7/7: the player's sole, the crowd's soles and the ground
+                                   # measure against the surface that is actually drawn (asphalt,
+                                   # trotoar, kerb ramp), plus a full walking stride
+node tools/measure-ground.mjs      # prints foot / drawn surface / measure / terrain at three
+                                   # points and fails if any foot-to-surface delta is over 2 cm
+node tools/shoot-feet.mjs          # headless: a pavement-level frame of the feet on the trotoar,
+                                   # writes screenshots/proof/feet-on-trotoar.png and checks the
+                                   # pixels (tread row over the paving row) instead of eyeballing it
 node tools/shoot-facades.mjs       # headless: searches the city's own facade audit for the street
                                    # frame that shows the most DISTINCT building archetypes, saves
                                    # screenshots/proof/facade-archetypes.png, raycast-confirms each
@@ -166,6 +174,17 @@ point is not on the ground (`groundHeightAt(x,z)` per sidewalk/road):
 { "peds": [], "cars": [], "player": 0, "ragdolls": [], "props": [], "buildings": [] }
 ```
 
+The measure it reads is `City.groundHeightAt`: every walking slab registers itself as it is built -
+the block plates, the kerb ring under them, parks, lots, the landmark squares, and every quad of the
+swept roads/gutter/kerb/trotoar/kerb-ramp - and the bare terrain is the drawn plane's own
+interpolation. Actors are planted by the shoe's real lowest corner, so a stride cannot sink the
+planted foot into the paving (`src/actors/plant.ts`).
+
+Measured on the commit before that change (same probe, `node tools/measure-ground.mjs`): the sole
+sat 5.2 cm under the asphalt, 7.06 m under a hillside plate and 19 cm under a crossing ramp, a
+walking stride sank 9.1 cm into the trotoar, and pedestrians floated or sank 7-26 cm. After it all
+three points are 0.0000 m and a stride never leaves the ground.
+
 It found and fixed real floaters: benches with no legs, traffic-light heads hanging above the
 mast, billboards 11 cm off the facade, police lightbars floating above the roof, shoes 1 cm into
 the pavement, and pedestrians that lifted both feet during the walk cycle (the body now drops by
@@ -180,6 +199,7 @@ npm run test:qa        # 19/19 gameplay assertions
 npm run test:interior  # 11/11 interior assertions
 npm run test:audit     # floating-geometry audit
 node tests/world/npc-behavior.mjs  # 13/13 pedestrian AI assertions (starts its own server on :8795)
+node tests/world/ground.mjs        # 7/7 ground contract assertions (starts its own server)
 ```
 
 ```

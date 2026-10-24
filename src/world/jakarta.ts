@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PITCH } from './city';
 import { terrainHeight } from './terrain';
+import { GroundKind, GroundPlate } from './ground';
 import { canvasTexture, rand, pick } from '../core/utils';
 
 /** shrink a label until it fits the drawn width */
@@ -154,7 +155,26 @@ type Ctx = {
   group: any;
   colliders: any[];
   audit: { name: string; x: number; z: number; bottom: number }[];
+  /** the city's registered walking slabs, so a landmark's own square is part of the ground measure */
+  grounds?: GroundPlate[];
+  /** world height the landmark group was lifted to; a slab's `top` is `lift + its local top` */
+  lift?: number;
 };
+
+/** Register a raised walking slab a landmark builds, so actors stand on it instead of on the ground. */
+function slab(
+  ctx: Ctx,
+  x: number,
+  z: number,
+  hx: number,
+  hz: number,
+  top: number,
+  kind: GroundKind = 'plate',
+  round?: number
+) {
+  if (!ctx.grounds) return;
+  ctx.grounds.push({ x, z, hx, hz, top: (ctx.lift ?? 0) + top, kind, round });
+}
 
 function block(ctx: Ctx, mat: any, w: number, h: number, d: number, x: number, y: number, z: number) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -179,7 +199,9 @@ export function buildMonas(ctx: Ctx, cx: number, cz: number) {
   const plaza = new THREE.Mesh(new THREE.BoxGeometry(26, 0.14, 26), new THREE.MeshStandardMaterial({ color: 0xcfc9bc, roughness: 0.95 }));
   plaza.position.set(cx, 0.29, cz);
   plaza.receiveShadow = true;
+  plaza.name = 'plate';
   ctx.group.add(plaza);
+  slab(ctx, cx, cz, 13, 13, 0.36);
 
   // the base: a wide stepped socle, like the real monument's goblet
   block(ctx, stone, 16, 1.2, 16, cx, 0.3, cz);
@@ -225,7 +247,9 @@ export function buildBundaran(ctx: Ctx, cx: number, cz: number) {
   const grass = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 0.16, 32), new THREE.MeshStandardMaterial({ color: 0x4e8a44, roughness: 0.95 }));
   grass.position.set(cx, 0.28, cz);
   grass.receiveShadow = true;
+  grass.name = 'lawn';
   ctx.group.add(grass);
+  slab(ctx, cx, cz, 15, 15, 0.36, 'lawn', 15);
 
   const pool = new THREE.Mesh(new THREE.CylinderGeometry(8, 8.4, 0.9, 28), white);
   pool.position.set(cx, 0.75, cz);
@@ -278,7 +302,9 @@ export function buildKotaTua(ctx: Ctx, cx: number, cz: number) {
   const square = new THREE.Mesh(new THREE.BoxGeometry(34, 0.12, 30), cobble);
   square.position.set(cx, 0.28, cz);
   square.receiveShadow = true;
+  square.name = 'plate';
   ctx.group.add(square);
+  slab(ctx, cx, cz, 17, 15, 0.34);
 
   // Stadhuis: long white facade, hipped red roof, central clock tower
   block(ctx, white, 22, 7.2, 9, cx, 0.3, cz - 12);
@@ -443,7 +469,9 @@ export function buildAncolShore(ctx: Ctx, cx: number, cz: number, half = 38) {
   sand.rotation.x = -Math.PI / 2;
   sand.position.set(cx, 0.3, cz - 22);
   sand.receiveShadow = true;
+  sand.name = 'plate';
   ctx.group.add(sand);
+  slab(ctx, cx, cz - 22, half, 8, 0.3);
 
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(520, 150),

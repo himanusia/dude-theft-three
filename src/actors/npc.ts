@@ -2,6 +2,7 @@ import { ARTERIALS, RING_ROAD } from '../world/jakartamap';
 import { LOCAL_STREETS } from '../world/streets';
 import * as THREE from 'three';
 import { Character } from './character';
+import { plantOnGround } from './plant';
 import { clamp, rand, angleDelta } from '../core/utils';
 
 // ---------------------------------------------------------------- street metrics
@@ -48,7 +49,6 @@ const CUSTOMER_CAP = 2; // carts serving a customer at once: a queue, not a crow
 const CUSTOMER_COOLDOWN_MIN = 25; // seconds before the same pedestrian eats again
 const CUSTOMER_COOLDOWN_MAX = 70;
 
-const _footV = new THREE.Vector3();
 const _scratch: any[] = [];
 
 /** Where a cart's vendor stands: on the ground at the cart's serve side, turned into the cart. */
@@ -63,24 +63,10 @@ interface VendorPost {
 }
 
 /**
- * Sit a pedestrian so its lowest sole touches `groundY` exactly. Same reason as
- * the player: footLift ignores the shoe's forward offset and tilt, so the
- * planted foot could dip a few millimetres under the pavement.
+ * Sit a pedestrian on the ground the same way the player is: the planted shoe's real lowest corner
+ * on the surface, not the shoe's centre minus half its height (which sinks it as soon as the leg
+ * swings). See `src/actors/plant.ts`.
  */
-function plantOnGround(ch: any, groundY: number) {
-  if (!ch?.legL || !ch?.legR) return;
-  const scale = ch.scale ?? 1;
-  ch.group.position.y = groundY;
-  let lowest = Infinity;
-  for (const leg of [ch.legL, ch.legR]) {
-    const shoe = leg.children?.[1];
-    if (!shoe) continue;
-    shoe.getWorldPosition(_footV);
-    lowest = Math.min(lowest, _footV.y - 0.075 * scale);
-  }
-  if (lowest === Infinity) return;
-  ch.group.position.y = groundY + (groundY - lowest);
-}
 
 /** Drop points that sit on the straight line between their neighbours. */
 function simplify(path: [number, number][]): [number, number][] {
