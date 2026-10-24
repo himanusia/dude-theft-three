@@ -48,6 +48,13 @@ const CUSTOMER_STOP_MAX = 6;
 const CUSTOMER_CAP = 2; // carts serving a customer at once: a queue, not a crowd
 const CUSTOMER_COOLDOWN_MIN = 25; // seconds before the same pedestrian eats again
 const CUSTOMER_COOLDOWN_MAX = 70;
+// The walking crowd is recycled around the player, and a cart 230 m from the spawn is outside
+// that ring forever, so nobody ever reaches it. A couple of walkers therefore belong to each
+// cart instead: they shuttle along the pavement in front of the counter, where every pass is a
+// chance to stop for food, and they are recycled around their own cart rather than the player.
+const CART_REGULARS = 2; // walkers posted at each cart, out of the crowd budget
+const CART_BEAT = 3.0; // metres of pavement a regular walks away from the cart and back
+const CART_LEASH = 25; // a regular further than this from its cart is put back on the beat
 
 const _scratch: any[] = [];
 
@@ -238,6 +245,14 @@ export class Ped {
 
   // a vendor belongs to a cart; a customer is a walker stopped at one
   declare vendor: boolean;
+  /** index into `mgr.cartPosts` for a walker that belongs to a cart's stretch of pavement */
+  declare regular: number;
+  /** the stretch of pavement in front of that cart: a leg and two points along it */
+  declare beatLeg: number;
+  declare beatA: number;
+  declare beatB: number;
+  /** which end of the beat it is walking to: 0 = a, 1 = b */
+  declare beatTo: number;
   declare postIndex: number;
   declare postX: number;
   declare postZ: number;
@@ -318,6 +333,11 @@ export class Ped {
 
     // a vendor is placed by its cart and stays there: the post is the cart, not a pavement lane
     this.vendor = !!opts.vendor;
+    this.regular = opts.regular?.i ?? -1;
+    this.beatLeg = -1;
+    this.beatA = 0;
+    this.beatB = 0;
+    this.beatTo = 0;
     this.postIndex = opts.vendor?.i ?? -1;
     this.postX = opts.vendor?.x ?? this.pos.x;
     this.postZ = opts.vendor?.z ?? this.pos.z;
@@ -376,6 +396,10 @@ export class Ped {
 
   /** Walk to the zebra at the end of this run of pavement, or turn the corner. */
   private plan() {
+    if (this.regular >= 0) {
+      this.planRegular();
+      return;
+    }
     const L = this.mgr.legs[this.leg];
     const t = this.legT();
     if (!this.crossed && L.cross >= 0) {
@@ -398,6 +422,56 @@ export class Ped {
     this.wpCross = false;
     const endT = this.dir > 0 ? L.len : 0;
     this.setTarget(L.ax + L.ux * endT, L.az + L.uz * endT);
+  }
+
+  /**
+   * A regular walks a short beat on the pavement in front of its cart instead of a leg end to
+   * end, so it keeps coming back past the counter. It stays on one lane, so it never steps onto
+   * a crossing and no shop row can walk it away from the shop; the end of the beat sends it back
+   * the other way (see the arrival branch in `updateWalk`).
+   */
+  private planRegular() {
+    const post = this.mgr?.cartPosts?.[this.regular];
+    if (!post) {
+      // the cart this walker belonged to is gone: rejoin the ordinary crowd
+      this.regular = -1;
+      this.plan();
+      return;
+    }
+    if (this.beatLeg < 0) {
+      const beat = this.mgr.cartBeat(post, 1);
+      this.beatLeg = beat.leg;
+      this.beatA = beat.a;
+      this.beatB = beat.b;
+    }
+    const L = this.mgr.legs[this.beatLeg];
+    this.leg = this.beatLeg;
+    const t = clamp((this.pos.x - L.ax) * L.ux + (this.pos.z - L.az) * L.uz, 0, L.len);
+    // walk to the end of the beat it is not standing at
+    this.beatTo = Math.abs(t - this.beatA) > Math.abs(t - this.beatB) ? 0 : 1;
+    const target = this.beatTo === 0 ? this.beatA : this.beatB;
+    this.dir = target >= t ? 1 : -1;
+    this.wpCross = false;
+    this.setTarget(L.ax + L.ux * target, L.az + L.uz * target);
+  }
+
+  /**
+   * The far end of the beat is inside a shop row or behind a parked car: turning round there is
+   * what a person would do, and it beats grinding into the wall until the stuck timer fires.
+   */
+  private flipRegular() {
+    if (this.beatLeg < 0) {
+      this.repath();
+      return;
+    }
+    const L = this.mgr.legs[this.beatLeg];
+    this.beatTo = this.beatTo === 0 ? 1 : 0;
+    const target = this.beatTo === 0 ? this.beatA : this.beatB;
+    const t = clamp((this.pos.x - L.ax) * L.ux + (this.pos.z - L.az) * L.uz, 0, L.len);
+    this.dir = target >= t ? 1 : -1;
+    this.wpCross = false;
+    this.setTarget(L.ax + L.ux * target, L.az + L.uz * target);
+    this.stuckT = 0;
   }
 
   private setTarget(x: number, z: number) {
@@ -763,6 +837,7 @@ export class Ped {
     }
     if (dx * dx + dz * dz < 0.81) {
       if (this.wpCross) this.beginCrossing();
+      else if (this.regular >= 0) this.planRegular();
       else this.arriveLegEnd();
       return;
     }
@@ -1105,7 +1180,8 @@ export class Ped {
       this.stuckT += dt;
       if (this.stuckT > 2) {
         this.stuckT = 0;
-        this.repath();
+        if (this.regular >= 0) this.flipRegular();
+        else this.repath();
       }
     } else {
       this.stuckT = 0;
@@ -1220,6 +1296,10 @@ export class PedManager {
       b.leader = a;
       this.pairs += 1;
     }
+    // Two of the walkers belong to each cart rather than to the player. Done inside the crowd
+    // budget, so the street keeps its 46 bodies: the money is in the carts the player never
+    // stands next to, and those are the ones nobody ever walked to.
+    this.assignCartWalkers();
     // A vendor for every cart, on top of the walking crowd. The 46-pedestrian budget the world
     // gate enforces is the walking crowd plus these, so the street gets its shops without the
     // count check having to grow. Added after the pairing pass: a vendor is not one half of a
@@ -1680,6 +1760,86 @@ export class PedManager {
   }
 
   /**
+   * Post a couple of the walking crowd at each cart. They are walkers like any other - the same
+   * body, the same speed, the same shopping - but their beat is the pavement in front of the
+   * cart, and `update` recycles them around that cart instead of around the player.
+   */
+  private assignCartWalkers() {
+    const walkers = this.peds.filter((p) => !p.vendor);
+    let k = walkers.length - 1; // from the back: the front of the crowd keeps the street fixtures
+    for (let i = 0; i < this.cartPosts.length; i++) {
+      const post = this.cartPosts[i];
+      for (let n = 0; n < CART_REGULARS && k >= 0; n++) {
+        const beat = this.cartBeat(post, n === 0 ? -1 : 1);
+        const p = walkers[k--];
+        if (p.leader) {
+          if (p.leader.partner === p) p.leader.partner = null;
+          p.leader = null;
+        }
+        if (p.partner) {
+          if (p.partner.partner === p) p.partner.partner = null;
+          if (p.partner.leader === p) p.partner.leader = null;
+          p.partner = null;
+        }
+        p.regular = post.i;
+        p.beatLeg = beat.leg;
+        p.beatA = beat.a;
+        p.beatB = beat.b;
+        // not everybody queues on the first second: the carts serve at a spread of times
+        p.shopCd = rand(0, CUSTOMER_COOLDOWN_MAX * 0.4);
+        const spot = this.beatSpot(p);
+        p.placeAt(spot.x, spot.z);
+      }
+    }
+  }
+
+  /**
+   * The stretch of pavement in front of a cart that a regular walks, on the `sign` side of it: the
+   * lane point beside the cart (where a customer stands) out to `CART_BEAT` metres along the lane.
+   * A cart whose footprint actually covers the lane starts the beat past its collider instead, or
+   * a walker aimed through it grinds on that box and never moves.
+   */
+  cartBeat(post: VendorPost, sign: number) {
+    const near = this.nearestLeg(post.cx, post.cz);
+    const L = this.legs[near.leg];
+    // how far the cart's collider reaches along the lane, plus a body and a little air
+    let reach = 0.9;
+    const list = this.grid.near(post.cx, post.cz);
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (post.cx < b.minX || post.cx > b.maxX || post.cz < b.minZ || post.cz > b.maxZ) continue;
+      for (const x of [b.minX, b.maxX]) {
+        for (const z of [b.minZ, b.maxZ]) {
+          const along = (x - post.cx) * L.ux + (z - post.cz) * L.uz;
+          if (Math.abs(along) > reach) reach = Math.abs(along);
+        }
+      }
+    }
+    const clear = reach + RADIUS + 0.25;
+    // The lane point beside the cart is where a customer stands - the vendor's own post is
+    // there - so the near end of the beat belongs at the cart unless the cart's footprint
+    // actually covers the lane (then a walker aimed through it grinds on the collider).
+    const c0x = L.ax + L.ux * near.t;
+    const c0z = L.az + L.uz * near.t;
+    const off = this.clearOfBuildings(c0x, c0z) ? 0 : clear;
+    let a = clamp(near.t + sign * off, 0, L.len);
+    let b = clamp(near.t + sign * (off + CART_BEAT), 0, L.len);
+    if (Math.abs(b - a) < 0.8) {
+      // the lane runs out under the cart: walk away on the other side instead
+      a = clamp(near.t - sign * clear, 0, L.len);
+      b = clamp(near.t - sign * (clear + CART_BEAT), 0, L.len);
+    }
+    return { leg: near.leg, a: Math.min(a, b), b: Math.max(a, b) };
+  }
+
+  /** Somewhere on a regular's beat, on the ground: a spawn/recycle point that is never in a wall. */
+  private beatSpot(p: any) {
+    const L = this.legs[p.beatLeg];
+    const t = clamp(rand(p.beatA, p.beatB), 0, L.len);
+    return { x: L.ax + L.ux * t, z: L.az + L.uz * t };
+  }
+
+  /**
    * A spot on a pavement lane between minR and maxR from (cx,cz). This is how the crowd is
    * spawned and recycled: never a random block ring, so nobody is ever dropped inside a wall.
    */
@@ -1814,7 +1974,9 @@ export class PedManager {
       }
     }
 
-    // keep the crowd near the player: far pedestrians are re-placed on a pavement around him
+    // keep the crowd near the player: far pedestrians are re-placed on a pavement around him.
+    // The walkers that belong to a cart are the exception: they are recycled around their own
+    // cart, so a gerobak 230 m from the spawn still has people walking past the counter.
     this.flowTimer += dt;
     if (this.flowTimer > 2.2 && ctx.playerPos) {
       this.flowTimer = 0;
@@ -1826,6 +1988,17 @@ export class PedManager {
         // never yank a body off a crossing: a teleport on the zebra both loses the crossing
         // and looks broken. The lane walk is what gets recycled.
         if (p.mode === 'cross') continue;
+        if (p.regular >= 0) {
+          // only a calm regular is put back: a fleeing one is mid-run, not lost
+          if (p.state !== 'walk') continue;
+          const post = this.cartPosts[p.regular];
+          if (!post) continue;
+          if (Math.hypot(p.pos.x - post.cx, p.pos.z - post.cz) > CART_LEASH) {
+            const spot = this.beatSpot(p);
+            p.placeAt(spot.x, spot.z);
+          }
+          continue;
+        }
         if (p.pos.distanceTo(ctx.playerPos) > 80) {
           const spot = this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 14, 48) ||
             this.pavementPointNear(ctx.playerPos.x, ctx.playerPos.z, 8, 120);
