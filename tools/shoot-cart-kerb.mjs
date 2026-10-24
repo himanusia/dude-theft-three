@@ -50,6 +50,16 @@ await page.evaluate(() => {
 const pick = await page.evaluate(() => {
   const g = window.__game;
   const THREE = g.THREE;
+  // `city.pavementBand` is gone: the ground is described by `groundInfoAt().kind` now, which reads
+  // the drawn plates and ribbons. Paving is `walk` (trotoar) / `plate` (a block); the carriageway
+  // is `road`; the bare verge is `terrain`.
+  const PAVED = ['walk', 'plate', 'kerb', 'ramp'];
+  const kindAt = (x, z) => g.city.groundInfoAt(x, z).kind;
+  const isRoad = (x, z) => kindAt(x, z) === 'road';
+  // every ground hit goes through this list, not the whole scene: a muzzle flash is a Sprite, and
+  // `Sprite.raycast` throws when the raycaster has no camera
+  const meshes = [];
+  g.scene.traverse((o) => { if (o.isMesh) meshes.push(o); });
   const carts = [];
   g.scene.traverse((o) => {
     if (typeof o.name === 'string' && o.name.startsWith('kaki5-')) carts.push(o);
@@ -57,7 +67,7 @@ const pick = await page.evaluate(() => {
   const groundUnder = (x, z) => {
     const near = g.city.groundHeightAt(x, z);
     const rc = new THREE.Raycaster(new THREE.Vector3(x, near + 1.6, z), new THREE.Vector3(0, -1, 0), 0, 3.2);
-    for (const h of rc.intersectObjects(g.scene.children, true)) {
+    for (const h of rc.intersectObjects(meshes, true)) {
       if (h.object.material && h.object.material.transparent) continue;
       if (h.face) {
         const n = h.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld)).normalize();
@@ -83,8 +93,8 @@ const pick = await page.evaluate(() => {
       for (let d = 0.4; d <= 6; d += 0.2) {
         const bx = c.position.x + Math.cos(a) * d;
         const bz = c.position.z + Math.sin(a) * d;
-        if (g.city.pavementBand(bx, bz) !== 0) continue;
-        if (g.city.pavementBand(bx + Math.cos(a) * 0.8, bz + Math.sin(a) * 0.8) !== 0) continue;
+        if (!isRoad(bx, bz)) continue;
+        if (!isRoad(bx + Math.cos(a) * 0.8, bz + Math.sin(a) * 0.8)) continue;
         hitD = d;
         break;
       }
@@ -97,7 +107,7 @@ const pick = await page.evaluate(() => {
     }
     // on the raised paving, not in the gutter beside it: the cart's own base has to be at the
     // height `groundHeightAt` reports for that slot
-    const raised = g.city.pavementBand(c.position.x, c.position.z) > 0 && Math.abs(at - g.city.groundHeightAt(c.position.x, c.position.z)) < 0.1;
+    const raised = PAVED.includes(kindAt(c.position.x, c.position.z)) && Math.abs(at - g.city.groundHeightAt(c.position.x, c.position.z)) < 0.1;
     out.push({ i, name: c.name, x: c.position.x, y: c.position.y, z: c.position.z, yaw: c.rotation.y, at, drop, out: outA, kerbNear: +kerbNear.toFixed(2), raised });
   });
   function d2(v) { return v; }
@@ -110,6 +120,10 @@ const pick = await page.evaluate(() => {
 const shot = await page.evaluate(async ({ cand, width, height }) => {
   const g = window.__game;
   const THREE = g.THREE;
+  // meshes only: an occlusion ray has to hit something with a face, and a Sprite without a camera
+  // on the raycaster throws instead of returning a hit
+  const meshes = [];
+  g.scene.traverse((o) => { if (o.isMesh) meshes.push(o); });
   const groups = [];
   g.scene.traverse((o) => {
     // the city builds two carts of each kind, so the stance (not the name) is what identifies the
@@ -145,7 +159,10 @@ const shot = await page.evaluate(async ({ cand, width, height }) => {
   // surface, or the frame proves nothing about the drop the old shots hid
   // the carriageway, not a 20 cm sliver: the band has to stay absent for 1.6 m past the first
   // non-band point, or the camera lands back on paving behind a crossing mouth
-  const onRoad = (ax, az) => g.city.pavementBand(ax, az) === 0;
+  // the camera has to stand on the carriageway itself: `groundInfoAt().kind` names the drawn
+  // surface, so `road` is asphalt and not a lot, a gutter or the far side of a crossing mouth
+  const isRoad = (ax, az) => g.city.groundInfoAt(ax, az).kind === 'road';
+  const onRoad = (ax, az) => isRoad(ax, az);
   const roadDistance = (a) => {
     for (let d = 1.0; d <= 6.5; d += 0.2) {
       const px = group.position.x + Math.cos(a) * d;
@@ -214,7 +231,7 @@ const shot = await page.evaluate(async ({ cand, width, height }) => {
         const dir = pt.clone().sub(cam);
         const dd = dir.length();
         rays.set(cam, dir.normalize());
-        const hit = rays.intersectObjects(g.scene.children, true).find((h) => !(h.object.material && h.object.material.transparent));
+        const hit = rays.intersectObjects(meshes, true).find((h) => !(h.object.material && h.object.material.transparent));
         if (hit && hit.distance < dd - 0.08 && !isMine(hit.object)) blocked.push({ at: name, by: hit.object.name || hit.object.type, d: +hit.distance.toFixed(2) });
       }
       const proj = (v) => {
@@ -237,7 +254,7 @@ const shot = await page.evaluate(async ({ cand, width, height }) => {
         const dir = far.p.clone().add(new THREE.Vector3(0, 0.16, 0)).sub(cam);
         const dd = dir.length();
         rays.set(cam, dir.normalize());
-        const hit = rays.intersectObjects(g.scene.children, true).find((h) => !(h.object.material && h.object.material.transparent));
+        const hit = rays.intersectObjects(meshes, true).find((h) => !(h.object.material && h.object.material.transparent));
         farVisible = !!hit && Math.abs(hit.distance - dd) < 0.4;
       }
       const farPt = proj(far.p);
@@ -245,7 +262,7 @@ const shot = await page.evaluate(async ({ cand, width, height }) => {
       const res = {
         cam: [+cam.x.toFixed(2), +cam.y.toFixed(2), +cam.z.toFixed(2)],
         camGround: +camGround.toFixed(3),
-        camIsRoad: g.city.pavementBand(cx, cz) === 0,
+        camIsRoad: isRoad(cx, cz),
         kerbDistance: +kerbAt.toFixed(2),
         distance: +dist.toFixed(2),
         reach,

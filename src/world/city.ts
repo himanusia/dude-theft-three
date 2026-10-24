@@ -106,6 +106,49 @@ const OJEK_KERB_INSET = 1.1;
 /** Fallback slot for paving that is not one plane: the kerbside lane, 2 m off the centre line. */
 const OJEK_ROAD_INSET = 5.5;
 
+/**
+ * How far toward the kerb a gerobak rank is pulled off the generic kerbside slot.
+ *
+ * The generic slot is `half + 3.5` from the centre line and the paving runs `half+0.2 .. half+3.8`,
+ * so it is the shopfront end of the walk: measured on the rank, the outermost tyre stood 1.62-3.89 m
+ * from the kerb line (t_6cd9aa18), which reads as a cart in the middle of the pavement rather than
+ * a prop at the kerb. A gerobak parks broadside with its 1.0 m track ACROSS the kerb line, so its
+ * outer tyre sits half of that track nearer the road than the slot does: at 2.55 m of inset the
+ * slot is 0.95 m off the asphalt, the outer tyre 0.45 m, the inner one 1.45 m and the two braced
+ * feet 0.66 / 1.24 m - the whole cart on the 3.6 m slab, 0.45 m from the kerb.
+ *
+ * 0.45 m is deliberately the middle of the 0.2-0.7 m band a kerbside prop reads as: `wideStance`
+ * treats the inset as a starting point, not a promise, and slides the cart 0.2 m either side along
+ * this same kerb normal to find level paving without leaving the band.
+ */
+const CART_KERB_INSET = 2.55;
+/** The band an outermost tyre is expected to park in, measured as `distToPath - half`. */
+const CART_KERB_MIN = 0.2;
+const CART_KERB_MAX = 0.7;
+/** Half the track across the cart's tyres: a SLOT sits this much further out than its outer tyre. */
+const CART_TRACK_HALF = 0.5;
+/**
+ * The largest spread between a stance's four contacts that `standOnContacts` can still seat.
+ *
+ * Its tilt cap is 11.5 deg (0.2 rad) over the 1.26 m footprint diagonal, which is 0.25 m of height
+ * difference; 0.22 leaves margin. This is the "seat it, do not abandon it" threshold: at 0.16 a
+ * stance on a 10 deg crossfall was rejected and the search parked the cart 1 m further out
+ * (measured, t_6cd9aa18) even though the tilt solver could have seated it.
+ */
+const SEATABLE = 0.22;
+
+/**
+ * What a cart is allowed to stand on and still read as a kerbside prop.
+ *
+ * `groundInfoAt` reports the surface as it is DRAWN (`plate` blocks, the `walk` trotoar ribbon, the
+ * `kerb` stone and a `ramp` at a crossing mouth), which is the difference between paving and the
+ * bare verge a plate sits on: a cart down in the gutter beside a 26 cm slab is level and grounded,
+ * and only the surface's name says it is wrong (t_6cd9aa18). The mesh names are the same surfaces
+ * as the ray in `contactGround` sees them, so the analytic test and the seated ray agree.
+ */
+const PAVED_KINDS = new Set<GroundKind>(['plate', 'walk', 'kerb', 'ramp']);
+const PAVED_MESHES = new Set(['plate', 'trotoar', 'kerb', 'kerb-ramp']);
+
 
 // Every interior kind is built once; shop doors cycle through this pool, so all
 // seven rooms are reachable no matter how the city is randomised.
@@ -190,6 +233,21 @@ interface GroundContact {
   z: number;
   /** contact patch radius: how far to look for the lowest vertex of this foot or tread */
   r: number;
+  /** a road wheel: the rank's distance from the kerb is measured on the outermost one */
+  tyre?: boolean;
+}
+
+/**
+ * The carriageway a kerbside prop stands beside, as `snapToVerge` measured it: the path, its
+ * half-width, and the unit normal pointing away from the centre line (the direction the slot is
+ * pushed along when it is inset). `kerbGap` is `distToPath - half`, so 0 is the edge of the
+ * asphalt, 0..0.2 is the kerb cap, and anything past 0.2 is paving.
+ */
+interface KerbFrame {
+  path: [number, number][];
+  half: number;
+  nx: number;
+  nz: number;
 }
 
 /**
@@ -200,8 +258,8 @@ interface GroundContact {
  * across that edge puts one tyre 26 cm over the carriageway (t_3bbf1bce).
  */
 const CART_CONTACTS: GroundContact[] = [
-  { x: 0.38, z: 0.5, r: 0.2 },
-  { x: 0.38, z: -0.5, r: 0.2 },
+  { x: 0.38, z: 0.5, r: 0.2, tyre: true },
+  { x: 0.38, z: -0.5, r: 0.2, tyre: true },
   { x: -0.6, z: 0.29, r: 0.2 },
   { x: -0.6, z: -0.29, r: 0.2 },
 ];
@@ -1101,14 +1159,17 @@ export class City {
    * `accept` rejects a candidate slot the caller cannot use - the ojek rank needs both tyres on one
    * surface, and the paving is not one surface at a crossing mouth. The walk along the kerb is a
    * fixed order, so the slot a caller gets is deterministic for a given layout.
+   *
+   * The returned `kerb` frame names the carriageway the slot was measured against, so a caller can
+   * keep working in the same frame: `kerbGap()` on a contact is its distance from that kerb line.
    */
   snapToVerge(
     x: number,
     z: number,
     inset = 0,
     accept?: (p: { x: number; z: number; yaw: number }) => boolean
-  ): { x: number; z: number; yaw: number } | null {
-    let best: { d: number; cx: number; cz: number; nx: number; nz: number; yaw: number; half: number } | null = null;
+  ): { x: number; z: number; yaw: number; kerb: KerbFrame } | null {
+    let best: { d: number; cx: number; cz: number; nx: number; nz: number; yaw: number; half: number; path: [number, number][] } | null = null;
     for (const a of [...ARTERIALS, { path: RING_ROAD, width: 20 } as any]) {
       const pts = a.path as [number, number][];
       for (let i = 0; i < pts.length - 1; i++) {
@@ -1123,7 +1184,7 @@ export class City {
         const d = Math.hypot(x - cx, z - cz);
         if (!best || d < best.d) {
           const len = Math.sqrt(len2) || 1;
-          best = { d, cx, cz, nx: -dz / len, nz: dx / len, yaw: Math.atan2(dx, dz), half: a.width / 2 };
+          best = { d, cx, cz, nx: -dz / len, nz: dx / len, yaw: Math.atan2(dx, dz), half: a.width / 2, path: pts };
         }
       }
     }
@@ -1131,8 +1192,7 @@ export class City {
     // The kerb cap ends at half+0.2 and the paving runs 3.6 m behind it, so this is 0.3 m short of
     // the shopfront line, not the middle of the slab: a prop deeper than 0.6 m has to inset itself.
     const off = best.half + 1.9 + 1.6 - inset;
-    const free = (px: number, pz: number) =>
-      this.colliders.every((c) => px < c.minX - 1.2 || px > c.maxX + 1.2 || pz < c.minZ - 1.2 || pz > c.maxZ + 1.2);
+    const free = (px: number, pz: number) => this.slotFree(px, pz);
     // walk along the kerb as well as across it: one POI can land where a shopfront juts out, and
     // the slot two doors down is still on the same pavement
     const dirX = best.nz;
@@ -1143,10 +1203,41 @@ export class City {
         const pz = best.cz + dirZ * along + best.nz * off * side;
         if (!free(px, pz) || isWater(px, pz)) continue;
         if (accept && !accept({ x: px, z: pz, yaw: best.yaw })) continue;
-        return { x: px, z: pz, yaw: best.yaw };
+        // the normal is reported at the side the slot actually took, so a caller can walk further
+        // toward the kerb (or away from it) along the same line
+        return { x: px, z: pz, yaw: best.yaw, kerb: { path: best.path, half: best.half, nx: best.nx * side, nz: best.nz * side } };
       }
     }
     return null;
+  }
+
+  /** is (x,z) clear of every collider, keeping `margin` metres off its edges? */
+  private slotFree(px: number, pz: number, margin = 1.2): boolean {
+    return this.colliders.every(
+      (c) => px < c.minX - margin || px > c.maxX + margin || pz < c.minZ - margin || pz > c.maxZ + margin
+    );
+  }
+
+  /**
+   * The nearest kerb line of ANY mapped carriageway, as `distToPath - half`.
+   *
+   * A stance is inset along one road's normal, but a cart can land beside a junction where the
+   * crossing street's kerb is half a metre nearer than the one it was measured against. Measuring
+   * only the frame put three carts of six inside 0.09 m of the crossing kerb (t_6cd9aa18): the tyre
+   * band has to be judged against the kerb the eye actually sees.
+   */
+  private kerbGapAny(px: number, pz: number): number {
+    let best = Infinity;
+    for (const a of [...ARTERIALS, { path: RING_ROAD, width: 20 } as any]) {
+      const gap = this.distToPath(px, pz, a.path as [number, number][]) - a.width / 2;
+      if (gap < best) best = gap;
+    }
+    return best;
+  }
+
+  /** is the drawn ground here paving (`plate`/`trotoar`/kerb/ramp) rather than the bare verge? */
+  private onPaving(px: number, pz: number): boolean {
+    return PAVED_KINDS.has(this.groundInfoAt(px, pz).kind);
   }
 
   /** Haltes, food carts, the nutrition kitchen and the village cooperative, all kerbside. */
@@ -1189,12 +1280,24 @@ export class City {
    * wall two metres up cannot be mistaken for the street.
    */
   private contactGround(x: number, z: number): number | null {
+    const s = this.contactSurface(x, z);
+    return s ? s.y : null;
+  }
+
+  /**
+   * The built surface under (x, z), and which mesh it is.
+   *
+   * The height is the contact target (see `contactGround`); the name is what tells paving from the
+   * bare verge. `groundHeightAt` carries a 1.2 m margin past a block plate's visible edge, so the
+   * analytic height calls bare ground "on the pavement" - only the mesh the ray actually hit knows.
+   */
+  private contactSurface(x: number, z: number): { y: number; mesh: string } | null {
     const near = this.groundHeightAt(x, z);
     const ray = new THREE.Raycaster(new THREE.Vector3(x, near + 1.2, z), new THREE.Vector3(0, -1, 0), 0, 2.4);
     const hits = ray.intersectObjects(this.surfaces(), true) as { point: THREE.Vector3; face: { normal: THREE.Vector3 } | null; object: THREE.Object3D }[];
     const n = new THREE.Vector3();
     const nm = new THREE.Matrix3();
-    let best: number | null = null;
+    let best: { y: number; mesh: string } | null = null;
     for (const h of hits) {
       if (h.point.y > near + 0.32 || h.point.y < near - 0.6) continue;
       // only an upward face can be stood on. A ray that lands on the vertical back of a paving slab
@@ -1204,7 +1307,7 @@ export class City {
         n.copy(h.face.normal).applyMatrix3(nm.getNormalMatrix(h.object.matrixWorld)).normalize();
         if (n.y < 0.5) continue;
       }
-      if (best === null || h.point.y > best) best = h.point.y;
+      if (best === null || h.point.y > best.y) best = { y: h.point.y, mesh: h.object.name };
     }
     return best;
   }
@@ -1250,58 +1353,153 @@ export class City {
    *
    * `placeOnGround` samples the slot once, which seats a narrow prop and mis-seats a wide one: the
    * kerbside slot sits on the pavement edge, a gerobak's track is 1.0 m across that edge, and one
-   * tyre ended up 26 cm over the carriageway (measured, t_3bbf1bce). This walks the slot outward in
-   * 30 cm rings and scores every candidate on two things: are the built heights under the four
-   * contacts within 3 cm of each other (the largest spread a rigid prop can take and still have
-   * every tyre and foot on the ground), and is each of them the surface `groundHeightAt` describes.
-   * The first candidate that passes both, nearest the slot, is returned; failing that the flattest
-   * stance on a slab, then any level ground, then the flattest place found - a cart parked in the
-   * gutter under a kerb is still a cart on the ground, and the audit reports the gap either way.
+   * tyre ended up 26 cm over the carriageway (measured, t_3bbf1bce). This walks the slot along the
+   * kerb normal and then outward in 30 cm rings, and scores every candidate on three things: are
+   * the built heights under the four contacts within 3 cm of each other, is every contact standing
+   * on paving (`plate`/`trotoar`) rather than bare terrain, and - when the caller passes the kerb
+   * frame - is the outermost tyre 0.2-0.7 m off the kerb line.
+   *
+   * The preference order is the point of the search: a level stance on paving beats a level stance
+   * on bare terrain even 2.4 m away, because a cart in the gutter beside a 26 cm plate reads as a
+   * prop in a ditch, while a cart a ring out still reads as a kerbside cart (t_6cd9aa18). Bare
+   * terrain is only taken when no paving is reachable, and then the flattest grounded spot wins.
+   *
+   * Two budgets keep the ray count sane: the cheap analytic ground (`groundInfoAt`, no ray) picks
+   * the candidates worth raycasting first, and the ray total is capped per cart. The cap is on RAYS
+   * actually cast, not candidates visited, so the cheap rejections cannot starve the search.
    *
    * Returns a stance, not a correction: the caller builds the prop there, so the audit entry, the
    * collider and the mesh all describe the same place.
    */
-  private wideStance(x: number, z: number, yaw: number, contacts: GroundContact[]) {
+  private wideStance(x: number, z: number, yaw: number, contacts: GroundContact[], kerb?: KerbFrame) {
     const spreadOf = (g: number[]) => Math.max(...g) - Math.min(...g);
-    const onPavement = (px: number, pz: number) => this.groundHeightAt(px, pz) - terrainHeight(px, pz) > 0.2;
     // a stance is only a stance when the built surface under each contact is the surface
     // `groundHeightAt` describes. On the verge that is not free: the plate is 26 cm high and
     // `groundHeightAt` carries a 1.2 m margin past its edge, so a cart can stand on the ground
     // beside a slab and read "on the pavement" analytically. Level, but in the gutter.
-    const onTheSurface = (p: { x: number; z: number }, built: number) => Math.abs(built - this.groundHeightAt(p.x, p.z)) <= 0.08;
-    let onSlab: { x: number; z: number; spread: number } | null = null;
-    let levelAny: { x: number; z: number } | null = null;
-    let flattest: { x: number; z: number; spread: number } | null = null;
-    let rays = 0;
-    for (const r of [0, 0.3, 0.6, 0.9, 1.2, 1.5]) {
-      const steps = r === 0 ? 1 : 8;
-      for (let i = 0; i < steps; i++) {
-        const a = (i / steps) * Math.PI * 2;
-        const cx = x + Math.cos(a) * r;
-        const cz = z + Math.sin(a) * r;
-        const pts = contacts.map((c) => this.contactWorld(cx, cz, yaw, c));
-        const grounds: number[] = [];
-        for (const p of pts) {
-          const g = this.contactGround(p.x, p.z);
-          if (g === null) break;
-          grounds.push(g);
+    const agrees = (built: number, px: number, pz: number) => Math.abs(built - this.groundHeightAt(px, pz)) <= 0.08;
+
+    type Cand = { x: number; z: number; inset: number };
+    type Scored = Cand & { rank: number; spread: number; grounded: boolean };
+    // The kerb band is a narrow corridor, not a disc: the tyre has 0.5 m of legal kerb and the slot
+    // already sits in the middle of it. So the search walks ALONG the kerb first (the paving is
+    // rarely one plane for 6 m, and a step or a collider at the slot is not an argument for parking
+    // mid-slab), staying inside the band across it. Measured on load 3 of the verification: the
+    // disc-only search had to leave the band by 0.9 m on one layout of three (t_6cd9aa18).
+    const corridorCands: Cand[] = [{ x, z, inset: 0 }];
+    const ringCands: Cand[] = [];
+    if (kerb) {
+      const tx = kerb.nz;            // the kerb's own direction, i.e. the corridor
+      const tz = -kerb.nx;
+      for (const along of [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.8, -1.8, 2.4, -2.4, 3.0, -3.0]) {
+        for (const d of [0, -0.2, 0.2]) {
+          if (along === 0 && d === 0) continue;
+          corridorCands.push({ x: x + tx * along + kerb.nx * d, z: z + tz * along + kerb.nz * d, inset: Math.abs(along) + Math.abs(d) });
         }
-        if (grounds.length < pts.length) continue;
-        rays++;
-        const spread = spreadOf(grounds);
-        const slab = pts.every((p, k) => onTheSurface(p, grounds[k]));
-        if (!flattest || spread < flattest.spread) flattest = { x: cx, z: cz, spread };
-        if (slab && pts.every((p) => onPavement(p.x, p.z)) && spread <= 0.03) return { x: cx, z: cz };
-        if (slab && (!onSlab || spread < onSlab.spread) && spread <= 0.16) onSlab = { x: cx, z: cz, spread };
-        if (spread <= 0.03 && !levelAny) levelAny = { x: cx, z: cz };
-        if (rays >= 80) break;
       }
-      if (rays >= 80) break;
     }
-    // a stance on the paving beats a level one in the gutter: the cart is a kerbside prop, and the
-    // tilt in standOnContacts is there for exactly the grade a slab can have
-    const pick = onSlab ?? levelAny ?? flattest;
-    return pick ? { x: pick.x, z: pick.z } : { x, z };
+    // then a ring walk out to 2.4 m, for a layout where the paving is cut at the slot altogether
+    for (const r of [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4]) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        ringCands.push({ x: x + Math.cos(a) * r, z: z + Math.sin(a) * r, inset: r });
+      }
+    }
+
+    const pick: { best: Scored | null; rays: number } = { best: null, rays: 0 };
+
+    /** score one candidate; true when it is the stance the rank wants and the search can stop */
+    const evaluate = (c: Cand, budget: number): boolean => {
+      if (pick.rays >= budget) return false;
+      // the collider test has to run on the stance the prop actually takes: the slot was clear when
+      // snapToVerge picked it, but the search can walk the prop a couple of metres off that slot.
+      // Same 1.2 m clearance the slot itself was chosen with, so the whole rank obeys one rule.
+      if (!this.slotFree(c.x, c.z) || isWater(c.x, c.z)) return false;
+      const pts = contacts.map((k) => this.contactWorld(c.x, c.z, yaw, k));
+      const ground: { y: number; mesh: string }[] = [];
+      for (const p of pts) {
+        const s = this.contactSurface(p.x, p.z);
+        if (!s) return false;
+        ground.push(s);
+      }
+      pick.rays += pts.length;
+      const spread = spreadOf(ground.map((g) => g.y));
+      const kinds = pts.map((p) => this.groundInfoAt(p.x, p.z).kind);
+      // paving, on both measures: the surface `groundInfoAt` draws there, and the mesh the contact
+      // ray actually hit. One of them alone is enough to seat a cart in the gutter (t_6cd9aa18).
+      const paved = ground.every((g, k) => PAVED_MESHES.has(g.mesh) && PAVED_KINDS.has(kinds[k]));
+      const grounded = ground.every((g, k) => agrees(g.y, pts[k].x, pts[k].z));
+      const tyres = contacts.map((k, i) => (k.tyre ? pts[i] : null)).filter((p): p is { x: number; z: number } => p !== null);
+      // The band is judged against the nearest kerb line of ANY carriageway, not only the road the
+      // slot was inset along: at a junction the crossing street's kerb is closer than the frame's.
+      // TWO numbers come out of that measurement - nothing may stand inside a carriageway's corridor
+      // (gap < 0.2 means over the asphalt or on the kerb cap), and the outermost tyre has to be
+      // within 0.7 m of the nearest kerb to read as a cart parked at the kerb.
+      const gaps = pts.map((p) => this.kerbGapAny(p.x, p.z));
+      const outsideKerb = gaps.every((g) => g >= CART_KERB_MIN);
+      const atKerb = Math.min(...tyres.map((p) => this.kerbGapAny(p.x, p.z))) <= CART_KERB_MAX;
+      const inBand = !kerb || tyres.length === 0 ? true : outsideKerb && atKerb;
+      const safe = !kerb || gaps.every((g) => g >= 0);
+      // a cart on the asphalt is worse than a cart in the gutter: the carriageway is the one place
+      // a street prop may never stand, so a level pose on it loses to everything else
+      const onCarriageway = ground.some((g, k) => kinds[k] === 'road' || String(g.mesh).startsWith('road'));
+      // Paving beats the verge, and once the cart is on paving the KERB BAND outranks levelness: a
+      // paved stance 4 cm out of level can be tilted onto its contacts (standOnContacts solves two
+      // tilts, capped at 11.5 deg), while a stance 0.6 m further from the kerb cannot be untilted
+      // into reading as a kerbside cart. Ranking levelness first put three carts of six back within
+      // 0.09 m of the crossing kerb, which is the defect this card is fixing (t_6cd9aa18).
+      let rank: number;
+      if (onCarriageway) rank = 9;
+      else if (paved && inBand && spread <= 0.03) rank = 0;
+      else if (paved && inBand && spread <= SEATABLE) rank = 1;
+      else if (paved && safe && spread <= 0.03) rank = 2;
+      else if (paved && safe && spread <= SEATABLE) rank = 3;
+      else if (paved && spread <= 0.03) rank = 4;
+      else if (paved && spread <= SEATABLE) rank = 5;
+      else if (spread <= 0.03) rank = 6;
+      else if (spread <= SEATABLE) rank = 7;
+      else rank = 8;
+      const b = pick.best;
+      const better =
+        !b ||
+        rank < b.rank ||
+        (rank === b.rank &&
+          (grounded !== b.grounded
+            ? grounded
+            : spread < b.spread - 1e-4 ||
+              (spread <= b.spread + 1e-4 && Math.abs(c.inset) < Math.abs(b.inset) - 1e-4)));
+      if (better) pick.best = { ...c, rank, spread, grounded };
+      return rank === 0;
+    };
+
+    // pass 1: the corridor, in the order the rank wants it (the slot first, then further along the
+    // kerb). It costs no ray, and it is what lets a paved stance 2.4 m away beat a level one on the
+    // verge.
+    const onBand = (c: Cand) => contacts.every((k) => {
+      const p = this.contactWorld(c.x, c.z, yaw, k);
+      return this.onPaving(p.x, p.z);
+    });
+    for (const c of corridorCands) {
+      if (!onBand(c)) continue;
+      if (evaluate(c, 320)) break;
+    }
+    // pass 2: no paved stance in the corridor. Walk the disc, so a layout whose paving is cut at the
+    // slot still gets a cart on the street rather than one dropped on the verge.
+    const bestRank = pick.best ? pick.best.rank : Infinity;
+    if (bestRank > 1) {
+      for (const c of ringCands) {
+        if (evaluate(c, 460)) break;
+      }
+      // last: the corridor again without the analytic prefilter, for a plate the analytic ground does
+      // not know about (the mesh name still has to say paving for a paved rank)
+      if ((pick.best ? pick.best.rank : Infinity) > 1) {
+        for (const c of corridorCands) {
+          if (evaluate(c, 620)) break;
+        }
+      }
+    }
+    const best = pick.best;
+    return best ? { x: best.x, z: best.z } : { x, z };
   }
 
   /**
@@ -1419,12 +1617,34 @@ export class City {
     for (const poi of POIS) {
       if (poi.kind !== 'kaki5') continue;
       for (let i = 0; i < 3 && placedCarts < 6; i++) {
-        const spot = this.snapToVerge(poi.x + (i - 1) * 9, poi.z + (i - 1) * 4);
+        // The rank parks AT the kerb, not in the middle of the walk: `CART_KERB_INSET` pulls the
+        // slot 2.45 m toward the roadway. A slot with no paving under it is not a kerbside slot at
+        // all - the Kemang cart used to stand on the bare verge 4 m past the back edge of the slab
+        // (t_6cd9aa18) - so the accept test asks for paving and lets `snapToVerge` walk down the
+        // kerb to a door that still has a walk in front of it. If no inset finds paving at all the
+        // cart is dropped rather than put in the road: a rank of five on the walk is the honest
+        // outcome of a kerb with no walk on it.
+        const px = poi.x + (i - 1) * 9;
+        const pz = poi.z + (i - 1) * 4;
+        // the slot is only accepted where BOTH hold: `groundInfoAt` draws a walk there, and the
+        // slot is at the distance that puts the outer tyre inside the 0.2-0.7 m band. The second
+        // test matters because the walk along the kerb can carry the slot round a fork where two
+        // arterials' kerb lines are 0.5 m apart, and a slot 1.5 m out parks the cart mid-slab
+        // again. A paving slot outside the band is the fallback, one inset step at a time.
+        const accept = (p: { x: number; z: number }) => {
+          const gap = this.kerbGapAny(p.x, p.z);
+          return this.onPaving(p.x, p.z) && gap >= CART_KERB_MIN + CART_TRACK_HALF && gap <= CART_KERB_MAX + CART_TRACK_HALF;
+        };
+        const acceptPaved = (p: { x: number; z: number }) => this.onPaving(p.x, p.z);
+        let spot = this.snapToVerge(px, pz, CART_KERB_INSET, accept);
+        for (let k = 1; !spot && k < 4; k++) spot = this.snapToVerge(px, pz, CART_KERB_INSET - k * 0.4, acceptPaved);
+        if (!spot) spot = this.snapToVerge(px, pz, CART_KERB_INSET, acceptPaved);
         if (!spot) continue;
         const yaw = spot.yaw + Math.PI / 2;
-        // a cart is 1.0 m across its tyres and the kerbside slot is on the pavement edge, so it is
-        // built on a stance where all four contacts are on one surface, not on the slot itself
-        const stance = this.wideStance(spot.x, spot.z, yaw, CART_CONTACTS);
+        // a cart is 1.0 m across its tyres and stands broadside, so it is built on a stance where
+        // all four contacts are on one surface, searched along the kerb normal as well as around
+        // the slot, and where the outer tyre is 0.2-0.7 m off the kerb line
+        const stance = this.wideStance(spot.x, spot.z, yaw, CART_CONTACTS, spot.kerb);
         const g = buildKakiLima(ctx, carts[placedCarts % carts.length], stance.x, stance.z, yaw);
         this.standOnContacts(g, yaw, stance, CART_CONTACTS);
         placedCarts++;
