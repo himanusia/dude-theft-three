@@ -473,6 +473,8 @@ const camShoulder = new THREE.Vector3();
 const _camTmp = new THREE.Vector3();
 const BASE_FOV = 58;
 let camDistActual = 5.8;
+/** extra height the boom takes on when a wall is closer than the car's own body */
+let camRise = 0;
 let autoAlignTimer = 0;
 let cinematic = false; // test hook: freeze the follow camera for asset comparison shots
 
@@ -535,11 +537,26 @@ function updateCamera(dt: number) {
   // shortest legal distance put the camera inside the car, which filled the screen with the
   // car's paint. Better to clip the wall than to sit inside the vehicle.
   const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 1.1;
-  const allowed = boomHit ? Math.max(minBoom, boomHit.dist - 0.45) : camDist;
+  // …but clipping the wall meant the camera went THROUGH it: taking the larger of the two put it
+  // a metre or two inside the facade, where every face is back-culled and the frame is nothing
+  // but the background — the "screen turns blue when I crash" report. A wall closer than the
+  // body's clearance is therefore resolved by RISING over the car instead of entering the wall:
+  // the camera stays outside the world, the car stays in frame, and geometry still stands between
+  // the lens and the sky.
+  let allowed = camDist;
+  let rise = 0;
+  if (boomHit) {
+    const clip = Math.max(0.6, boomHit.dist - 0.45);
+    allowed = Math.min(camDist, clip);
+    if (clip < minBoom) rise = (minBoom - clip) * 0.9;
+  }
   camDistActual = lerp(camDistActual, allowed, clamp(dt * (allowed < camDistActual ? 20 : 4.5), 0, 1));
+  camRise = lerp(camRise, rise, clamp(dt * (rise > camRise ? 14 : 4.5), 0, 1));
 
   camGoal.copy(camTarget).addScaledVector(dir, camDistActual).add(camShoulder);
-  camGoal.y = Math.max(camGoal.y, 0.75);
+  // the floor is the ground under the camera, not an absolute height: on a raised road or a
+  // hillside an absolute floor leaves the camera metres underground, looking at nothing
+  camGoal.y = Math.max(camGoal.y + camRise, city.groundHeightAt(camGoal.x, camGoal.z) + 0.75);
 
   // smooth the camera-local offset rather than the world position, so the
   // framing stays glued to the player while the boom settles

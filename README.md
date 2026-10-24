@@ -38,6 +38,9 @@ Run one suite, one group, or everything:
 npm test               # gameplay + world + ui
 npm run test:world     # the city: geometry, traffic, pedestrians, police
 node tests/world/audit.mjs
+node tests/world/crash-frame.mjs  # 12/12: a crash may never fill the frame with one colour
+                                  # (samples the centre pixel and the whole frame for 2 s after
+                                  # the hit, and fails if the boom ends up inside a wall)
 ```
 
 ## Stack
