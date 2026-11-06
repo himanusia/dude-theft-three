@@ -10,7 +10,7 @@ import { readdirSync } from 'node:fs';
 
 const GROUPS = {
   gameplay: ['qa', 'playtest', 'weapons-smoke', 'fps'],
-  world: ['audit', 'colliders', 'death-interior', 'ground', 'floats', 'drivers', 'drift', 'engine-audio', 'police-path', 'police-handover', 'npc-behavior', 'roadnav', 'overlap', 'placement', 'terminal-level'],
+  world: ['audit', 'ambience-audio', 'colliders', 'death-interior', 'ground', 'floats', 'drivers', 'drift', 'engine-audio', 'police-path', 'police-handover', 'npc-behavior', 'roadnav', 'overlap', 'placement', 'terminal-level'],
   ui: ['interior', 'touch', 'responsive', 'persistence'],
   visual: ['proof-shots', 'ragdoll-shots', 'bgm'],
 };
