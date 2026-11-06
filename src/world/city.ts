@@ -429,6 +429,8 @@ export class City {
   declare shopDoorKindCursor: number;
   declare facades: { x: number; z: number; w: number; d: number; faceX: boolean; dir: number }[];
   declare dressingSpots: { type: string; x: number; z: number; yaw: number }[];
+  /** the six kaki lima carts, as placed: the warung ambience bed and the pedal bell hang off these */
+  declare cartSpots: { x: number; z: number; kind: string }[];
   declare treeTrunks: any[];
   declare treeCrowns: any[];
   declare lampPoles: any[];
@@ -460,6 +462,7 @@ export class City {
     this.interiors = [];
     this.facades = [];
     this.dressingSpots = [];
+    this.cartSpots = [];
     this.shopDoorKindCursor = randInt(0, SHOP_KINDS.length - 1);
     this.buildInteriors();
     this.buildShopSignage();
@@ -1899,6 +1902,7 @@ export class City {
         const stance = this.wideStance(spot.x, spot.z, yaw, CART_CONTACTS, spot.kerb);
         const g = buildKakiLima(ctx, carts[placedCarts % carts.length], stance.x, stance.z, yaw);
         this.standOnContacts(g, yaw, stance, CART_CONTACTS);
+        this.cartSpots.push({ x: stance.x, z: stance.z, kind: carts[placedCarts % carts.length] });
         placedCarts++;
       }
     }

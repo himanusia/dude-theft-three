@@ -70,6 +70,11 @@ node tests/world/engine-audio.mjs  # 13/13: the engine loop that ships as audio/
                                    # decoded and audible while driving: one live looping node, level
                                    # and pitch sampled at three road speeds, quieter in a closed
                                    # cabin than in the open cockpit, silent behind a shop wall
+node tests/world/ambience-audio.mjs # 18/18: all nine licensed ambience assets are served, loaded
+                                   # and heard inside 60 s (beds crossfade on arterials / pasar /
+                                   # kaki lima / rain, horns from a passing car and moped, the
+                                   # becak bell, gamelan on the menu), one-shots never loop, and
+                                   # the mute silences the street bus
 node tools/measure-ground.mjs      # prints foot / drawn surface / measure / terrain at three
                                    # points and fails if any foot-to-surface delta is over 2 cm
 node tools/shoot-feet.mjs          # headless: a pavement-level frame of the feet on the trotoar,

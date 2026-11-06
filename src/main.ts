@@ -15,6 +15,7 @@ import { Traffic } from './vehicles/traffic';
 import { PlacedInterior, InteriorKind } from './world/interior';
 import { HUD } from './ui/hud';
 import { AudioSys } from './core/audio';
+import { AmbienceDirector } from './systems/ambience';
 import { loadSave, writeSave, clearSave, loadSettings, writeSettings, SaveData, Settings } from './core/save';
 import { TouchControls } from './core/touch';
 import {
@@ -152,6 +153,8 @@ scene.add(character.group);
 const peds = new PedManager(scene, city, 40);
 const police = new Police(scene, city, audio);
 const traffic = new Traffic(scene, city, 8);
+// the street layer needs the roads and the traffic that drive its triggers, so it is built last
+const ambience = new AmbienceDirector(audio, city, scene);
 
 // headlight rig that follows whichever car the player is driving
 const headlight = new THREE.SpotLight(0xfff2cc, 0, 55, 0.55, 0.45, 1.6);
@@ -1762,7 +1765,31 @@ function toggleSettings(force?: boolean) {
 }
 
 // ---------------------------------------------------------------- startup
+let startingRun = false;
+
+/**
+ * The menu has a cue of its own (the gamelan loop), but a browser will not start audio without a
+ * gesture. The first click or key press on the title screen is that gesture: it builds the
+ * context and starts the menu music. Starting a run reuses the same context, so the cue crossfades
+ * into the free-roam track instead of being cut off.
+ */
+async function unlockMenuAudio() {
+  if (started || startingRun || audio.ready || audio.initPromise) return;
+  try {
+    await audio.init();
+  } catch (e) {
+    console.warn('menu audio init failed', e);
+    return;
+  }
+  audio.setVolumes({ master: settings.master, sfx: settings.sfx, bgm: settings.bgm });
+  audio.resume();
+  if (!started && !startingRun) audio.startBgm('gamelan');
+}
+window.addEventListener('pointerdown', unlockMenuAudio, { passive: true });
+window.addEventListener('keydown', unlockMenuAudio);
+
 async function startGame(continueRun: boolean) {
+  startingRun = true;
   hud.el.startBtn!.disabled = true;
   hud.setLoading('loading audio…');
   try {
@@ -1985,6 +2012,16 @@ function update(dt: number) {
   if (!player.inInterior) peds.update(dt, pedContext());
 
   if (!player.inInterior) traffic.update(dt, { playerPos: player.pos, playerCar: player.inCar, peds, wanted: police.wanted });
+
+  // street audio follows the player even indoors, so the beds can fade out behind a shop wall
+  ambience.update(dt, {
+    playerPos: player.pos,
+    camPos: camera.position,
+    camYaw,
+    inCar: !!player.inCar,
+    inInterior: !!player.inInterior,
+    traffic: traffic.cars,
+  });
 
   if (!player.inInterior) police.update(dt, {
     playerPos: player.pos,
@@ -2222,6 +2259,7 @@ window.__game = {
   pickups,
   ragdolls,
   audio,
+  ambience,
   hud,
   touch,
   get state() {
@@ -2359,6 +2397,28 @@ window.__game = {
         kmh: player.inCar ? Math.round(player.inCar.kmh) : 0,
         rpm01: player.inCar ? +player.inCar.engineRpm01.toFixed(3) : 0,
       };
+    },
+
+    /**
+     * The street layer as it actually stands: every ambience asset's loaded/playing state and how
+     * many times it has started, plus the mix the director is asking for and the moped/weather
+     * state that produced it. The probe reads this instead of reaching into AudioSys fields.
+     */
+    ambienceState() {
+      return {
+        ...audio.ambienceState(),
+        scene: ambience.state(),
+        started,
+        inCar: !!player.inCar,
+        inInterior: !!player.inInterior,
+        pos: player.pos.toArray().map((v: number) => +v.toFixed(2)),
+      };
+    },
+
+    /** Pin the sky for a deterministic capture ('rain' | 'clear'), or null to hand it back. */
+    setWeather(state: 'rain' | 'clear' | null) {
+      ambience.setWeather(state);
+      return ambience.state().weather;
     },
 
     // ---- floating geometry audit: every actor and prop must touch the ground ----
