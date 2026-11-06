@@ -51,10 +51,32 @@ export interface StreetCollider {
   h: number;
 }
 
+/** The kinds of ground a street kit lays. `GroundKind` in city.ts is this set plus the city's own. */
+export type StreetSurfaceKind = 'road' | 'walk' | 'kerb' | 'ramp';
+
+/** One ground surface as the kit draws it: two triangles, world space, in the city's quad order. */
+export interface StreetQuad {
+  a: THREE.Vector3;
+  b: THREE.Vector3;
+  c: THREE.Vector3;
+  d: THREE.Vector3;
+  kind: StreetSurfaceKind;
+}
+
 export interface StreetCtx {
   group: THREE.Group;
   colliders: StreetCollider[];
   audit: { name: string; x: number; z: number; bottom: number }[];
+  /**
+   * Hand every ground surface the kit draws to the city's one measure.
+   *
+   * The kit used to build on `terrainHeight`, the analytic hill, while the rest of the city is
+   * measured on the DRAWN mesh - and a terrain cell is 43 m, so the two disagree by up to 0.43 m on
+   * the foothills. That is the "street sunk 0.23 m" defect: the kit sat on a hill that is not the
+   * one the player stands on. Registering the surfaces the kit actually lays makes `groundInfoAt`
+   * read the carriageway, kerb and trotoar the same way it reads every other ribbon in the city.
+   */
+  groundQuad?: (q: StreetQuad) => void;
 }
 
 /** world-space ground height; the kit conforms to it instead of floating on y = 0 */
@@ -272,10 +294,52 @@ const M = {
 // ---------------------------------------------------------------- geometry helpers
 
 /**
+ * Which drawn ground surface a material stands for, or null for detail that rides on top of one.
+ *
+ * Paint, tactile studs, drain bars, planted soil and every fitting are not the ground: a prop
+ * standing on the road should read the asphalt, not a 2 cm stripe of paint. Only the materials that
+ * make a surface a surface (asphalt, paving, kerb, ramp) are registered with the city measure.
+ */
+function surfaceKind(m: THREE.Material): StreetSurfaceKind | null {
+  if (m === M.asphalt) return 'road';
+  if (m === M.walk) return 'walk';
+  if (m === M.kerb || m === M.kerbNose) return 'kerb';
+  if (m === M.slope) return 'ramp';
+  return null;
+}
+
+/**
+ * The height of one registered surface at (x, z), or null when the point is outside it. Same two
+ * triangles the city's measure solves, so the audit row a kit publishes is the surface it drew.
+ */
+function surfaceHeightAt(q: StreetQuad, x: number, z: number): number | null {
+  const tri = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3): number | null => {
+    const den = (p1.z - p2.z) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.z - p2.z);
+    if (Math.abs(den) < 1e-7) return null;
+    const l0 = ((p1.z - p2.z) * (x - p2.x) + (p2.x - p1.x) * (z - p2.z)) / den;
+    const l1 = ((p2.z - p0.z) * (x - p2.x) + (p0.x - p2.x) * (z - p2.z)) / den;
+    const l2 = 1 - l0 - l1;
+    if (l0 < -1e-4 || l1 < -1e-4 || l2 < -1e-4) return null;
+    return l0 * p0.y + l1 * p1.y + l2 * p2.y;
+  };
+  return tri(q.a, q.b, q.c) ?? tri(q.c, q.b, q.d);
+}
+
+/**
  * A flat face that follows the ground. The city's roads are ribbons that sample terrain per vertex;
  * a kit that assumes y = 0 either sinks at one end or floats at the other, and that is exactly the
  * defect a close-up screenshot exposes.
+ *
+ * The grid is refined where the ground is not flat under a cell: the drawn terrain is a linear
+ * interpolation over 43 m cells, so a street cell that straddles one of those edges is a chord
+ * across a kink. Sampling only the corners left the carriageway up to 7 cm under the ground at the
+ * kink - the carriageway is 5 cm proud - and the ground then stands ON the road. A cell is split
+ * until the ground at its centre and its four edge midpoints is within `CONFORM_TOL` of the drawn
+ * face, so the road follows the surface the player stands on instead of approximating it.
  */
+const CONFORM_TOL = 0.01;
+const CONFORM_MAX_DEPTH = 4;
+
 function gridMesh(
   k: Kit,
   w: number,
@@ -287,24 +351,65 @@ function gridMesh(
   cx = 0,
   cz = 0
 ): THREE.Mesh {
+  // one tile per drawn cell, all welded to the ground under their own corners
+  const tiles: [number, number, number, number][] = [];
+  const split = (x0: number, z0: number, x1: number, z1: number, depth: number): void => {
+    const y00 = k.gy(x0, z0);
+    const y10 = k.gy(x1, z0);
+    const y01 = k.gy(x0, z1);
+    const y11 = k.gy(x1, z1);
+    const xm = (x0 + x1) / 2;
+    const zm = (z0 + z1) / 2;
+    const dev = Math.max(
+      Math.abs(k.gy(xm, zm) - (y00 + y10 + y01 + y11) / 4),
+      Math.abs(k.gy(xm, z0) - (y00 + y10) / 2),
+      Math.abs(k.gy(xm, z1) - (y01 + y11) / 2),
+      Math.abs(k.gy(x0, zm) - (y00 + y01) / 2),
+      Math.abs(k.gy(x1, zm) - (y10 + y11) / 2)
+    );
+    if (dev <= CONFORM_TOL || depth >= CONFORM_MAX_DEPTH || (x1 - x0) * (z1 - z0) < 0.05) {
+      tiles.push([x0, z0, x1, z1]);
+      return;
+    }
+    split(x0, z0, xm, zm, depth + 1);
+    split(xm, z0, x1, zm, depth + 1);
+    split(x0, zm, xm, z1, depth + 1);
+    split(xm, zm, x1, z1, depth + 1);
+  };
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const lx0 = cx - w / 2 + (i / nx) * w;
+      const lx1 = cx - w / 2 + ((i + 1) / nx) * w;
+      const lz0 = cz - d / 2 + (j / nz) * d;
+      const lz1 = cz - d / 2 + ((j + 1) / nz) * d;
+      split(lx0, lz0, lx1, lz1, 0);
+    }
+  }
+
   const pos: number[] = [];
   const uv: number[] = [];
   const idx: number[] = [];
-  for (let j = 0; j <= nz; j++) {
-    for (let i = 0; i <= nx; i++) {
-      const lx = cx - w / 2 + (i / nx) * w;
-      const lz = cz - d / 2 + (j / nz) * d;
+  const sk = surfaceKind(material);
+  for (const [x0, z0, x1, z1] of tiles) {
+    const base = pos.length / 3;
+    // four corners per tile: a T-junction between a split cell and its neighbour would crack the
+    // surface, and sharing no vertices keeps every tile watertight with the cell next to it
+    for (const [lx, lz] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]] as [number, number][]) {
       pos.push(lx, k.gy(lx, lz) + lift, lz);
       uv.push(lx, lz);
     }
-  }
-  for (let j = 0; j < nz; j++) {
-    for (let i = 0; i < nx; i++) {
-      const a = j * (nx + 1) + i;
-      const b = a + 1;
-      const c = a + nx + 2;
-      const dd = a + nx + 1;
-      idx.push(a, c, b, a, dd, c);
+    idx.push(base, base + 2, base + 1, base, base + 2, base + 3);
+    if (sk) {
+      const p = (lx: number, lz: number): THREE.Vector3 => {
+        const [wx, wz] = k.world(lx, lz);
+        return new THREE.Vector3(wx, k.gy(lx, lz) + lift, wz);
+      };
+      const a = p(x0, z0);
+      const b = p(x1, z0);
+      const c = p(x1, z1);
+      const dd = p(x0, z1);
+      k.triangle(a, c, b, sk);
+      k.triangle(a, dd, c, sk);
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -333,6 +438,7 @@ function runBox(
 ): void {
   const n = Math.max(1, Math.ceil(length / step));
   const seg = length / n;
+  const sk = surfaceKind(material);
   for (let s = 0; s < n; s++) {
     const along = atAlong - length / 2 + (s + 0.5) * seg;
     const lx = axis === 'z' ? atAcross : along;
@@ -342,10 +448,17 @@ function runBox(
         ? new THREE.BoxGeometry(across, h, seg + 0.02)
         : new THREE.BoxGeometry(seg + 0.02, h, across);
     const m = new THREE.Mesh(box, material);
+    const top = k.gy(lx, lz) + lift + h;
     m.position.set(lx, k.gy(lx, lz) + lift + h / 2, lz);
     m.castShadow = true;
     m.receiveShadow = true;
     k.g.add(m);
+    if (sk) {
+      const halfAcross = across / 2;
+      const halfAlong = (seg + 0.02) / 2;
+      if (axis === 'z') k.surfaceRect(lx - halfAcross, lz - halfAlong, lx + halfAcross, lz + halfAlong, top, sk);
+      else k.surfaceRect(lx - halfAlong, lz - halfAcross, lx + halfAlong, lz + halfAcross, top, sk);
+    }
   }
 }
 
@@ -369,6 +482,7 @@ function slab(
   if (across1 - across0 < 0.001 || along1 - along0 < 0.001) return;
   const n = Math.max(1, Math.ceil((along1 - along0) / step));
   const seg = (along1 - along0) / n;
+  const sk = surfaceKind(material);
   for (let s = 0; s < n; s++) {
     const a = along0 + s * seg;
     const b = a + seg;
@@ -381,10 +495,20 @@ function slab(
         ? new THREE.BoxGeometry(across1 - across0, h1 - h0, seg + 0.02)
         : new THREE.BoxGeometry(seg + 0.02, h1 - h0, across1 - across0);
     const m = new THREE.Mesh(box, material);
+    const top = k.gy(lx, lz) + h1;
     m.position.set(lx, k.gy(lx, lz) + (h0 + h1) / 2, lz);
     m.castShadow = true;
     m.receiveShadow = true;
     k.g.add(m);
+    // the box top is FLAT on the ground under the segment's midpoint, so that is what the measure
+    // gets: a slab steps along a slope, and pretending it is a smooth surface is how a prop ends up
+    // 6 cm inside the paving it looks like it is standing on
+    if (sk) {
+      const a0 = a - 0.01;
+      const a1 = b + 0.01;
+      if (axis === 'z') k.surfaceRect(across0, a0, across1, a1, top, sk);
+      else k.surfaceRect(a0, across0, a1, across1, top, sk);
+    }
   }
 }
 
@@ -404,25 +528,44 @@ function polyFace(
   uvScale = 1
 ): THREE.Mesh | null {
   if (pts.length < 3) return null;
-  let area = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % pts.length];
-    area += a[0] * b[1] - b[0] * a[1];
-  }
-  const list = area > 0 ? [...pts].reverse() : pts;
+  // One triangle per entry, each wound to face UP from its own projected facing.
+  //
+  // A fan's winding cannot be resolved once for the whole polygon: the corner fillet is a concave
+  // horseshoe, so a fan from any one corner produces some triangles the right way round and some
+  // inverted, and a ground surface born inverted is culled by FrontSide - the ground (or the sky)
+  // then shows through the wedge. That is the grey triangle that used to sit on the carriageway at
+  // each corner of a junction. Per-triangle winding also means per-triangle normals: computeVertexNormals
+  // on a non-indexed soup gives the flat normal the face actually has.
+  const facing = (a: [number, number, number], b: [number, number, number], c: [number, number, number]): number =>
+    (b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]);
   const pos: number[] = [];
   const uv: number[] = [];
-  for (const [lx, lz, h] of list) {
-    pos.push(lx, k.gy(lx, lz) + h, lz);
-    uv.push(lx * uvScale, lz * uvScale);
+  const sk = surfaceKind(material);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[0];
+    let b = pts[i];
+    let c = pts[i + 1];
+    if (facing(a, b, c) < 0) [b, c] = [c, b];
+    const world: THREE.Vector3[] = [];
+    for (const [lx, lz, h] of [a, b, c]) {
+      const wy = k.gy(lx, lz) + h;
+      pos.push(lx, wy, lz);
+      uv.push(lx * uvScale, lz * uvScale);
+      if (sk) {
+        const [wx, wz] = k.world(lx, lz);
+        world.push(new THREE.Vector3(wx, wy, wz));
+      }
+    }
+    // the same triangle, welded to the ground under its own corners, is what the measure reads
+    if (sk) k.triangle(world[0], world[1], world[2], sk);
   }
-  const idx: number[] = [];
-  for (let i = 1; i < list.length - 1; i++) idx.push(0, i, i + 1);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  geo.setIndex(idx);
+  // still INDEXED, vertex per corner: `mergeStaticChildren` refuses to mix an indexed geometry with
+  // a non-indexed one in the same material bucket, and a bucket it refuses is a whole surface that
+  // silently vanishes from the junction
+  geo.setIndex([...Array(pos.length / 3).keys()]);
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, material);
   mesh.receiveShadow = true;
@@ -463,6 +606,8 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, 
 class Kit {
   readonly g = new THREE.Group();
   readonly ground: StreetGround;
+  /** every ground surface this kit has drawn, so its audit row can report the surface it made */
+  private drawn: StreetQuad[] = [];
   constructor(
     readonly ctx: StreetCtx,
     readonly x: number,
@@ -498,6 +643,45 @@ class Kit {
     return mesh;
   }
 
+  /**
+   * Register one drawn ground surface: the quads the city measures, and the kit's own record of what
+   * it laid. World coordinates, already welded to the ground under each corner.
+   */
+  surface(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, kind: StreetSurfaceKind): void {
+    const q: StreetQuad = { a, b, c, d, kind };
+    this.drawn.push(q);
+    this.ctx.groundQuad?.(q);
+  }
+
+  /** one triangle of a surface; the second half of the city's quad split is degenerate and skipped */
+  triangle(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, kind: StreetSurfaceKind): void {
+    this.surface(a, b, c, c, kind);
+  }
+
+  /** a flat rectangle in the kit's local frame, at world height `y` */
+  surfaceRect(lx0: number, lz0: number, lx1: number, lz1: number, y: number, kind: StreetSurfaceKind): void {
+    const p = (lx: number, lz: number): THREE.Vector3 => {
+      const [wx, wz] = this.world(lx, lz);
+      return new THREE.Vector3(wx, y, wz);
+    };
+    this.surface(p(lx0, lz0), p(lx1, lz0), p(lx0, lz1), p(lx1, lz1), kind);
+  }
+
+  /**
+   * A flat polygon in the kit's local frame, at world height `y`, triangulated the same way the
+   * extruded corner slab is. A junction corner is one polygon, not a rectangle, and a fan from its
+   * first point would leave the jog for the crossing ramp uncovered.
+   */
+  surfacePolygon(points: [number, number][], y: number, kind: StreetSurfaceKind): void {
+    const contour = points.map(([lx, lz]) => new THREE.Vector2(lx, -lz));
+    const tris = THREE.ShapeUtils.triangulateShape(contour, []);
+    const p = (i: number): THREE.Vector3 => {
+      const [wx, wz] = this.world(points[i][0], points[i][1]);
+      return new THREE.Vector3(wx, y, wz);
+    };
+    for (const [i, j, k] of tris) this.triangle(p(i), p(j), p(k), kind);
+  }
+
   collider(lx: number, lz: number, halfX: number, halfZ: number, h: number): void {
     const pts = [
       [lx - halfX, lz - halfZ],
@@ -520,7 +704,18 @@ class Kit {
     mergeStaticChildren(this.g);
     this.ctx.group.add(this.g);
     const [wx, wz] = this.world(anchorLx, anchorLz);
-    this.ctx.audit.push({ name, x: wx, z: wz, bottom: this.gy(anchorLx, anchorLz) });
+    // A surface piece's ground face is the surface it draws - the carriageway at its anchor - not
+    // the hill it was laid on. A fitting has no drawn surface, so it reports the ground it stands on
+    // (`gy`, which the city measure now answers for the kit's own paving).
+    let bottom = this.gy(anchorLx, anchorLz);
+    let top: number | null = null;
+    for (const q of this.drawn) {
+      const h = surfaceHeightAt(q, wx, wz);
+      if (h !== null && (top === null || h > top)) top = h;
+    }
+    if (top !== null) bottom = top;
+    this.g.userData.streetkit ??= { kind: name.replace(/^street:/, '') };
+    this.ctx.audit.push({ name, x: wx, z: wz, bottom });
   }
 }
 
@@ -1114,6 +1309,9 @@ function cornerReturn(k: Kit, c: CornerSpec): void {
   slabMesh.receiveShadow = true;
   slabMesh.castShadow = true;
   k.g.add(slabMesh);
+  // the apron is ONE flat slab lifted by the ground under that same sample point, so the measure
+  // gets the polygon at that one height - the corner a player walks across is not per-vertex ground
+  k.surfacePolygon(pts, k.gy(gx, gz) + ROAD_LIFT - 0.1 + depth, 'walk');
 
   // --- kerb stones following the arc, at the same angles as the slab's own arc
   const arcLen = (Math.PI / 2) * R;

@@ -351,8 +351,7 @@ export function roundedBox(w: number, h: number, d: number, radius: number = 0.0
 export function mergeStaticChildren(group: THREE.Group): THREE.Group {
   group.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
-  const buckets = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>();
-  const doomed: THREE.Mesh[] = [];
+  const buckets = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[]; meshes: THREE.Mesh[] }>();
 
   group.traverse((o) => {
     const m = o as THREE.Mesh;
@@ -361,17 +360,19 @@ export function mergeStaticChildren(group: THREE.Group): THREE.Group {
     const geo = m.geometry.clone();
     geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
     const sig = `${m.material.uuid}|${Object.keys(geo.attributes).sort().join(',')}`;
-    const bucket = buckets.get(sig) ?? { mat: m.material as THREE.Material, geos: [] };
+    const bucket = buckets.get(sig) ?? { mat: m.material as THREE.Material, geos: [], meshes: [] };
     bucket.geos.push(geo);
+    bucket.meshes.push(m);
     buckets.set(sig, bucket);
-    doomed.push(m);
   });
 
-  for (const m of doomed) m.removeFromParent();
-
-  for (const { mat, geos } of buckets.values()) {
+  for (const { mat, geos, meshes } of buckets.values()) {
     const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+    // A bucket that cannot merge keeps its meshes. Dropping them is a surface that silently stops
+    // existing: the junction's whole carriageway vanished once because one geometry in its bucket
+    // had no index and mergeGeometries answered null. A few more draw calls beat a hole in the road.
     if (!merged) continue;
+    for (const m of meshes) m.removeFromParent();
     const mesh = new THREE.Mesh(merged, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;

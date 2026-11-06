@@ -27,8 +27,6 @@ import {
   buildSignalIntersection,
   buildStreetRun,
   buildTIntersection,
-  KERB_WIDTH,
-  WALK_TOP_M,
   type StreetGround,
 } from './streetkit';
 import {
@@ -73,14 +71,13 @@ const WALK_ROADS = [
 /**
  * The heights of the surfaces the city draws, in metres above the terrain each one is built from:
  * the block plate is a 26 cm box lifted by the terrain under the block's own centre, the kerb ring
- * under it 16 cm, a park lawn 34 cm, a lot 33 cm, the carriageway +5 cm and the arterial trotoar
- * +26 cm (the last two are the street kit's own numbers too, at 17 cm, see `WALK_TOP_M`).
+ * under it 16 cm, a park lawn 34 cm, a lot 33 cm, and the arterial trotoar +26 cm.
  *
  * The swept ribbons do not need these: they register the quads they build (`groundQuads`), so the
- * measure reads their real height. The constants are what the *slabs* are registered with, and what
- * the street kit's analytic bands are measured against.
+ * measure reads their real height. The same is true of the street kit, which registers the
+ * carriageway, kerb and trotoar it lays (`streetQuads`). These constants are only what the flat
+ * *slabs* are registered with.
  */
-const ROAD_TOP = 0.05;
 /** the arterial trotoar is 26 cm over the terrain it is swept from (`buildRoadRibbons`) */
 const WALK_MEASURE_TOP = 0.26;
 const KERB_RING_TOP = 0.16;
@@ -354,6 +351,11 @@ export class City {
     audit: { name: string; x: number; z: number; bottom: number };
   }[];
 
+  /**
+   * The kit's streets as centre lines, for tools and proof shots - the numeric handle a harness can
+   * walk. NOT a ground source: a spine is a line, not a surface, and treating it as one is what made
+   * a junction's carriageway read as a 17 cm trotoar. The measure reads `streetQuads`.
+   */
   declare streetSpines: { ax: number; az: number; bx: number; bz: number; half: number; walkW: number }[];
 
   /**
@@ -377,6 +379,22 @@ export class City {
   /** groundQuads bucketed into a coarse grid; rebuilt when the list grows (see quadsNear) */
   private quadGrid: Map<number, number[]> | null = null;
   private quadGridCount = 0;
+
+  /**
+   * The ground surfaces the STREET KIT lays - carriageway, kerb, trotoar, ramps - registered by
+   * `buildStreetKit` through `StreetCtx.groundQuad` as they are built.
+   *
+   * They are kept apart from `groundQuads` for two reasons: the kit's own `gy` has to answer "what
+   * is under this street", which may not include the street itself (or every slab would climb on
+   * top of the one before it), and the kit is built last, so its quads are the only layer that can
+   * still appear while the measure is live. `baseGroundAt` reads the layers below, `groundInfoAt`
+   * reads all of them.
+   */
+  declare streetQuads: { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3; kind: GroundKind }[];
+
+  /** streetQuads bucketed into a coarse grid; rebuilt when the list grows (see streetQuadsNear) */
+  private streetQuadGrid: Map<number, number[]> | null = null;
+  private streetQuadGridCount = 0;
 
   /** the mapped roads as segments in a grid, built on first use by the street-kit site search */
   declare roadGrid: { grid: Map<string, number[]>; segs: number[]; CELL: number } | null;
@@ -446,6 +464,7 @@ export class City {
     this.blocks = [];
     this.grounds = [];
     this.groundQuads = [];
+    this.streetQuads = [];
     this.roadLines = [];
     this.jumpPads = [];
     this.parkedSpots = [];
@@ -3359,13 +3378,24 @@ export class City {
     if (!this.propAudit) this.propAudit = [];
     if (!this.streetSpines) this.streetSpines = [];
 
-    const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
-    // surfaces sit on the terrain; anything standing on the trotoar sits 17 cm higher - unless the
-    // city already draws a higher pavement there (an arterial's trotoar is 26 cm), in which case the
-    // prop stands on that. Both numbers come from the same `groundHeightAt` the audit reads, so a
-    // kit prop cannot report a 9 cm gap against the surface it is actually standing on.
-    const bed: StreetGround = (x, z) => terrainHeight(x, z);
-    const walkTop: StreetGround = (x, z) => Math.max(terrainHeight(x, z) + WALK_TOP_M, this.groundHeightAt(x, z));
+    const ctx = {
+      group: this.group,
+      colliders: this.colliders,
+      audit: this.propAudit,
+      // every surface the kit draws goes into the city's measure, exactly like a swept ribbon
+      groundQuad: (q: { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3; kind: 'road' | 'walk' | 'kerb' | 'ramp' }) => {
+        this.streetQuads.push(q);
+      },
+    };
+    // A street is laid on the city's own ground measure - the drawn terrain plane, the block plates
+    // and the arterial ribbons - never on `terrainHeight`, which is the analytic hill the 43 m
+    // terrain cells interpolate away. That mismatch is why a kit piece read 0.23-0.43 m under the
+    // surface the rest of the city stands on. The kit's own surfaces are excluded here (they are in
+    // `streetQuads`) so a finished street never lifts the next piece of itself.
+    const bed: StreetGround = (x, z) => this.baseGroundAt(x, z);
+    // and what stands ON the street stands on what the kit drew: the registered walk, kerb or ramp,
+    // read back through the same measure. No `terrain + 17 cm` anywhere.
+    const furnitureGround: StreetGround = (x, z) => this.groundHeightAt(x, z);
 
     const WALK = 3.6;
     const HALF = 4; // the map's local class is 8 m
@@ -3378,7 +3408,7 @@ export class City {
       walkWidthM: WALK,
       lights: true,
       ground: bed,
-      furnitureGround: walkTop,
+      furnitureGround,
     });
     // the junction's own cross-section, so the arms' walks are in groundHeightAt too
     this.streetSpines.push({ ax: site.x - armEnd, az: site.z, bx: site.x + armEnd, bz: site.z, half: HALF, walkW: WALK });
@@ -3394,7 +3424,7 @@ export class City {
         lengthM: len,
         walkWidthM: WALK,
         ground: bed,
-        furnitureGround: walkTop,
+        furnitureGround,
         ...features,
       });
       this.streetSpines.push({
@@ -3509,6 +3539,10 @@ export class City {
       const half = (b.size ?? BLOCK) / 2;
       if (Math.abs(x - b.x) < half + PAD && Math.abs(z - b.z) < half + PAD) return false;
     }
+    // A raised plate is a platform, a station hall, a terminal apron or a lawn: a street laid across
+    // one rides up its face, and every slab edge becomes a step in the ground the kit is measured
+    // against. The site search and its reach therefore treat a plate exactly like a block.
+    if (this.raisedPlate(x, z, PAD)) return false;
     const { grid, segs, CELL } = this.roadSegments();
     const list = grid.get(Math.floor(x / CELL) + ',' + Math.floor(z / CELL));
     if (list) {
@@ -3526,6 +3560,23 @@ export class City {
     }
     for (const lm of LANDMARKS) if (Math.hypot(x - lm.x, z - lm.z) < 34) return false;
     return true;
+  }
+
+  /**
+   * Is a raised plate over (x, z), widened by `margin`? A plate counts only where its top is above
+   * the drawn terrain at the query point: a slab that the hill has swallowed is not an obstacle.
+   */
+  private raisedPlate(x: number, z: number, margin: number): boolean {
+    const terrain = this.terrainMeshHeight(x, z);
+    for (const p of this.platesNear(x, z, margin)) {
+      if (p.top - terrain <= 0.03) continue;
+      const inside =
+        p.round !== undefined
+          ? Math.hypot(x - p.x, z - p.z) <= p.round + margin
+          : Math.abs(x - p.x) <= p.hx + margin && Math.abs(z - p.z) <= p.hz + margin;
+      if (inside) return true;
+    }
+    return false;
   }
 
   /**
@@ -4877,7 +4928,7 @@ export class City {
    * (x, z), and what kind of surface is it.
    *
    * Everything that has to touch the ground reads this - the player, every pedestrian, the cars and
-   * the prop seating - so there is exactly one answer to "where is the floor here". The three things
+   * the prop seating - so there is exactly one answer to "where is the floor here". The four things
    * it has to know about, and the reason the old version was wrong:
    *
    *  1. A block plate is ONE flat 26 cm box lifted by the terrain under the block's centre
@@ -4888,13 +4939,32 @@ export class City {
    *  2. The swept ribbons (carriageway, gutter, kerb stone, trotoar, crossing ramps) are registered
    *     quad by quad as they are swept, so their height is the quad's own interpolation: the
    *     cross-section's real profile, the chord between two stations, and the ramp's slope included.
-   *  3. The bare terrain is the drawn plane's own interpolation (190 segments), because
+   *  3. The street kit's own carriageway, kerbs, walks and ramps are registered the same way as it
+   *     draws them. It used to be reconstructed here as `terrainHeight + 5/17 cm`, on a hill the
+   *     43 m terrain cells interpolate away - the kit sat up to 0.43 m under the city it was in.
+   *  4. The bare terrain is the drawn plane's own interpolation (190 segments), because
    *     `terrainHeight` at the query point is up to 30 cm away from the triangles the player sees.
    *
    * `margin` widens the slabs for the placement questions ("is this slot on a pavement?"); actors
    * always ask with the default 0.
    */
   groundInfoAt(x: number, z: number, margin = 0): { y: number; kind: GroundKind } {
+    return this.surfaceAt(x, z, margin, true);
+  }
+
+  /**
+   * The same measure with the street kit's own surfaces left out: the ground a city street is LAID
+   * on.
+   *
+   * The kit has to build against this, not against `groundInfoAt`, or every slab would sit on the
+   * slab drawn before it and a junction would climb its own pavement. Everything else - block
+   * plates, the arterial ribbons, the terrain plane - is here, because the street is laid on those.
+   */
+  baseGroundAt(x: number, z: number): number {
+    return this.surfaceAt(x, z, 0, false).y;
+  }
+
+  private surfaceAt(x: number, z: number, margin: number, includeStreet: boolean): { y: number; kind: GroundKind } {
     let best: { y: number; kind: GroundKind } = { y: this.terrainMeshHeight(x, z), kind: 'terrain' };
 
     // 1. the plates, the kerb rings under them, lawns, lots and the landmark squares
@@ -4916,12 +4986,15 @@ export class City {
       if (y !== null && y > best.y) best = { y, kind: q.kind };
     }
 
-    // 3. the street kit's own trotoar, raised 17 cm over the terrain it was swept from
-    for (const s of this.streetSpines ?? []) {
-      const d = this.spineDistance(x, z, s);
-      if (d > s.half + KERB_WIDTH + s.walkW) continue;
-      const top = terrainHeight(x, z) + (d <= s.half ? ROAD_TOP : WALK_TOP_M);
-      if (top > best.y) best = { y: top, kind: d <= s.half ? 'road' : 'walk' };
+    // 3. the street kit's own surfaces, registered as it draws them. A kit piece is a surface like
+    // any ribbon in the city: what it lays is what the measure reads, so the carriageway the player
+    // walks on is the carriageway the kit drew - not `terrain + 5 cm`, which is what let the kit sit
+    // 0.43 m under the drawn city on the foothills.
+    if (includeStreet) {
+      for (const q of this.streetQuadsNear(x, z)) {
+        const y = quadHeightAt(q, x, z);
+        if (y !== null && y > best.y) best = { y, kind: q.kind };
+      }
     }
 
     return best;
@@ -5032,6 +5105,42 @@ export class City {
     if (!ids) return [];
     const out = [];
     for (const id of ids) out.push(this.groundQuads[id]);
+    return out;
+  }
+
+  /**
+   * The street kit's own surfaces under (x, z), bucketed the same way as the swept ribbons.
+   *
+   * A separate list, so a kit piece can ask "what am I being laid on" without seeing its own paving,
+   * while the rest of the game sees the finished street.
+   */
+  private streetQuadsNear(x: number, z: number): { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3; kind: GroundKind }[] {
+    const CELL = 24;
+    const key = (i: number, j: number) => (i + 1024) * 4096 + (j + 1024);
+    if (!this.streetQuadGrid || this.streetQuadGridCount !== this.streetQuads.length) {
+      const grid = new Map<number, number[]>();
+      for (let k = 0; k < this.streetQuads.length; k++) {
+        const q = this.streetQuads[k];
+        const minX = Math.min(q.a.x, q.b.x, q.c.x, q.d.x);
+        const maxX = Math.max(q.a.x, q.b.x, q.c.x, q.d.x);
+        const minZ = Math.min(q.a.z, q.b.z, q.c.z, q.d.z);
+        const maxZ = Math.max(q.a.z, q.b.z, q.c.z, q.d.z);
+        for (let i = Math.floor(minX / CELL); i <= Math.floor(maxX / CELL); i++) {
+          for (let j = Math.floor(minZ / CELL); j <= Math.floor(maxZ / CELL); j++) {
+            const kk = key(i, j);
+            const list = grid.get(kk);
+            if (list) list.push(k);
+            else grid.set(kk, [k]);
+          }
+        }
+      }
+      this.streetQuadGrid = grid;
+      this.streetQuadGridCount = this.streetQuads.length;
+    }
+    const ids = this.streetQuadGrid.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
+    if (!ids) return [];
+    const out = [];
+    for (const id of ids) out.push(this.streetQuads[id]);
     return out;
   }
 
