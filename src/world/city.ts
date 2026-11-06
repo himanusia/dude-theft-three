@@ -1820,54 +1820,11 @@ export class City {
       if (!spot) continue;
       const g = buildHalte(ctx, spot.x, spot.z, spot.yaw);
       this.placeOnGround(g, spot.x, spot.z);
-<<<<<<< HEAD
-      // A bus berthed at the first two haltes, so the street shows the busway running.
-      //
-      // Two things were wrong here. The body was rotated and then only given a *height*
-      // (`placeOnGround` writes y and nothing else), so every bus in the city stood at the world
-      // origin while a fixed axis-aligned box was registered 70 m away beside the halte: the body
-      // was walk-through and the busway had a phantom wall in it. And the berth itself was picked
-      // on the wrong side of the shelter, which on this map put 17.9 m of bus inside a shophouse -
-      // a body walking at it was stopped by the building two metres before the bumper.
-      //
-      // So the berth is the carriageway side of the shelter (the direction of the nearest mapped
-      // road), the body is placed there, and the berth is only used if the bus's own footprint is
-      // clear of everything already standing on the ground.
-      if (buses < 2) {
-        const road = this.nearestRoadPoint(spot.x, spot.z);
-        const side = Math.cos(spot.yaw) * (road.x - spot.x) - Math.sin(spot.yaw) * (road.z - spot.z) < 0 ? -1 : 1;
-        const bus = new TransjakartaBus({ simple: false });
-        const { halfWidth, halfLength, height } = bus.footprint;
-        let berth: { x: number; z: number; boxes: FootprintBox[] } | null = null;
-        for (const along of [0, 7, -7, 14, -14]) {
-          const bx = spot.x + Math.cos(spot.yaw) * 3.4 * side + Math.sin(spot.yaw) * along;
-          const bz = spot.z - Math.sin(spot.yaw) * 3.4 * side + Math.cos(spot.yaw) * along;
-          if (!this.onRoad(bx, bz, 8) || isWater(bx, bz)) continue;
-          const boxes = rotatedFootprint(bx, bz, spot.yaw, halfWidth, halfLength, height);
-          const clear = boxes.every((b) => !this.colliders.some((o) =>
-            b.minX < o.maxX + 0.3 && b.maxX > o.minX - 0.3 && b.minZ < o.maxZ + 0.3 && b.maxZ > o.minZ - 0.3));
-          if (!clear) continue;
-          berth = { x: bx, z: bz, boxes };
-          break;
-        }
-        if (!berth) continue;            // no clear berth at this shelter: no bus, not a bus in a wall
-        bus.group.rotation.y = spot.yaw;
-        bus.group.position.set(berth.x, 0, berth.z);
-        this.group.add(bus.group);
-        const audit = { name: 'transjakarta', x: berth.x, z: berth.z, bottom: 0 };
-        this.propAudit.push(audit);
-        this.placeOnGround(bus.group, berth.x, berth.z);
-        for (const b of berth.boxes) this.colliders.push(b);
-        this.buses.push({ group: bus.group, boxes: berth.boxes, halfWidth, halfLength, height, audit });
-        buses++;
-      }
-=======
       // A bus is no longer parked here. The two `TransjakartaBus` props that used to stand
       // beside the first two haltes were added to the scene without a position, so they sat at
       // the world origin with an empty collider on the kerb; berthing one on the pavement in
       // front of a halte only put an 18 m body across the walkway. The corridor runs now
       // (see TransjakartaService), so the street sees buses that move.
->>>>>>> origin/wt/t_377a1125
     }
 
     const carts: KakiLimaKind[] = ['bakso', 'nasgor', 'sate'];
