@@ -1,0 +1,1158 @@
+{
+  "headCount": 86,
+  "tollHeads": 46,
+  "metroHeads": 40,
+  "columnCount": 1066,
+  "deckCount": 8,
+  "headTrisPerInstance": 12,
+  "headTrisTotal": 1032,
+  "gapMax": 2.027,
+  "gapMin": -1.8589,
+  "samples": {
+    "toll": [
+      {
+        "headKind": "toll",
+        "at": [
+          -1.04,
+          -532.69
+        ],
+        "headTopY": 13.6234,
+        "headBottomY": 12.9234,
+        "headSize": [
+          15.18,
+          0.7,
+          2.4
+        ],
+        "headTris": 12,
+        "deckUndersideY": 12.5362,
+        "gap": -1.0872,
+        "columns": [
+          {
+            "side": 1,
+            "at": [
+              7.79,
+              -532.06
+            ],
+            "topY": 12.986,
+            "entersHeadBy": 0.0626,
+            "headTopMinusColumnTop": 0.6374,
+            "underFootprint": false,
+            "topBelowDeck": -0.4498
+          },
+          {
+            "side": -1,
+            "at": [
+              -9.86,
+              -533.32
+            ],
+            "topY": 12.9652,
+            "entersHeadBy": 0.0418,
+            "headTopMinusColumnTop": 0.6582,
+            "underFootprint": false,
+            "topBelowDeck": -0.429
+          }
+        ]
+      },
+      {
+        "headKind": "toll",
+        "at": [
+          0.52,
+          117.11
+        ],
+        "headTopY": 12.1499,
+        "headBottomY": 11.4499,
+        "headSize": [
+          15.18,
+          0.7,
+          2.4
+        ],
+        "headTris": 12,
+        "deckUndersideY": 12.1582,
+        "gap": 0.0083,
+        "columns": [
+          {
+            "side": 1,
+            "at": [
+              9.36,
+              116.79
+            ],
+            "topY": 11.4988,
+            "entersHeadBy": 0.0489,
+            "headTopMinusColumnTop": 0.6511,
+            "underFootprint": false,
+            "topBelowDeck": 0.6594
+          },
+          {
+            "side": -1,
+            "at": [
+              -8.33,
+              117.42
+            ],
+            "topY": 11.5034,
+            "entersHeadBy": 0.0535,
+            "headTopMinusColumnTop": 0.6465,
+            "underFootprint": false,
+            "topBelowDeck": 0.6548
+          }
+        ]
+      },
+      {
+        "headKind": "toll",
+        "at": [
+          -0.56,
+          -86.92
+        ],
+        "headTopY": 10.1436,
+        "headBottomY": 9.4436,
+        "headSize": [
+          7.82,
+          0.7,
+          2.4
+        ],
+        "headTris": 12,
+        "deckUndersideY": 10.7459,
+        "gap": 0.6024,
+        "columns": [
+          {
+            "side": 1,
+            "at": [
+              -0.04,
+              -91.74
+            ],
+            "topY": 9.4746,
+            "entersHeadBy": 0.031,
+            "headTopMinusColumnTop": 0.669,
+            "underFootprint": false,
+            "topBelowDeck": 1.2714
+          },
+          {
+            "side": -1,
+            "at": [
+              -1.08,
+              -82.1
+            ],
+            "topY": 9.592,
+            "entersHeadBy": 0.1485,
+            "headTopMinusColumnTop": 0.5515,
+            "underFootprint": false,
+            "topBelowDeck": 1.1539
+          }
+        ]
+      }
+    ],
+    "metro": [
+      {
+        "headKind": "metro",
+        "at": [
+          -574.05,
+          -180.79
+        ],
+        "headTopY": 11.1272,
+        "headBottomY": 10.4272,
+        "headSize": [
+          7.82,
+          0.7,
+          2.4
+        ],
+        "headTris": 12,
+        "deckUndersideY": 11.2259,
+        "gap": 0.0988,
+        "columns": [
+          {
+            "side": 1,
+            "at": [
+              -573.03,
+              -185.53
+            ],
+            "topY": 10.5048,
+            "entersHeadBy": 0.0776,
+            "headTopMinusColumnTop": 0.6224,
+            "underFootprint": false,
+            "topBelowDeck": 0.7211
+          },
+          {
+            "side": -1,
+            "at": [
+              -575.06,
+              -176.04
+            ],
+            "topY": 10.4166,
+            "entersHeadBy": -0.0106,
+            "headTopMinusColumnTop": 0.7106,
+            "underFootprint": false,
+            "topBelowDeck": 0.8093
+          }
+        ]
+      },
+      {
+        "headKind": "metro",
+        "at": [
+          96.55,
+          -74.97
+        ],
+        "headTopY": 10.5016,
+        "headBottomY": 9.8016,
+        "headSize": [
+          7.82,
+          0.7,
+          2.4
+        ],
+        "headTris": 12,
+        "deckUndersideY": 11.0798,
+        "gap": 0.5782,
+        "columns": [
+          {
+            "side": 1,
+            "at": [
+              97.22,
+              -79.78
+            ],
+            "topY": 9.8542,
+            "entersHeadBy": 0.0526,
+            "headTopMinusColumnTop": 0.6474,
+            "underFootprint": false,
+            "topBelowDeck": 1.2256
+          },
+          {
+            "side": -1,
+            "at": [
+              95.89,
+              -70.17
+            ],
+            "topY": 10.0758,
+            "entersHeadBy": 0.2742,
+            "headTopMinusColumnTop": 0.4258,
+            "underFootprint": false,
+            "topBelowDeck": 1.004
+          }
+        ]
+      },
+      {
+        "headKind": "metro",
+        "at": [
+          700.53,
+          -90.53
+        ],
+        "headTopY": 11.4055,
+        "headBottomY": 10.7055,
+        "headSize": [
+          7.82,
+          0.7,
+          2.4
+        ],
+        "headTris": 12,
+        "deckUndersideY": 11.6639,
+        "gap": 0.2584,
+        "columns": [
+          {
+            "side": 1,
+            "at": [
+              699.73,
+              -95.32
+            ],
+            "topY": 11.0007,
+            "entersHeadBy": 0.2952,
+            "headTopMinusColumnTop": 0.4048,
+            "underFootprint": false,
+            "topBelowDeck": 0.6633
+          },
+          {
+            "side": -1,
+            "at": [
+              701.33,
+              -85.75
+            ],
+            "topY": 10.9959,
+            "entersHeadBy": 0.2905,
+            "headTopMinusColumnTop": 0.4095,
+            "underFootprint": false,
+            "topBelowDeck": 0.668
+          }
+        ]
+      }
+    ]
+  },
+  "allGaps": [
+    {
+      "kind": "toll",
+      "at": [
+        -1.04,
+        -532.69
+      ],
+      "gap": -1.0872
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -3.11,
+        -503.67
+      ],
+      "gap": -1.4122
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -5.18,
+        -474.65
+      ],
+      "gap": -1.4464
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -7.25,
+        -445.64
+      ],
+      "gap": -1.1852
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -9.33,
+        -416.62
+      ],
+      "gap": -0.8455
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -11.4,
+        -387.6
+      ],
+      "gap": -0.4318
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -13.47,
+        -358.58
+      ],
+      "gap": 0.028
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -15.55,
+        -329.56
+      ],
+      "gap": 0.3391
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -17.62,
+        -300.55
+      ],
+      "gap": 0.4428
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -19.69,
+        -271.53
+      ],
+      "gap": 0.6218
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -21.76,
+        -242.51
+      ],
+      "gap": 0.8431
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -21.85,
+        -214.23
+      ],
+      "gap": 0.2518
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -19.95,
+        -186.68
+      ],
+      "gap": 0.2281
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -18.05,
+        -159.13
+      ],
+      "gap": 0.1477
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -16.15,
+        -131.57
+      ],
+      "gap": 0.155
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -14.25,
+        -104.03
+      ],
+      "gap": 0.368
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -12.35,
+        -76.47
+      ],
+      "gap": 0.5736
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -10.45,
+        -48.92
+      ],
+      "gap": 0.6197
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -8.55,
+        -21.38
+      ],
+      "gap": 0.655
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -6.65,
+        6.18
+      ],
+      "gap": 0.6568
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -4.75,
+        33.72
+      ],
+      "gap": 0.4358
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -2.85,
+        61.28
+      ],
+      "gap": 0.1097
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -0.95,
+        88.82
+      ],
+      "gap": -0.1176
+    },
+    {
+      "kind": "toll",
+      "at": [
+        0.52,
+        117.11
+      ],
+      "gap": 0.0083
+    },
+    {
+      "kind": "toll",
+      "at": [
+        1.55,
+        146.13
+      ],
+      "gap": -0.2473
+    },
+    {
+      "kind": "toll",
+      "at": [
+        2.59,
+        175.15
+      ],
+      "gap": -0.5014
+    },
+    {
+      "kind": "toll",
+      "at": [
+        3.63,
+        204.16
+      ],
+      "gap": -0.6875
+    },
+    {
+      "kind": "toll",
+      "at": [
+        4.66,
+        233.18
+      ],
+      "gap": -0.806
+    },
+    {
+      "kind": "toll",
+      "at": [
+        5.7,
+        262.2
+      ],
+      "gap": -0.8413
+    },
+    {
+      "kind": "toll",
+      "at": [
+        6.74,
+        291.22
+      ],
+      "gap": -0.7703
+    },
+    {
+      "kind": "toll",
+      "at": [
+        7.77,
+        320.24
+      ],
+      "gap": -0.6316
+    },
+    {
+      "kind": "toll",
+      "at": [
+        8.81,
+        349.25
+      ],
+      "gap": -0.4675
+    },
+    {
+      "kind": "toll",
+      "at": [
+        9.85,
+        378.27
+      ],
+      "gap": -0.3125
+    },
+    {
+      "kind": "toll",
+      "at": [
+        10.88,
+        407.29
+      ],
+      "gap": -0.1724
+    },
+    {
+      "kind": "toll",
+      "at": [
+        10.88,
+        436.31
+      ],
+      "gap": null
+    },
+    {
+      "kind": "toll",
+      "at": [
+        9.85,
+        465.33
+      ],
+      "gap": null
+    },
+    {
+      "kind": "toll",
+      "at": [
+        8.81,
+        494.35
+      ],
+      "gap": null
+    },
+    {
+      "kind": "toll",
+      "at": [
+        7.77,
+        523.36
+      ],
+      "gap": null
+    },
+    {
+      "kind": "toll",
+      "at": [
+        6.74,
+        552.38
+      ],
+      "gap": null
+    },
+    {
+      "kind": "toll",
+      "at": [
+        5.7,
+        581.4
+      ],
+      "gap": null
+    },
+    {
+      "kind": "toll",
+      "at": [
+        4.66,
+        610.42
+      ],
+      "gap": null
+    },
+    {
+      "kind": "toll",
+      "at": [
+        3.63,
+        639.44
+      ],
+      "gap": 2.027
+    },
+    {
+      "kind": "toll",
+      "at": [
+        2.59,
+        668.45
+      ],
+      "gap": 0.2481
+    },
+    {
+      "kind": "toll",
+      "at": [
+        1.55,
+        697.47
+      ],
+      "gap": -1.8589
+    },
+    {
+      "kind": "toll",
+      "at": [
+        0.52,
+        726.49
+      ],
+      "gap": null
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -574.05,
+        -180.79
+      ],
+      "gap": 0.0988
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -542.19,
+        -173.96
+      ],
+      "gap": 0.3598
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -510.34,
+        -167.13
+      ],
+      "gap": 0.1161
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -478.49,
+        -160.31
+      ],
+      "gap": 0.1325
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -446.64,
+        -153.48
+      ],
+      "gap": 0.2954
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -414.79,
+        -146.65
+      ],
+      "gap": 0.4012
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -382.94,
+        -139.82
+      ],
+      "gap": 0.3666
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -351.09,
+        -133
+      ],
+      "gap": 0.3133
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -319.23,
+        -126.17
+      ],
+      "gap": 0.262
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -287.38,
+        -119.34
+      ],
+      "gap": 0.1668
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -255.52,
+        -114.22
+      ],
+      "gap": -1.1032
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -223.65,
+        -110.81
+      ],
+      "gap": -1.0302
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -191.78,
+        -107.4
+      ],
+      "gap": -0.3419
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -159.91,
+        -103.98
+      ],
+      "gap": -0.1568
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -128.04,
+        -100.57
+      ],
+      "gap": 0.0317
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -96.17,
+        -97.16
+      ],
+      "gap": 0.2421
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -64.3,
+        -93.74
+      ],
+      "gap": 0.4165
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -32.43,
+        -90.33
+      ],
+      "gap": 0.5842
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -0.56,
+        -86.92
+      ],
+      "gap": 0.6024
+    },
+    {
+      "kind": "metro",
+      "at": [
+        31.31,
+        -83.51
+      ],
+      "gap": 0.6337
+    },
+    {
+      "kind": "metro",
+      "at": [
+        63.68,
+        -79.52
+      ],
+      "gap": 0.8138
+    },
+    {
+      "kind": "metro",
+      "at": [
+        96.55,
+        -74.97
+      ],
+      "gap": 0.5782
+    },
+    {
+      "kind": "metro",
+      "at": [
+        129.43,
+        -70.42
+      ],
+      "gap": 0.2519
+    },
+    {
+      "kind": "metro",
+      "at": [
+        162.3,
+        -65.87
+      ],
+      "gap": 0.0321
+    },
+    {
+      "kind": "metro",
+      "at": [
+        195.17,
+        -61.32
+      ],
+      "gap": -0.114
+    },
+    {
+      "kind": "metro",
+      "at": [
+        228.04,
+        -56.77
+      ],
+      "gap": -0.2484
+    },
+    {
+      "kind": "metro",
+      "at": [
+        260.92,
+        -52.22
+      ],
+      "gap": -0.2209
+    },
+    {
+      "kind": "metro",
+      "at": [
+        293.79,
+        -47.67
+      ],
+      "gap": -0.3627
+    },
+    {
+      "kind": "metro",
+      "at": [
+        326.66,
+        -43.12
+      ],
+      "gap": -0.5677
+    },
+    {
+      "kind": "metro",
+      "at": [
+        359.53,
+        -38.57
+      ],
+      "gap": -0.7877
+    },
+    {
+      "kind": "metro",
+      "at": [
+        391.43,
+        -38.88
+      ],
+      "gap": -0.3993
+    },
+    {
+      "kind": "metro",
+      "at": [
+        422.34,
+        -44.05
+      ],
+      "gap": -0.5325
+    },
+    {
+      "kind": "metro",
+      "at": [
+        453.25,
+        -49.21
+      ],
+      "gap": -0.6011
+    },
+    {
+      "kind": "metro",
+      "at": [
+        484.16,
+        -54.38
+      ],
+      "gap": -0.5707
+    },
+    {
+      "kind": "metro",
+      "at": [
+        515.07,
+        -59.54
+      ],
+      "gap": -0.5942
+    },
+    {
+      "kind": "metro",
+      "at": [
+        545.98,
+        -64.71
+      ],
+      "gap": -0.6578
+    },
+    {
+      "kind": "metro",
+      "at": [
+        576.89,
+        -69.87
+      ],
+      "gap": -0.4778
+    },
+    {
+      "kind": "metro",
+      "at": [
+        607.8,
+        -75.04
+      ],
+      "gap": -0.8458
+    },
+    {
+      "kind": "metro",
+      "at": [
+        638.71,
+        -80.2
+      ],
+      "gap": -0.4276
+    },
+    {
+      "kind": "metro",
+      "at": [
+        669.62,
+        -85.37
+      ],
+      "gap": 0.1658
+    },
+    {
+      "kind": "metro",
+      "at": [
+        700.53,
+        -90.53
+      ],
+      "gap": 0.2584
+    }
+  ],
+  "pageErrors": [],
+  "samples3": [
+    {
+      "kind": "toll",
+      "at": [
+        -1.04,
+        -532.69
+      ],
+      "gap": -1.0872,
+      "headTop": 13.6234,
+      "deckUnderside": 12.5362,
+      "columnEntersHeadBy": [
+        0.0626,
+        0.0418
+      ]
+    },
+    {
+      "kind": "toll",
+      "at": [
+        0.52,
+        117.11
+      ],
+      "gap": 0.0083,
+      "headTop": 12.1499,
+      "deckUnderside": 12.1582,
+      "columnEntersHeadBy": [
+        0.0489,
+        0.0535
+      ]
+    },
+    {
+      "kind": "toll",
+      "at": [
+        -0.56,
+        -86.92
+      ],
+      "gap": 0.6024,
+      "headTop": 10.1436,
+      "deckUnderside": 10.7459,
+      "columnEntersHeadBy": [
+        0.031,
+        0.1485
+      ]
+    },
+    {
+      "kind": "metro",
+      "at": [
+        -574.05,
+        -180.79
+      ],
+      "gap": 0.0988,
+      "headTop": 11.1272,
+      "deckUnderside": 11.2259,
+      "columnEntersHeadBy": [
+        0.0776,
+        -0.0106
+      ]
+    },
+    {
+      "kind": "metro",
+      "at": [
+        96.55,
+        -74.97
+      ],
+      "gap": 0.5782,
+      "headTop": 10.5016,
+      "deckUnderside": 11.0798,
+      "columnEntersHeadBy": [
+        0.0526,
+        0.2742
+      ]
+    },
+    {
+      "kind": "metro",
+      "at": [
+        700.53,
+        -90.53
+      ],
+      "gap": 0.2584,
+      "headTop": 11.4055,
+      "deckUnderside": 11.6639,
+      "columnEntersHeadBy": [
+        0.2952,
+        0.2905
+      ]
+    }
+  ],
+  "verdict": "FAIL",
+  "failures": [
+    "toll @ -1.04,-532.69 gap -1.0872 (deck inside the head)",
+    "toll @ -1.04,-532.69 column 1 stands beside the head, not under it",
+    "toll @ -1.04,-532.69 column -1 stands beside the head, not under it",
+    "toll @ 0.52,117.11 column 1 stands beside the head, not under it",
+    "toll @ 0.52,117.11 column -1 stands beside the head, not under it",
+    "toll @ -0.56,-86.92 gap 0.6024 (>= 0.01)",
+    "toll @ -0.56,-86.92 column 1 stands beside the head, not under it",
+    "toll @ -0.56,-86.92 column -1 stands beside the head, not under it",
+    "metro @ -574.05,-180.79 gap 0.0988 (>= 0.01)",
+    "metro @ -574.05,-180.79 column 1 stands beside the head, not under it",
+    "metro @ -574.05,-180.79 column -1 stands beside the head, not under it",
+    "metro @ -574.05,-180.79 column -1 stops 0.0106 below the head",
+    "metro @ 96.55,-74.97 gap 0.5782 (>= 0.01)",
+    "metro @ 96.55,-74.97 column 1 stands beside the head, not under it",
+    "metro @ 96.55,-74.97 column -1 stands beside the head, not under it",
+    "metro @ 700.53,-90.53 gap 0.2584 (>= 0.01)",
+    "metro @ 700.53,-90.53 column 1 stands beside the head, not under it",
+    "metro @ 700.53,-90.53 column -1 stands beside the head, not under it",
+    "un-sampled pier gap -1.0872 at -1.04,-532.69",
+    "un-sampled pier gap -1.4122 at -3.11,-503.67",
+    "un-sampled pier gap -1.4464 at -5.18,-474.65",
+    "un-sampled pier gap -1.1852 at -7.25,-445.64",
+    "un-sampled pier gap -0.8455 at -9.33,-416.62",
+    "un-sampled pier gap -0.4318 at -11.4,-387.6",
+    "un-sampled pier gap 0.028 at -13.47,-358.58",
+    "un-sampled pier gap 0.3391 at -15.55,-329.56",
+    "un-sampled pier gap 0.4428 at -17.62,-300.55",
+    "un-sampled pier gap 0.6218 at -19.69,-271.53",
+    "un-sampled pier gap 0.8431 at -21.76,-242.51",
+    "un-sampled pier gap 0.2518 at -21.85,-214.23",
+    "un-sampled pier gap 0.2281 at -19.95,-186.68",
+    "un-sampled pier gap 0.1477 at -18.05,-159.13",
+    "un-sampled pier gap 0.155 at -16.15,-131.57",
+    "un-sampled pier gap 0.368 at -14.25,-104.03",
+    "un-sampled pier gap 0.5736 at -12.35,-76.47",
+    "un-sampled pier gap 0.6197 at -10.45,-48.92",
+    "un-sampled pier gap 0.655 at -8.55,-21.38",
+    "un-sampled pier gap 0.6568 at -6.65,6.18",
+    "un-sampled pier gap 0.4358 at -4.75,33.72",
+    "un-sampled pier gap 0.1097 at -2.85,61.28",
+    "un-sampled pier gap -0.1176 at -0.95,88.82",
+    "un-sampled pier gap -0.2473 at 1.55,146.13",
+    "un-sampled pier gap -0.5014 at 2.59,175.15",
+    "un-sampled pier gap -0.6875 at 3.63,204.16",
+    "un-sampled pier gap -0.806 at 4.66,233.18",
+    "un-sampled pier gap -0.8413 at 5.7,262.2",
+    "un-sampled pier gap -0.7703 at 6.74,291.22",
+    "un-sampled pier gap -0.6316 at 7.77,320.24",
+    "un-sampled pier gap -0.4675 at 8.81,349.25",
+    "un-sampled pier gap -0.3125 at 9.85,378.27",
+    "un-sampled pier gap -0.1724 at 10.88,407.29",
+    "un-sampled pier gap null at 10.88,436.31",
+    "un-sampled pier gap null at 9.85,465.33",
+    "un-sampled pier gap null at 8.81,494.35",
+    "un-sampled pier gap null at 7.77,523.36",
+    "un-sampled pier gap null at 6.74,552.38",
+    "un-sampled pier gap null at 5.7,581.4",
+    "un-sampled pier gap null at 4.66,610.42",
+    "un-sampled pier gap 2.027 at 3.63,639.44",
+    "un-sampled pier gap 0.2481 at 2.59,668.45",
+    "un-sampled pier gap -1.8589 at 1.55,697.47",
+    "un-sampled pier gap null at 0.52,726.49",
+    "un-sampled pier gap 0.0988 at -574.05,-180.79",
+    "un-sampled pier gap 0.3598 at -542.19,-173.96",
+    "un-sampled pier gap 0.1161 at -510.34,-167.13",
+    "un-sampled pier gap 0.1325 at -478.49,-160.31",
+    "un-sampled pier gap 0.2954 at -446.64,-153.48",
+    "un-sampled pier gap 0.4012 at -414.79,-146.65",
+    "un-sampled pier gap 0.3666 at -382.94,-139.82",
+    "un-sampled pier gap 0.3133 at -351.09,-133",
+    "un-sampled pier gap 0.262 at -319.23,-126.17",
+    "un-sampled pier gap 0.1668 at -287.38,-119.34",
+    "un-sampled pier gap -1.1032 at -255.52,-114.22",
+    "un-sampled pier gap -1.0302 at -223.65,-110.81",
+    "un-sampled pier gap -0.3419 at -191.78,-107.4",
+    "un-sampled pier gap -0.1568 at -159.91,-103.98",
+    "un-sampled pier gap 0.0317 at -128.04,-100.57",
+    "un-sampled pier gap 0.2421 at -96.17,-97.16",
+    "un-sampled pier gap 0.4165 at -64.3,-93.74",
+    "un-sampled pier gap 0.5842 at -32.43,-90.33",
+    "un-sampled pier gap 0.6024 at -0.56,-86.92",
+    "un-sampled pier gap 0.6337 at 31.31,-83.51",
+    "un-sampled pier gap 0.8138 at 63.68,-79.52",
+    "un-sampled pier gap 0.5782 at 96.55,-74.97",
+    "un-sampled pier gap 0.2519 at 129.43,-70.42",
+    "un-sampled pier gap 0.0321 at 162.3,-65.87",
+    "un-sampled pier gap -0.114 at 195.17,-61.32",
+    "un-sampled pier gap -0.2484 at 228.04,-56.77",
+    "un-sampled pier gap -0.2209 at 260.92,-52.22",
+    "un-sampled pier gap -0.3627 at 293.79,-47.67",
+    "un-sampled pier gap -0.5677 at 326.66,-43.12",
+    "un-sampled pier gap -0.7877 at 359.53,-38.57",
+    "un-sampled pier gap -0.3993 at 391.43,-38.88",
+    "un-sampled pier gap -0.5325 at 422.34,-44.05",
+    "un-sampled pier gap -0.6011 at 453.25,-49.21",
+    "un-sampled pier gap -0.5707 at 484.16,-54.38",
+    "un-sampled pier gap -0.5942 at 515.07,-59.54",
+    "un-sampled pier gap -0.6578 at 545.98,-64.71",
+    "un-sampled pier gap -0.4778 at 576.89,-69.87",
+    "un-sampled pier gap -0.8458 at 607.8,-75.04",
+    "un-sampled pier gap -0.4276 at 638.71,-80.2",
+    "un-sampled pier gap 0.1658 at 669.62,-85.37",
+    "un-sampled pier gap 0.2584 at 700.53,-90.53"
+  ]
+}

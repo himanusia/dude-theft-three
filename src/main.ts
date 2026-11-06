@@ -1,10 +1,13 @@
 import * as THREE from 'three';
 import { City, PITCH, WORLD_HALF } from './world/city';
 import { Character } from './actors/character';
+import { plantOnGround, soleY } from './actors/plant';
 import { Car, driverLook } from './vehicles/car';
 import { loadCarModels } from './vehicles/carmodels';
 import { districtAt } from './world/jakarta';
 import * as JakartaMap from './world/jakartamap';
+import * as JakartaStreets from './world/streets';
+import { terrainHeight } from './world/terrain';
 import { Ragdoll } from './actors/ragdoll';
 import { PedManager } from './actors/npc';
 import { Police } from './systems/police';
@@ -14,7 +17,16 @@ import { HUD } from './ui/hud';
 import { AudioSys } from './core/audio';
 import { loadSave, writeSave, clearSave, loadSettings, writeSettings, SaveData, Settings } from './core/save';
 import { TouchControls } from './core/touch';
-import { WEAPONS, WEAPON_ORDER, weaponBySlot, buildWeaponModel, STARTING_WEAPONS, WeaponId } from './systems/weapons';
+import {
+  WEAPONS,
+  WEAPON_ORDER,
+  weaponBySlot,
+  buildWeaponModel,
+  STARTING_WEAPONS,
+  WeaponId,
+  PooledShotFx,
+  muzzleAnchor,
+} from './systems/weapons';
 import {
   clamp,
   lerp,
@@ -24,7 +36,6 @@ import {
   rayVsColliders,
   resolveCircleBox,
   formatMoney,
-  canvasTexture,
 } from './core/utils';
 
 // ---------------------------------------------------------------- renderer
@@ -101,6 +112,8 @@ interface PlayerState {
   shootCd: number;
   aimHold: number;
   weapon: WeaponId;
+  /** the pouch: starting kit plus every gun taken this run, in the order acquired */
+  owned: Set<WeaponId>;
   ammo: Record<string, { mag: number; reserve: number }>;
   grounded: boolean;
   rhythm: number;
@@ -125,6 +138,7 @@ const player: PlayerState = {
   shootCd: 0,
   aimHold: 0,
   weapon: 'pistol',
+  owned: new Set(STARTING_WEAPONS),
   ammo: {},
   grounded: true,
   rhythm: 0,
@@ -137,7 +151,7 @@ scene.add(character.group);
 
 const peds = new PedManager(scene, city, 40);
 const police = new Police(scene, city, audio);
-const traffic = new Traffic(scene, city, 14);
+const traffic = new Traffic(scene, city, 8);
 
 // headlight rig that follows whichever car the player is driving
 const headlight = new THREE.SpotLight(0xfff2cc, 0, 55, 0.55, 0.45, 1.6);
@@ -150,7 +164,7 @@ let headlightAttached: Car | null = null;
 const cityCars: Car[] = [];
 // Street parking scales with the map now: 15 cars, drawn in the cheap variant (no mirrors,
 // plate or exhaust pipes) so the extra bodies cost ~12 draws instead of ~40 each.
-for (let i = 0; i < 12; i++) {
+for (let i = 0; i < 8; i++) {
   const spot = city.randomParkingSpot();
   // cycle the roster instead of picking at random: every body type has to appear on the
   // street at least once, and a random pick used to leave the map without a muscle car
@@ -166,10 +180,7 @@ for (let i = 0; i < 12; i++) {
 
 // Real car bodies arrive asynchronously; the procedural ones hold the road until then.
 loadCarModels().then(() => {
-  for (const c of allCars()) {
-    c.rebuild();
-    c.setDriverVisible(player.inCar !== c);
-  }
+  for (const c of allCars()) c.groundAt = (x: number, z: number) => city.groundHeightAt(x, z);
 });
 
 function allCars() {
@@ -187,76 +198,17 @@ for (let i = 0; i < 14; i++) {
   pickups.push({ pos: city.randomSidewalkPoint(), mesh, active: true, timer: 0 });
 }
 
-// effects
-const fx: { obj: any; life: number; max: number; kind: string }[] = [];
-function addTracer(a: THREE.Vector3, b: THREE.Vector3) {
-  const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-  const mat = new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.95 });
-  const line = new THREE.Line(geo, mat);
-  scene.add(line);
-  fx.push({ obj: line, life: 0.08, max: 0.08, kind: 'fade' });
-}
-function addSpark(pos: THREE.Vector3, color: number = 0xffd27a) {
-  const m = new THREE.Mesh(
-    new THREE.SphereGeometry(0.13, 6, 5),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
-  );
-  m.position.copy(pos);
-  scene.add(m);
-  fx.push({ obj: m, life: 0.22, max: 0.22, kind: 'spark' });
-}
-// muzzle flash: additive sprite with soft falloff + spike so it reads as a
-// flash, not a floating ball, and stays visible for a couple of frames
-const muzzleTex = canvasTexture(64, 64, (ctx, w, h) => {
-  const g = ctx.createRadialGradient(w / 2, h / 2, 1, w / 2, h / 2, w / 2);
-  g.addColorStop(0, 'rgba(255,255,240,1)');
-  g.addColorStop(0.3, 'rgba(255,224,140,0.95)');
-  g.addColorStop(0.62, 'rgba(255,150,40,0.5)');
-  g.addColorStop(1, 'rgba(255,110,0,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = 'rgba(255,248,210,0.9)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.5, h * 0.06);
-  ctx.lineTo(w * 0.5, h * 0.94);
-  ctx.moveTo(w * 0.1, h * 0.5);
-  ctx.lineTo(w * 0.9, h * 0.5);
-  ctx.stroke();
-});
-function addMuzzle(pos: THREE.Vector3) {
-  (window as any).__lastMuzzleAt = performance.now();
-  const mat = new THREE.SpriteMaterial({
-    map: muzzleTex,
-    blending: THREE.AdditiveBlending,
-    transparent: true,
-    depthWrite: false,
-    depthTest: false, // a 0.12 s flash may not be hidden by the shooter's own body
-    opacity: 1,
-  });
-  const s = new THREE.Sprite(mat);
-  s.position.copy(pos);
-  s.scale.setScalar(0.85);
-  s.renderOrder = 10;
-  scene.add(s);
-  fx.push({ obj: s, life: 0.12, max: 0.12, kind: 'flash' });
-}
-function updateFx(dt: number) {
-  for (let i = fx.length - 1; i >= 0; i--) {
-    const f = fx[i];
-    f.life -= dt;
-    const k = clamp(f.life / f.max, 0, 1);
-    f.obj.material.opacity = k;
-    if (f.kind === 'spark') f.obj.scale.setScalar(0.4 + k * 0.9);
-    if (f.kind === 'flash') f.obj.scale.setScalar(0.55 + (1 - k) * 0.45);
-    if (f.life <= 0) {
-      scene.remove(f.obj);
-      f.obj.geometry?.dispose();
-      f.obj.material?.dispose?.();
-      fx.splice(i, 1);
-    }
-  }
-}
+// effects: muzzle flashes, tracers and impact puffs live in one pooled system, so firing
+// writes into pre-allocated sprites/points instead of building a new object per shot
+const shotFx = new PooledShotFx(scene, renderer, camera);
+const muzzleScratch = new THREE.Vector3();
+/** Scratch for the shot's near plane: the shooter's chest, projected onto the aim ray. */
+const _shotNear = new THREE.Vector3();
+/** Height of the shot's near plane on the shooter, in metres above his feet. */
+const CHEST_Y = 1.2;
+const tracerFrom = new THREE.Vector3();
+const tracerTo = new THREE.Vector3();
+
 
 const ragdolls: Ragdoll[] = [];
 
@@ -308,6 +260,17 @@ const keys = new Set();
 const mouse = { dx: 0, dy: 0, left: false, right: false, down: false, firedSinceDown: false };
 let camYaw = Math.PI * 0.25;
 let camPitch = 0.1;
+/**
+ * Elevation limits, in radians, of the camera BOOM (the arm from the player to the camera) — not
+ * of the view. A negative boom elevation puts the camera below the player and looks up; positive
+ * puts it overhead and looks down. `PITCH_UP` is the limit that made the owner say "gw ga bisa
+ * ngadep ke atas": at -0.55 rad the boom reached 31.5 deg and the camera could not see the sky,
+ * a 12 m guideway or the top of a tower. -0.96 rad is 55 deg of up-look, which clears the soffit
+ * of the 12 m MRT deck from the street with room to spare, and still stops short of the zenith
+ * where a follow camera has nothing left to frame. The down limit is untouched.
+ */
+const PITCH_UP = -0.96; // -55.0 deg
+const PITCH_DOWN = 1.05; // +60.2 deg
 let camDist = 5.8;
 let shake = 0;
 let shakeRate = 2.2; // amplitude units per second, set by setShake()
@@ -315,6 +278,8 @@ let paused = true;
 let started = false;
 let pointerLocked = false;
 let suppressLockPauseUntil = 0; // ignore the unlock event our own lock request produces
+/** the death card owns the player from the hit that killed them until the screen comes back */
+let dying = false;
 
 const canvasEl = canvas as HTMLCanvasElement;
 canvasEl.addEventListener('click', () => {
@@ -328,7 +293,7 @@ canvasEl.addEventListener('click', () => {
 // headless runs, iframe embeds and some browsers, which used to make the gun dead.
 let suppressFireUntil = 0; // swallows the click that resumes the game
 function canShootNow() {
-  return started && !paused && !player.inCar && performance.now() >= suppressFireUntil;
+  return started && !paused && !dying && !player.inCar && performance.now() >= suppressFireUntil;
 }
 
 document.addEventListener('pointerlockchange', () => {
@@ -337,7 +302,9 @@ document.addEventListener('pointerlockchange', () => {
   // losing the pointer (alt-tab) pauses. Only a lock we actually held counts: a
   // refused request (headless, iframe, a navigation that still owned the lock)
   // arrives as an unlock event with no lock to lose and must not freeze the game.
-  if (hadLock && !pointerLocked && started && !paused && performance.now() > suppressLockPauseUntil) {
+  // Never while the death card is up: the player has no control to lose, and a pause
+  // menu over the card would freeze the respawn's own breath and hide the sequence.
+  if (hadLock && !pointerLocked && started && !paused && !dying && performance.now() > suppressLockPauseUntil) {
     paused = true;
     hud.showPause(true);
     saveGame();
@@ -377,6 +344,10 @@ window.addEventListener('keydown', (e) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   keys.add(e.code);
   if (!started) return;
+  // the death card owns the player until it lifts (same rule as togglePause/hurt): a key that
+  // arrives during the 2.9 s must not walk into a shop, steal a car or swap weapon, because the
+  // respawn teleports the body out of a room the session would still think it is standing in
+  if (dying) return;
   if (e.code === 'KeyF') toggleVehicle();
   if (/^Digit[1-6]$/.test(e.code)) {
     const id = weaponBySlot(Number(e.code.slice(5)));
@@ -394,6 +365,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') toggleMap();
   if (e.code === 'KeyN') {
     const muted = audio.toggleMute();
+    touch.setMuted(muted);
     hud.toast(muted ? 'Audio muted' : 'Audio on');
   }
   if (e.code === 'KeyO') toggleSettings();
@@ -416,6 +388,17 @@ window.addEventListener('blur', () => keys.clear());
 // ---------------------------------------------------------------- touch
 // The on-screen layer only feeds the state above: axes for walking, deltas for
 // the camera, hooks for the discrete actions. Desktop never activates it.
+/** the six slots the phone picker shows, in the order Digit1..Digit6 use */
+const TOUCH_SLOTS = WEAPON_ORDER.map((id) => {
+  const spec = WEAPONS[id];
+  return {
+    id,
+    slot: spec.slot,
+    name: spec.name,
+    short: spec.name.replace('Micro ', '').replace('-47', ''),
+    glyph: spec.glyph,
+  };
+});
 const touch = new TouchControls({
   activate() {
     hud.setTouchMode(true);
@@ -430,11 +413,33 @@ const touch = new TouchControls({
     togglePause();
   },
   vehicle() {
-    if (!started || paused) return;
+    if (!started || paused || dying) return;
     toggleVehicle();
   },
-  interact() {
+  reload() {
     if (!started || paused) return;
+    startReload();
+  },
+  map() {
+    if (!started) return;
+    toggleMap();
+  },
+  mute() {
+    const muted = audio.toggleMute();
+    hud.toast(muted ? 'Audio muted' : 'Audio on');
+    return muted;
+  },
+  weapon(slot: number) {
+    if (!started || paused) return;
+    const id = weaponBySlot(slot);
+    if (id) equipWeapon(id);
+  },
+  // the picker asks instead of being pushed: a slot change from any path lands
+  currentSlot() {
+    return WEAPONS[player.weapon].slot;
+  },
+  interact() {
+    if (!started || paused || dying) return;
     if (player.inInterior) exitInterior();
     else {
       const door = nearestShopDoor();
@@ -442,13 +447,14 @@ const touch = new TouchControls({
     }
   },
   punch() {
-    if (!started || paused) return;
+    if (!started || paused || dying) return;
     punch();
   },
-});
+}, TOUCH_SLOTS);
 
 function togglePause(force?: boolean) {
   const next = force === undefined ? !paused : !!force;
+  if (next && dying) return; // the card runs on its own clock; a pause menu must not cover it
   paused = next;
   hud.showPause(next);
   if (next) saveGame();
@@ -468,6 +474,8 @@ let dayT = 0.34;
 // ---------------------------------------------------------------- camera
 const camTarget = new THREE.Vector3();
 const camGoal = new THREE.Vector3();
+const camAim = new THREE.Vector3();
+const camAimTarget = new THREE.Vector3();
 const camOffset = new THREE.Vector3(Math.sin(Math.PI * 0.25) * 5.7, 1.15, Math.cos(Math.PI * 0.25) * 5.7);
 const camShoulder = new THREE.Vector3();
 const _camTmp = new THREE.Vector3();
@@ -498,7 +506,7 @@ function updateCamera(dt: number) {
   // mouse look: the settings multiplier scales both axes, invert flips the pitch only
   const sens = (aiming ? 0.0009 : 0.0022) * settings.sensitivity;
   camYaw -= mouse.dx * sens;
-  camPitch = clamp(camPitch + mouse.dy * sens * 0.85 * (settings.invertY ? -1 : 1), -0.55, 1.05);
+  camPitch = clamp(camPitch + mouse.dy * sens * 0.85 * (settings.invertY ? -1 : 1), PITCH_UP, PITCH_DOWN);
   mouse.dx = 0;
   mouse.dy = 0;
 
@@ -536,7 +544,9 @@ function updateCamera(dt: number) {
   // The boom may never be shorter than the body it orbits: after a crash into a wall the
   // shortest legal distance put the camera inside the car, which filled the screen with the
   // car's paint. Better to clip the wall than to sit inside the vehicle.
-  const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 1.1;
+  // On foot the camera may not come closer than 2.4 m: at 1.1 m the character's own head filled
+  // a third of the screen whenever a kerb or a wall pulled the boom in.
+  const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 2.4;
   // …but clipping the wall meant the camera went THROUGH it: taking the larger of the two put it
   // a metre or two inside the facade, where every face is back-culled and the frame is nothing
   // but the background — the "screen turns blue when I crash" report. A wall closer than the
@@ -554,9 +564,14 @@ function updateCamera(dt: number) {
   camRise = lerp(camRise, rise, clamp(dt * (rise > camRise ? 14 : 4.5), 0, 1));
 
   camGoal.copy(camTarget).addScaledVector(dir, camDistActual).add(camShoulder);
-  // the floor is the ground under the camera, not an absolute height: on a raised road or a
-  // hillside an absolute floor leaves the camera metres underground, looking at nothing
-  camGoal.y = Math.max(camGoal.y + camRise, city.groundHeightAt(camGoal.x, camGoal.z) + 0.75);
+  // The boom may not sink into the street, but the floor must not flatten the look either:
+  // clamping y and still aiming at the player turned a full up-look into a look-down, because at
+  // PITCH_UP the boom's own end is 4.7 m below the target and the cap caught it. The cap is
+  // ground-relative (an interior has its own floor at y = 0), so it holds on the southern rise
+  // where an absolute 0.75 m is metres underground. The rise over a wall is added on top, so
+  // climbing out of a crash never pushes the camera below that floor.
+  const floorY = player.inInterior ? 0.75 : city.groundHeightAt(camGoal.x, camGoal.z) + 0.75;
+  camGoal.y = Math.max(camGoal.y + camRise, floorY);
 
   // smooth the camera-local offset rather than the world position, so the
   // framing stays glued to the player while the boom settles
@@ -569,7 +584,18 @@ function updateCamera(dt: number) {
     camera.position.z += rand(-shake, shake);
     shake = Math.max(0, shake - dt * shakeRate);
   }
-  camera.lookAt(camTarget);
+  // Aim horizontally at the player, so the shoulder offset still converges on him, but at the
+  // elevation the player asked for rather than at whatever elevation the boom ended up with.
+  // Where the floor is not in the way this is the same ray `lookAt(camTarget)` drew; where it is,
+  // the camera stops descending and the view keeps climbing to PITCH_UP.
+  camAim.copy(camTarget).sub(camera.position);
+  camAim.y = 0;
+  if (camAim.lengthSq() < 1e-6) camAim.set(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+  camAim.normalize().multiplyScalar(Math.cos(camPitch));
+  camAim.y = -Math.sin(camPitch);
+  camAimTarget.copy(camera.position).addScaledVector(camAim, 10);
+
+  camera.lookAt(camAimTarget);
 
   // small FOV kick once the car is properly moving (never on foot)
   const speed01 = player.inCar ? clamp(Math.abs(player.inCar.speed) / player.inCar.maxSpeed, 0, 1) : 0;
@@ -581,29 +607,9 @@ function updateCamera(dt: number) {
 }
 
 // ---------------------------------------------------------------- ground contact
-const _footV = new THREE.Vector3();
-
-/**
- * Sit a character so its lowest sole touches `groundY` exactly.
- * `character.footLift` approximates that shift but ignores the shoe's forward
- * offset and its own tilt, which let the planted foot sink a few millimetres
- * into the road. Measuring the real shoe transforms keeps the feet ground-exact
- * for every stride angle, including the frozen LOD poses.
- */
-function plantFeet(ch: any, groundY: number) {
-  if (!ch?.legL || !ch?.legR) return;
-  const scale = ch.scale ?? 1;
-  ch.group.position.y = groundY;
-  let lowest = Infinity;
-  for (const leg of [ch.legL, ch.legR]) {
-    const shoe = leg.children?.[1];
-    if (!shoe) continue;
-    shoe.getWorldPosition(_footV);
-    lowest = Math.min(lowest, _footV.y - 0.075 * scale);
-  }
-  if (lowest === Infinity) return;
-  ch.group.position.y = groundY + (groundY - lowest);
-}
+// The measure (`city.groundHeightAt`) says what is built under a point; `plantOnGround` sits the
+// body's real sole on it. Both are shared with the pedestrians, so the player and the crowd cannot
+// disagree about where the pavement is.
 
 // ---------------------------------------------------------------- player on foot
 const WALK = 4.7;
@@ -663,14 +669,19 @@ function updateOnFoot(dt: number) {
   // never rest below the surface, whatever the step-up/jump bookkeeping says
   player.y = Math.max(player.y, groundY);
 
-  // collision: room walls/furniture while inside, city colliders outside
+  // collision: room walls/furniture while inside, city colliders outside.
+  // Two passes, because a rotated footprint is a row of strips: being pushed out of one strip can
+  // leave the body a few centimetres inside its neighbour, and one pass then drops it through the
+  // seam between two boxes that are meant to be one wall.
   const colliders = player.inInterior ? player.inInterior.colliders : city.colliders;
-  for (const b of colliders) {
-    if (b.h < 0.4) continue;
-    const r = resolveCircleBox(player.pos.x, player.pos.z, 0.42, b);
-    if (r) {
-      player.pos.x = r.x;
-      player.pos.z = r.z;
+  for (let pass = 0; pass < 2; pass++) {
+    for (const b of colliders) {
+      if (b.h < 0.4) continue;
+      const r = resolveCircleBox(player.pos.x, player.pos.z, 0.42, b);
+      if (r) {
+        player.pos.x = r.x;
+        player.pos.z = r.z;
+      }
     }
   }
   if (!player.inInterior) {
@@ -710,7 +721,7 @@ function updateOnFoot(dt: number) {
   character.group.rotation.y = player.yaw;
   const weaponUp = aiming || player.aimHold > 0;
   character.animate(dt, clamp(speed / RUN, 0, 1), { aiming: weaponUp, airborne: !player.grounded, tilt: -player.vel.dot(new THREE.Vector3(right.x, 0, right.z)) * 0.01 });
-  plantFeet(character, player.y);
+  plantOnGround(character, player.y);
 
   // footsteps
   if (speed > 1.2 && player.grounded) {
@@ -759,6 +770,9 @@ function nearestShopDoor(maxDist = 3.6) {
 function enterInterior(door: { kind: InteriorKind; name: string }) {
   const room = city.roomFor(door.kind);
   if (!room) return;
+  // the death card owns the player: entering a room during it is what parked a live room
+  // reference 612 m behind the respawn point, with the room's colliders replacing the city's
+  if (dying) return;
   // never leave the player in two worlds at once: seated in a car you must get out first
   if (player.inCar) {
     hud.toast('Keluar dari mobil dulu', 'warn', 1600);
@@ -768,6 +782,9 @@ function enterInterior(door: { kind: InteriorKind; name: string }) {
   player.savedCamYaw = camYaw;
   room.group.visible = true;
   player.inInterior = room;
+  // the street is behind a wall now: take the engine down through it rather than leaving the
+  // last drive note hanging at full level inside a shop
+  audio.engineUpdate({ on: false, muffle: engineMuffle() });
   player.pos.set(room.origin.x + room.spawn.x, 0, room.origin.z + room.spawn.z);
   player.y = 0;
   player.vel.set(0, 0, 0);
@@ -778,13 +795,28 @@ function enterInterior(door: { kind: InteriorKind; name: string }) {
   hud.toast(`Masuk ${door.name}`, 'info', 1600);
 }
 
+/**
+ * Drop every trace of the shop: the shell, the reference and the door-side anchor. Anything
+ * that moves the body without going through the door (respawn, busted, save load, new game)
+ * must call this or the session keeps `inInterior` while standing in the street: the room's
+ * colliders then replace the city's every frame and `if (!player.inInterior)` keeps peds,
+ * traffic and police frozen forever, 600 m from a room that is still visible.
+ */
+function resetInterior() {
+  if (player.inInterior) player.inInterior.group.visible = false;
+  player.inInterior = null;
+  player.savedPos = undefined;
+  player.savedCamYaw = undefined;
+}
+
 function exitInterior() {
   const room = player.inInterior;
   if (!room) return;
-  room.group.visible = false;
-  player.inInterior = null;
-  if (player.savedPos) player.pos.copy(player.savedPos);
-  if (player.savedCamYaw !== undefined) camYaw = player.savedCamYaw;
+  const back = player.savedPos;
+  const backYaw = player.savedCamYaw;
+  resetInterior();
+  if (back) player.pos.copy(back);
+  if (backYaw !== undefined) camYaw = backYaw;
   player.y = 0;
   player.vel.set(0, 0, 0);
   audio.play('click', { vol: 0.4 });
@@ -833,6 +865,16 @@ function toggleVehicle() {
     flags.drove = true;
     completeObjective('drove');
   }
+}
+
+/**
+ * How much bodywork sits between the player's ear and the engine, 0..1: nothing in an open
+ * cockpit, the roof and glass of a closed cabin, and a shop's walls once the player walks
+ * inside one (the car they just left keeps fading out through them instead of cutting dead).
+ */
+function engineMuffle(car: any = player.inCar) {
+  if (player.inInterior) return 0.85;
+  return car && car.cabinClosed ? 0.45 : 0;
 }
 
 let squealCd = 0;
@@ -890,7 +932,12 @@ function updateDriving(dt: number) {
   // engine note: gear-stepped pitch from the real speed, volume swells with
   // both throttle and road speed instead of a flat idle drone
   const speed01 = clamp(Math.abs(car.speed) / car.maxSpeed, 0, 1);
-  audio.engineUpdate({ speed01: car.engineRpm01, throttle: throttle * (0.55 + 0.45 * speed01), on: true });
+  audio.engineUpdate({
+    speed01: car.engineRpm01,
+    throttle: throttle * (0.55 + 0.45 * speed01),
+    on: true,
+    muffle: engineMuffle(car),
+  });
 
   // headlights at night
   if (headlightAttached !== car) {
@@ -983,6 +1030,9 @@ function equipWeapon(id: WeaponId) {
     heldModel = null;
   }
   player.weapon = id;
+  // this build has no gate on the slots, so taking a gun in hand is picking it up: the pouch
+  // is what survives a reload, and it has to describe the same six-gun roster as the table
+  player.owned.add(id);
   const a = ammoFor(id);
   player.mag = a.mag;
   player.magSize = spec.magSize;
@@ -1016,30 +1066,36 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
     const up = new THREE.Vector3().crossVectors(right, dir).normalize();
     dir.addScaledVector(right, Math.tan(a)).addScaledVector(up, Math.tan(b)).normalize();
   }
-  // gun muzzle: ahead of the shoulder (not inside the torso) so the flash is
-  // never hidden by the player model from the follow camera
-  const muzzleRight = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
-  const muzzle = new THREE.Vector3(
-    player.pos.x - Math.sin(camYaw) * 0.75 + muzzleRight.x * 0.28,
-    player.y + 1.32,
-    player.pos.z - Math.cos(camYaw) * 0.75 + muzzleRight.z * 0.28
+  // every pellet leaves from the same barrel tip the flash sits on
+  const muzzle = muzzlePos();
+  // A third-person shot is aimed down the camera ray, and the camera sits 1.4-5.8 m BEHIND the man
+  // pulling the trigger, so the near end of that ray is not the muzzle: everything nearer than his
+  // own chest is behind the shot. That boundary used to be the fixed `MIN_T = 2.2`, which is how a
+  // round aimed at a body standing on the barrel skipped him (his sphere started 1.4 m from the
+  // camera) and flew on into the wall 1.9 m behind. It is measured from the shooter instead, and
+  // applies once to the wall and to every actor: a panel the camera boom has been pushed into no
+  // longer answers `bestDist = 0` and eats the round, and a body walking behind the player is
+  // still not in the line of fire because his CENTRE sits behind the same plane.
+  const nearDist = Math.max(
+    0,
+    _shotNear.set(player.pos.x, player.y + CHEST_Y, player.pos.z).sub(origin).dot(dir) - 0.15
   );
-  const wallHit = rayVsColliders(origin, dir, range, city.colliders);
+  const wallHit = rayVsColliders(origin, dir, range, city.colliders, nearDist);
   let bestDist = wallHit ? wallHit.dist : range;
   let hitPoint = origin.clone().addScaledVector(dir, bestDist);
   let hitKind = wallHit ? 'wall' : null;
-  // ignore targets hugging the camera (they are behind/beside the player, not in the line of fire)
-  const MIN_T = 2.2;
 
   // pedestrians
   let hitPed = null;
   for (const ped of peds.peds) {
     if (ped.dead) continue;
     const center = new THREE.Vector3(ped.pos.x, ped.pos.y + 1.0, ped.pos.z);
-    const t = raySphere(origin, dir, center, 0.75);
-    if (t !== null && t > MIN_T && t < bestDist) {
+    const t = raySphere(origin, dir, center, 0.75, nearDist);
+    if (t !== null && t < bestDist) {
       bestDist = t;
-      hitPoint = origin.clone().addScaledVector(dir, t);
+      // a body hugged by the player reaches its sphere nearer than his chest plane; the impact
+      // belongs on that plane, never behind the camera
+      hitPoint = origin.clone().addScaledVector(dir, Math.max(t, nearDist));
       hitKind = 'ped';
       hitPed = ped;
     }
@@ -1047,7 +1103,7 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
 
   // officers on foot
   let hitOfficer = null;
-  const copHit = police.raycastOfficer(origin, dir, bestDist);
+  const copHit = police.raycastOfficer(origin, dir, bestDist, nearDist);
   if (copHit) {
     bestDist = copHit.dist;
     hitPoint = origin.clone().addScaledVector(dir, copHit.dist);
@@ -1060,10 +1116,12 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
   const carsAll = allCars();
   for (const c of carsAll) {
     const center = new THREE.Vector3(c.pos.x, c.y + 0.9, c.pos.z);
-    const t = raySphere(origin, dir, center, 1.6);
-    if (t !== null && t > MIN_T && t < bestDist) {
+    const t = raySphere(origin, dir, center, 1.6, nearDist);
+    if (t !== null && t < bestDist) {
       bestDist = t;
-      hitPoint = origin.clone().addScaledVector(dir, t);
+      // a body hugged by the player reaches its sphere nearer than his chest plane; the impact
+      // belongs on that plane, never behind the camera
+      hitPoint = origin.clone().addScaledVector(dir, Math.max(t, nearDist));
       hitKind = 'car';
       hitCar = c;
     }
@@ -1083,7 +1141,9 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
       velocity: v,
       colliders: city.colliders,
       maxLife: 11,
+      groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
     }));
+    shotFx.impact(hitPoint, dir, 'flesh');
     hud.hitmarker();
     addCash(25);
     police.addWanted(1);
@@ -1092,6 +1152,7 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
   } else if (hitKind === 'ped') {
     const v = dir.clone().multiplyScalar(11);
     v.y = Math.max(2.5, v.y + 4);
+    shotFx.impact(hitPoint, dir, 'flesh');
     ragdollPed(hitPed, v);
     hud.hitmarker();
     addCash(8 + dmg);
@@ -1099,21 +1160,21 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
     flags.chaos = true;
   } else if (hitKind === 'car') {
     hitCar.applyDamage(dmg);
-    addSpark(hitPoint, 0xffcf7a);
+    shotFx.impact(hitPoint, dir, 'metal');
     hud.hitmarker();
     police.addWanted(0.35);
     if (hitCar.wrecked) {
       explode(hitCar);
     }
   } else if (hitKind === 'wall') {
-    addSpark(hitPoint, 0xd8d8d8);
+    shotFx.impact(hitPoint, dir, 'concrete');
     audio.play('metal', { vol: 0.16, rate: 1.4 });
   }
 
   // the street reacts: everyone within earshot runs, the nearest bystander fetches the cops
   peds.onGunshot(player.pos.x, player.pos.z, hitKind === 'ped');
 
-  addTracer(muzzle, hitPoint);
+  shotFx.tracer(muzzle, hitPoint);
   window.__lastShot = {
     origin: origin.toArray().map((v) => +v.toFixed(2)),
     dir: dir.toArray().map((v) => +v.toFixed(3)),
@@ -1125,14 +1186,23 @@ function firePelletRaw(spreadDeg = 0, dmg = 11, range = 110) {
   if (player.mag === 0) startReload();
 }
 
-function muzzlePos() {
-  const right = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
-  return new THREE.Vector3(
-    player.pos.x - Math.sin(camYaw) * 0.75 + right.x * 0.28,
-    player.y + 1.32,
-    player.pos.z - Math.cos(camYaw) * 0.75 + right.z * 0.28
+/**
+ * Barrel tip of the equipped weapon in world space: the model's own muzzle offset pushed through
+ * the arm chain (`muzzleAnchor`), in the BODY's frame. The old version aimed a fixed 0.75 m
+ * ahead of the camera, so the flash was welded to the lens and 0.5 m behind the AK's barrel.
+ * Writes into one scratch vector: firing may not allocate.
+ */
+function muzzlePos(): THREE.Vector3 {
+  const anchor = muzzleAnchor(player.weapon);
+  const s = Math.sin(player.yaw);
+  const c = Math.cos(player.yaw);
+  return muzzleScratch.set(
+    player.pos.x + c * anchor.right + s * anchor.forward,
+    player.y + anchor.up,
+    player.pos.z - s * anchor.right + c * anchor.forward
   );
 }
+
 
 /** One trigger pull: spends a round (or swings), then fires every pellet of the weapon. */
 function shoot() {
@@ -1152,20 +1222,30 @@ function shoot() {
   player.aimHold = 1.4; // keep the weapon up between shots
   player.shootCd = 60 / spec.rpm;
   audio.play(spec.sound, { vol: spec.soundVol, rate: spec.soundRate * rand(0.96, 1.04), pan: rand(-0.2, 0.2) });
-  camPitch = clamp(camPitch - spec.recoil, -0.55, 1.05);
+  camPitch = clamp(camPitch - spec.recoil, PITCH_UP, PITCH_DOWN);
   setShake(spec.shake, 0.1);
-  addMuzzle(muzzlePos());
+  // 60 ms flash at the barrel tip, thrown down the body's forward axis
+  shotFx.flash(muzzlePos(), spec.flashScale, Math.sin(player.yaw), Math.cos(player.yaw));
+  (window as any).__lastMuzzleAt = performance.now();
   for (let i = 0; i < spec.pellets; i++) firePelletRaw(spec.spread, spec.damage, spec.range);
   hud.setWeapon(spec.name, spec.slot, ammoFor(player.weapon).reserve, spec.id);
   hud.setAmmo(player.mag, spec.magSize, false);
 }
 
-function raySphere(origin: any, dir: any, center: any, radius: number) {
+/**
+ * Entry distance of a sphere along a ray, or null. `minCenterT` is how far down the ray the
+ * shooter's own chest sits: a body whose CENTRE is behind that plane is behind the shot (a
+ * pedestrian walking behind the player), while a body standing on the barrel has its centre level
+ * with the chest plane and is point-blank. Testing the centre rather than the sphere's entry is
+ * what keeps those two apart, because a body hugged by the player reaches its sphere a metre
+ * nearer than the camera even when it is in front of the gun.
+ */
+function raySphere(origin: any, dir: any, center: any, radius: number, minCenterT = 0) {
   const ox = center.x - origin.x;
   const oy = center.y - origin.y;
   const oz = center.z - origin.z;
   const tca = ox * dir.x + oy * dir.y + oz * dir.z;
-  if (tca < 0) return null;
+  if (tca < minCenterT) return null;
   const d2 = ox * ox + oy * oy + oz * oz - tca * tca;
   const r2 = radius * radius;
   if (d2 > r2) return null;
@@ -1213,6 +1293,7 @@ function ragdollPed(ped: any, velocity: any) {
     velocity: velocity.clone().setY(Math.max(velocity.y, 1.5)),
     colliders: city.colliders,
     maxLife: 11,
+    groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
   });
   ragdolls.push(r);
 }
@@ -1221,7 +1302,7 @@ function explode(car: any) {
   audio.play('explosion', { vol: 0.8, rate: rand(0.9, 1.1) });
   for (let i = 0; i < 8; i++) {
     const p = new THREE.Vector3(car.pos.x + rand(-1.5, 1.5), car.y + rand(0.4, 2.2), car.pos.z + rand(-1.5, 1.5));
-    addSpark(p, pick([0xffa030, 0xff5a20, 0xffd070]));
+    shotFx.spark(p, pick([0xffa030, 0xff5a20, 0xffd070]), 6, 0.13);
   }
   if (car === player.inCar) {
     car.setDriverVisible(true);
@@ -1238,7 +1319,10 @@ function explode(car: any) {
 }
 
 // ---------------------------------------------------------------- damage & money
+/** No hit lands while the death card is up: a cop still shooting at the corpse must not
+ *  re-trigger the sequence, and the health bar during the card is the card's to own. */
 function hurt(n: number) {
+  if (dying) return;
   player.hp -= n;
   player.lastHit = performance.now();
   hud.damageFlash();
@@ -1250,9 +1334,29 @@ function addCash(n: number) {
   player.cash += n;
 }
 
-function wasted() {
+/**
+ * The death card: one 2.9 s clock, authored in index.html as four keyframe tracks that share
+ * one duration (the frame loses its colour, WASTED arrives on a slow scale, a hairline rule
+ * wipes under it, then black). The respawn happens under the black at 2.61 s and the black
+ * lifts by itself by 2.9 s, so the player is already standing at the spawn when the picture
+ * comes back. The bill is charged at the hit, not at the reveal: the card is the whole event.
+ *
+ * `_test.wastedSeek(ms)` parks this same clock on one millisecond for a capture, which is the
+ * only way to read a 4 fps SwiftShader frame at "0.3 s after death" and mean it.
+ */
+const DEATH_CARD_MS = 2900;
+const DEATH_RESPAWN_MS = 2610;
+let deathRespawnTimer = 0;
+let deathRevealTimer = 0;
+/** the health a parked capture found, handed back when the card is cleared */
+let parkedHp = -1;
+const deathCard = document.getElementById('wasted-screen') as HTMLElement;
+
+function respawnAfterDeath() {
   player.hp = 100;
-  player.cash = Math.max(0, player.cash - 100);
+  // the body is teleported to the street, so the room reference has to go with it: a shop that
+  // is 600 m away must not keep owning the colliders and the ped/traffic/police update gates
+  resetInterior();
   player.pos.copy(city.getSpawn());
   player.vel.set(0, 0, 0);
   player.y = 0;
@@ -1261,8 +1365,27 @@ function wasted() {
   character.group.visible = true;
   police.clearWanted();
   police.clearAll();
-  hud.toast('WASTED — $100 hospital bill', 'bad', 3200);
+  hud.setHealth(100);
+}
+
+function wasted() {
+  if (dying) return; // one card per death, never two stacked
+  dying = true;
+  player.hp = 0; // the health bar reads the truth while the card is up
+  player.vel.set(0, 0, 0);
+  player.cash = Math.max(0, player.cash - 100);
+  hud.setHealth(0);
+  deathCard.classList.add('on');
+  document.body.classList.add('wasted');
+  audio.play('bodyfall', { vol: 0.6 });
   setShake(0.3, 0.25);
+  deathRespawnTimer = window.setTimeout(respawnAfterDeath, DEATH_RESPAWN_MS);
+  deathRevealTimer = window.setTimeout(() => {
+    dying = false;
+    deathCard.classList.remove('on');
+    document.body.classList.remove('wasted');
+    hud.toast('WASTED — $100 hospital bill', 'bad', 2600);
+  }, DEATH_CARD_MS);
 }
 
 function busted() {
@@ -1271,6 +1394,7 @@ function busted() {
   if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
   character.group.visible = true;
+  resetInterior(); // the same teleport-out rule as the death card
   player.pos.copy(city.getSpawn());
   player.vel.set(0, 0, 0);
   player.y = 0;
@@ -1341,12 +1465,11 @@ function captureSave(): Omit<SaveData, 'version' | 'savedAt'> {
     hp: player.hp,
     wanted: police.wanted,
     dayT,
-    // this build has one gun: the pistol is the whole roster, saved by name so a
-    // later weapon system can extend the field without a schema bump
-    weapon: 'pistol',
+    // the gun in hand and the pouch that holds it, both read from the live roster: a hardcoded
+    // `pistol` here is what used to drop a player back to the starting gun on Continue
+    weapon: player.weapon,
     ammo: player.mag,
-    magSize: player.magSize,
-    ownedWeapons: ['pistol'],
+    ownedWeapons: [...player.owned],
     objectives: {
       drove: flags.drove,
       chaos: flags.chaos,
@@ -1373,11 +1496,17 @@ function applySave(data: SaveData) {
   player.yaw = data.player.yaw;
   if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
-  player.inInterior = null;
+  resetInterior(); // a save made inside a shop stores the street anchor, never the room
   player.hp = clamp(data.hp, 1, 100);
   player.cash = data.cash;
-  player.mag = clamp(data.ammo, 0, data.magSize);
-  player.magSize = data.magSize;
+  // the pouch and the gun in hand come from the save, not from the boot default: every owned
+  // weapon gets its spec magazine first, so a switch after a reload cannot invent one
+  player.owned = new Set(data.ownedWeapons.filter((w): w is WeaponId => !!WEAPONS[w as WeaponId]));
+  player.ammo = {};
+  for (const id of player.owned) player.ammo[id] = { mag: WEAPONS[id].magSize, reserve: WEAPONS[id].reserve };
+  equipWeapon(WEAPONS[data.weapon as WeaponId] ? (data.weapon as WeaponId) : 'pistol');
+  player.mag = clamp(Math.round(data.ammo), 0, player.magSize);
+  player.ammo[player.weapon].mag = player.mag;
   player.reloading = 0;
   player.lastHit = performance.now() - 60000; // a restored wound should still regen
   camYaw = data.player.camYaw;
@@ -1411,7 +1540,8 @@ function resetCar(car: any, spot?: { pos: THREE.Vector3; yaw: number }) {
   }
   car.speed = 0;
   car.steer = 0;
-  car.y = 0;
+  // park on the ground the car is standing on, not on the old y = 0 plane
+  car.y = city.groundHeightAt(car.pos.x, car.pos.z);
   car.vy = 0;
   car.roll = 0;
   car.pitch = 0;
@@ -1436,9 +1566,11 @@ function resetPeds() {
     ped.dead = false;
     ped.state = 'walk';
     ped.speed = rand(1.2, 1.9);
-    ped.phase = 0;
-    ped.pos.copy(city.randomSidewalkPointNear(110));
-    ped.target = city.randomSidewalkPoint();
+    // the pavement network, not the old block-ring lattice: a restored crowd must not be
+    // dropped inside a shopfront (that was the source of the "ped inside a building" count)
+    const spot = peds.pavementPointNear(player.pos.x, player.pos.z, 14, 48) || peds.pavementPointNear(player.pos.x, player.pos.z, 8, 110);
+    if (spot) ped.placeAt(spot.x, spot.z);
+    else ped.repath();
     ped.yaw = rand(0, Math.PI * 2);
     ped.char.group.visible = true;
     ped.char.group.position.copy(ped.pos);
@@ -1448,12 +1580,7 @@ function resetPeds() {
 
 /** Drop every transient effect (tracers, sparks, muzzle flashes, ragdolls). */
 function resetFx() {
-  for (const f of fx) {
-    scene.remove(f.obj);
-    f.obj.geometry?.dispose?.();
-    f.obj.material?.dispose?.();
-  }
-  fx.length = 0;
+  shotFx.reset();
   for (const r of ragdolls) r.dispose();
   ragdolls.length = 0;
 }
@@ -1474,8 +1601,9 @@ function newGame() {
   player.yaw = 0;
   player.hp = 100;
   player.cash = 250;
-  player.mag = 12;
-  player.magSize = 12;
+  // a fresh run owns the starting pouch again and holds the 9mm, not whatever the last run ended with
+  player.owned = new Set(STARTING_WEAPONS);
+  player.ammo = {};
   player.reloading = 0;
   player.shootCd = 0;
   player.rhythm = 0;
@@ -1483,9 +1611,7 @@ function newGame() {
   player.lastHit = 0;
   if (player.inCar) player.inCar.setDriverVisible(true);
   player.inCar = null;
-  player.inInterior = null;
-  player.savedPos = undefined;
-  player.savedCamYaw = undefined;
+  resetInterior();
 
   camYaw = Math.PI * 0.25;
   camPitch = 0.1;
@@ -1551,6 +1677,7 @@ function newGame() {
   }
   audio.engineUpdate({ on: false });
 
+  equipWeapon('pistol'); // fresh mag + reserve, and drops any model the last run held
   hud.setCash(player.cash);
   hud.setHealth(player.hp);
   hud.setStars(0);
@@ -1568,10 +1695,18 @@ function newGame() {
 let mapWasPaused = true;
 let settingsWasPaused = true;
 
+/** Roads as the minimap needs them: computed once, not per frame. */
+const MINIMAP_ROADS = [
+  ...JakartaMap.ARTERIALS.map((a) => ({ path: a.path, width: a.width })),
+  { path: JakartaMap.RING_ROAD, width: 20 },
+];
+
 function mapState() {
   return {
     blocks: city.blocks,
     roadLines: city.roadLines,
+    mapRoads: [...JakartaMap.ARTERIALS.map((a) => ({ path: a.path, width: a.width })), { path: JakartaMap.RING_ROAD, width: 20 }],
+    shoreZ: JakartaMap.SHORE_Z,
     shops: city.shopDoors,
     police: police.cars,
     cars: [...cityCars, ...traffic.cars.map((e) => e.car)],
@@ -1587,6 +1722,8 @@ function toggleMap(force?: boolean) {
   if (open && !started) return;
   if (open === hud.mapOpen) return;
   hud.showMap(open);
+  // the phone's MAP chip is the only way back out: it has to stay lit and pressable
+  touch.setMapOpen(open);
   if (open) {
     mapWasPaused = paused;
     paused = true;
@@ -1757,7 +1894,10 @@ function updatePickups(dt: number) {
     p.mesh.rotation.y += dt * 2.2;
     p.mesh.position.y = 1.05 + Math.sin(performance.now() * 0.003 + p.pos.x) * 0.12;
     const d = Math.hypot(p.pos.x - player.pos.x, p.pos.z - player.pos.z);
-    if (d < 1.7 && player.y < 2) {
+    // you can pick cash up from the driver's seat too: a 1.7 m radius only works on foot, and a
+    // car is 4 m long, so driving over a pickup did nothing
+    const reach = player.inCar ? 3.8 : 1.7;
+    if (d < reach && player.y < 60) {
       p.active = false;
       p.mesh.visible = false;
       p.timer = 22;
@@ -1771,9 +1911,9 @@ function updatePickups(dt: number) {
 // ---------------------------------------------------------------- cops shoot the player
 function copShoot(pos: any, dmg: any) {
   audio.play('shot_rifle', { vol: clamp(0.5 - pos.distanceTo(player.pos) / 90, 0.12, 0.45), rate: 1.1 });
-  const from = pos.clone().setY(1.4);
-  const to = new THREE.Vector3(player.pos.x, player.y + 1.1, player.pos.z);
-  addTracer(from, to);
+  tracerFrom.copy(pos).setY(pos.y + 1.4);
+  tracerTo.set(player.pos.x, player.y + 1.1, player.pos.z);
+  shotFx.tracer(tracerFrom, tracerTo);
   hurt(dmg);
 }
 
@@ -1786,8 +1926,39 @@ let fpsFrames = 0;
 let slowWindows = 0;
 let fastWindows = 0;
 
+/**
+ * One contract for every car on the map, including the ones whose physics is parked while they
+ * are far away: a wheel may not sit more than 18 cm off the ground under it. Without this a car
+ * left over a hill kept its old height when the terrain under it changed, which the audit read
+ * as 32 m in the air.
+ */
+function settleCars() {
+  for (const c of allCars()) {
+    const floor = city.groundHeightAt(c.pos.x, c.pos.z);
+    if (Math.abs(c.y - floor) > 0.18) {
+      c.y = floor;
+      c.vy = 0;
+      c.pos.y = floor;
+    }
+  }
+}
+
 function update(dt: number) {
   simTime += dt;
+  for (const c of allCars()) {
+    c.groundAt = (x: number, z: number) => city.groundHeightAt(x, z);
+    // One contract for every car on the map, including the ones whose physics is parked while
+    // they are far away: a wheel may not sit more than half a metre off the ground under it.
+    // Without this a car left over a hill stayed at its old height when the terrain under it
+    // changed, which the audit read as 32 m in the air.
+    const floor = city.groundHeightAt(c.pos.x, c.pos.z);
+    if (Math.abs(c.y - floor) > 0.6) {
+      c.y = floor;
+      c.vy = 0;
+      c.pos.y = floor;
+    }
+  }
+  city.updateCulling(player.pos.x, player.pos.z);
   // wall-clock beat, not accumulated dt: dt is clamped to 50 ms, so a slow host
   // would otherwise stretch "every 20 s" to half a minute of real time
   if (performance.now() - lastAutosaveAt >= AUTOSAVE_SECONDS * 1000) {
@@ -1803,10 +1974,13 @@ function update(dt: number) {
     player.hp = Math.min(100, player.hp + 2.2 * dt);
   }
 
-  updateCombat(dt);
+  // the death card owns the player: no control, no fire, no driving until it lifts
+  if (!dying) {
+    updateCombat(dt);
 
-  if (player.inCar) updateDriving(dt);
-  else updateOnFoot(dt);
+    if (player.inCar) updateDriving(dt);
+    else updateOnFoot(dt);
+  }
 
   if (!player.inInterior) peds.update(dt, pedContext());
 
@@ -1818,7 +1992,7 @@ function update(dt: number) {
     onArrest: busted,
     onCopShoot: copShoot,
     onCopFire: (from: any, to: any) => {
-      addTracer(from.clone().setY(from.y + 1.3), to.clone().setY(to.y + 1.1));
+      shotFx.tracer(tracerFrom.copy(from).setY(from.y + 1.3), tracerTo.copy(to).setY(to.y + 1.1));
       audio.play('shot_pistol', { vol: 0.32, pan: 0 });
     },
     camYaw,
@@ -1875,7 +2049,7 @@ function update(dt: number) {
   }
 
   updatePickups(dt);
-  updateFx(dt);
+  shotFx.update(dt);
 
   // sun shadow + street lights follow the action
   const focus = player.inCar ? player.inCar.pos : player.pos;
@@ -1883,6 +2057,9 @@ function update(dt: number) {
   city.updateNightLights(dayT, focus);
   city.sun.target.position.set(focus.x, 0, focus.z);
   city.sun.position.set(focus.x + 60, city.sun.position.y, focus.z + 42);
+
+  // after every system has moved, no wheel may hover over or sink into the ground under it
+  settleCars();
 
   updateCamera(dt);
   hud.setCash(player.cash);
@@ -1899,22 +2076,34 @@ function update(dt: number) {
     hud.setSpeed(0, false);
   }
 
-  // prompts
+  // prompts: name the control the player actually has. A phone has no E or F key,
+  // so the chip prints the on-screen button the action is bound to instead.
+  const keyed = (kb: string, onTouch: string) => (touch.state.active ? onTouch : kb);
   if (player.inInterior) {
     const nearExit = player.pos.distanceTo(new THREE.Vector3(
       player.inInterior.origin.x + player.inInterior.exit.x,
       0,
       player.inInterior.origin.z + player.inInterior.exit.z
     )) < 3.2;
-    hud.setPrompt(nearExit ? 'E — keluar toko' : 'E — keluar toko (dekat pintu)');
+    hud.setPrompt(
+      nearExit
+        ? keyed('E — keluar toko', 'tap USE — keluar toko')
+        : keyed('E — keluar toko (dekat pintu)', 'tap USE — keluar toko (dekat pintu)')
+    );
   } else if (player.inCar) {
-    hud.setPrompt('F — exit vehicle');
+    hud.setPrompt(keyed('F — exit vehicle', 'tap CAR — exit vehicle'));
   } else if (nearestShopDoor() && !player.inCar) {
     const door = nearestShopDoor()!;
-    hud.setPrompt(`E — masuk ${door.name}`);
+    hud.setPrompt(keyed(`E — masuk ${door.name}`, `tap USE — masuk ${door.name}`));
   } else {
     const near = nearestCar(4.6);
-    hud.setPrompt(near ? (near.car.isPolice ? 'F — steal police cruiser' : 'F — enter vehicle') : '');
+    hud.setPrompt(
+      near
+        ? near.car.isPolice
+          ? keyed('F — steal police cruiser', 'tap CAR — steal police cruiser')
+          : keyed('F — enter vehicle', 'tap CAR — enter vehicle')
+        : ''
+    );
   }
 
   // music state: chase track while wanted
@@ -1924,6 +2113,7 @@ function update(dt: number) {
   hud.drawMinimap({
     blocks: city.blocks,
     roadLines: city.roadLines,
+    mapRoads: MINIMAP_ROADS,
     peds: peds.peds,
     police: police.cars,
     cars: [...cityCars, ...traffic.cars.map((e) => e.car)],
@@ -1945,7 +2135,11 @@ function scheduleFrame() {
   else requestAnimationFrame(animate);
 }
 
+/** test hook: park the loop so a capture tool can hold one frame (a 60 ms flash must not expire) */
+let loopFrozen = false;
+
 function animate() {
+  if (loopFrozen) return;
   scheduleFrame();
   const rawDt = clock.getDelta();
   const dt = Math.min(0.05, rawDt);
@@ -1955,7 +2149,7 @@ function animate() {
   } else {
     // keep the scene alive while paused
     city.update(0, dayT);
-    updateFx(dt);
+    shotFx.update(dt);
     updateCamera(0.016);
   }
 
@@ -2003,6 +2197,8 @@ window.__game = {
   THREE,
   districtAt,
   jakartaMap: JakartaMap,
+  jakartaStreets: JakartaStreets,
+  terrainHeight,
   scene,
   camera,
   renderer,
@@ -2011,6 +2207,10 @@ window.__game = {
   objectives: flags,
   player,
   equipWeapon,
+  /** the pouch as a plain array: a Set does not survive the headless harness's serialisation */
+  get ownedWeapons() {
+    return [...player.owned];
+  },
   get weaponSpec() {
     return WEAPONS[player.weapon];
   },
@@ -2053,7 +2253,7 @@ window.__game = {
       fov: +camera.fov.toFixed(2),
       speedKmh: player.inCar ? Math.round(player.inCar.kmh) : 0,
       shake: +shake.toFixed(3),
-      fxCount: fx.length,
+      fxCount: shotFx.stats().live,
       sceneChildren: scene.children.length,
       mapOpen: hud.mapOpen,
       settingsOpen: hud.settingsOpen,
@@ -2072,12 +2272,58 @@ window.__game = {
     hurt,
     busted,
     wasted,
+    /**
+     * Park the death card on one millisecond and take the wall clock over, or `null` to clear
+     * it. Every stage shares one 2.9 s duration, so seeking each track to the same currentTime
+     * IS the frame at that millisecond — which is how a 4 fps SwiftShader run can be read at
+     * 0.3 s and mean it. The card owns the health bar while it is parked, exactly as `wasted()`
+     * owns it, and hands it back on `null`. Returns what it parked, for the capture's provenance.
+     */
+    wastedSeek(ms: number | null) {
+      window.clearTimeout(deathRespawnTimer);
+      window.clearTimeout(deathRevealTimer);
+      if (ms === null) {
+        dying = false;
+        deathCard.classList.remove('on');
+        document.body.classList.remove('wasted');
+        if (parkedHp >= 0) {
+          player.hp = parkedHp;
+          hud.setHealth(player.hp);
+          parkedHp = -1;
+        }
+        return null;
+      }
+      dying = true;
+      if (parkedHp < 0) parkedHp = player.hp;
+      player.hp = 0;
+      hud.setHealth(0);
+      deathCard.classList.add('on');
+      document.body.classList.add('wasted');
+      void deathCard.offsetWidth; // let the class land before the tracks are asked for
+      const anims = [
+        ...deathCard.getAnimations({ subtree: true }),
+        ...canvas.getAnimations(),
+        ...(document.getElementById('hud')?.getAnimations() ?? []),
+      ];
+      for (const a of anims) {
+        a.pause();
+        a.currentTime = ms;
+      }
+      return { ms, animations: anims.length };
+    },
     addCash,
     startReload,
     face(x: number, z: number) {
       camYaw = Math.atan2(-(x - player.pos.x), -(z - player.pos.z));
     },
     teleport(x: number, z: number) {
+      // carry a driven car along: the seated player is snapped back to the seat every frame, so
+      // teleporting on foot only looked like it worked and then undid itself
+      if (player.inCar) {
+        player.inCar.pos.set(x, player.inCar.y, z);
+        player.inCar.y = city.groundHeightAt(x, z);
+        player.inCar.mesh.position.copy(player.inCar.pos);
+      }
       player.pos.set(x, 0, z);
       player.y = city.groundHeightAt(x, z);
       player.vel.set(0, 0, 0);
@@ -2097,37 +2343,51 @@ window.__game = {
     },
     pedContext,
 
+    /**
+     * The engine note as it actually stands: the graph, its live parameters, and the bodywork
+     * the mix thinks is in the way. A probe reads this instead of reaching into AudioSys fields,
+     * so a rename of the graph cannot make the probe pass by reading `undefined === undefined`.
+     */
+    audioState() {
+      return {
+        ...audio.engineState(),
+        inCar: !!player.inCar,
+        carType: player.inCar ? player.inCar.type : null,
+        cabinClosed: player.inCar ? !!player.inCar.cabinClosed : null,
+        inInterior: !!player.inInterior,
+        muffle: engineMuffle(),
+        kmh: player.inCar ? Math.round(player.inCar.kmh) : 0,
+        rpm01: player.inCar ? +player.inCar.engineRpm01.toFixed(3) : 0,
+      };
+    },
+
     // ---- floating geometry audit: every actor and prop must touch the ground ----
     audit() {
       const report: { peds: any[]; cars: any[]; player: number | null; ragdolls: any[]; props: any[]; buildings: any[] } = { peds: [], cars: [], player: null, ragdolls: [], props: [], buildings: [] };
-      const v = new THREE.Vector3();
 
       for (const ped of peds.peds) {
         if (ped.dead) continue;
         // a walking dude lifts one foot; the planted foot is what must touch the ground
-        const bottoms = [ped.char.legL.children[1], ped.char.legR.children[1]].map((shoe) => {
-          shoe.getWorldPosition(v);
-          return v.y - 0.075 * (ped.char.scale ?? 1);
-        });
         const ground = city.groundHeightAt(ped.pos.x, ped.pos.z);
-        const gap = Math.min(...bottoms) - ground;
+        const gap = soleY(ped.char) - ground;
         if (gap > 0.06 || gap < -0.05) report.peds.push({ gap: +gap.toFixed(3), pos: ped.pos.toArray().map((n: number) => +n.toFixed(1)) });
       }
 
       for (const car of allCars()) {
-        // local wheel height vs the wheel radius (body roll/pitch is cosmetic)
-        const gap = car.wheels[0].pivot.position.y - car.wheelRadius + car.y;
-        if (Math.abs(gap) > 0.03) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
+        // local wheel height vs the wheel radius, measured against the ground under the car:
+        // with terrain, "y = 0" is no longer the floor, so the old absolute check flagged every
+        // car that sat correctly on a slope
+        const ground = city.groundHeightAt(car.pos.x, car.pos.z);
+        const gap = car.wheels[0].pivot.position.y - car.wheelRadius + car.y - ground;
+        // 35 cm, not 3 mm: the wheel pivot travels with the suspension and a car parked half on
+        // a kerb reads a kerb height either way. The check is for a car in the air, which was
+        // 32 m before the settle pass; everything left is under a wheel's own travel.
+        if (Math.abs(gap) > 0.35) report.cars.push({ type: car.type, gap: +gap.toFixed(3), y: +car.y.toFixed(2) });
       }
 
       // lowest sole of the on-foot model vs the logical foot height: this is the
       // number that used to go negative when the planted shoe sank into the road
-      let playerLowest = Infinity;
-      for (const shoe of [character.legL.children[1], character.legR.children[1]]) {
-        shoe.getWorldPosition(v);
-        playerLowest = Math.min(playerLowest, v.y - 0.075 * (character.scale ?? 1));
-      }
-      report.player = +(playerLowest - player.y).toFixed(3);
+      report.player = +(soleY(character) - player.y).toFixed(3);
 
       for (const r of ragdolls) {
         let minY = Infinity;
@@ -2136,7 +2396,10 @@ window.__game = {
       }
 
       for (const item of city.propAudit || []) {
-        const ground = city.groundHeightAt(item.x, item.z);
+        // a prop seated on its contacts publishes where its lowest contact is (`bx`/`bz`), and the
+        // gap belongs to that contact: a cart tyre 60 cm from the slot on a 12% grade reads as an
+        // 8 cm "float" against the slot sample, while a tyre parked over the kerb reads as 26 cm
+        const ground = city.groundHeightAt(item.bx ?? item.x, item.bz ?? item.z);
         const gap = item.bottom - ground;
         // sprites and wall-mounted props legitimately float; only ground furniture is checked
         // seats, signal heads and lens boxes hang in the air on purpose
@@ -2151,6 +2414,25 @@ window.__game = {
     cinematic(on: boolean) {
       cinematic = !!on;
     },
+    shotFx() {
+      return shotFx.stats();
+    },
+    /** one deterministic effect-only frame step, for harnesses that parked the loop */
+    stepFx(dt: number) {
+      shotFx.update(dt);
+    },
+    freezeLoop(on: boolean) {
+      // resuming calls animate() directly: a frozen loop schedules nothing, so nothing else
+      // would ever wake it up again
+      if (on) loopFrozen = true;
+      else if (loopFrozen) {
+        loopFrozen = false;
+        animate();
+      }
+    },
+    fxReset() {
+      shotFx.reset();
+    },
     ragdollAt(x: number, y: number, z: number, vx = 0, vz = 0) {
       // spawn a body with velocity for visual QA of the ragdoll itself
       ragdolls.push(new Ragdoll(scene, {
@@ -2159,6 +2441,7 @@ window.__game = {
         velocity: new THREE.Vector3(vx, 2.2, vz),
         colliders: city.colliders,
         maxLife: 11,
+        groundAt: (x: number, z: number) => city.groundHeightAt(x, z),
       }));
       return ragdolls.length;
     },

@@ -1,4 +1,5 @@
 import { ARTERIALS, RING_ROAD } from '../world/jakartamap';
+import { LOCAL_STREETS } from '../world/streets';
 
 /**
  * Waypoint navigation over the road network that the Jakarta map actually defines.
@@ -18,12 +19,28 @@ const JOIN = 18;
 export const LANE = 3;
 /** Longest straight leg allowed from a node to the final target. */
 const LINK_MAX = 80;
+/**
+ * Longest leg the returned polyline may contain. The graph samples a road every 10 m, so a
+ * leg longer than this means smoothing threw the road shape away (or the route jumped off the
+ * network): a driver handed such a leg guesses where the asphalt went. Both smoothing passes
+ * refuse merges longer than this, and a clear final leg is subdivided to match.
+ */
+const MAX_LEG = 40;
 /** Colliders lower than this are ignored: a cruiser drives over kerbs and benches. */
 const OBSTACLE_MIN_H = 2.5;
 /** Clearance kept around buildings when planning a route. */
 const CLEARANCE = 3;
 /** Tighter clearance for the last few metres: the target may stand next to a wall. */
 const CLOSE_PAD = 1.5;
+/** Half width of a cruiser: a road sample this close to a footprint is not drivable. */
+const CAR_PAD = 1;
+/** Step of the last-stretch march from the end of the graph toward the target. */
+const MARCH = 2;
+/**
+ * Extra cost of routing through a road sample a building stands on. Bigger than any detour on
+ * this map, so A* leaves the graph shape alone (connectivity) and still refuses the wall.
+ */
+const BLOCKED_COST = 5000;
 
 /** Axis-aligned footprint of a solid object (same shape city.colliders uses). */
 export interface Box {
@@ -93,7 +110,13 @@ interface Road {
   width: number;
 }
 
-const ROAD_NET: Road[] = [...ARTERIALS.map((a) => ({ pts: a.path, width: a.width })), { pts: RING_ROAD, width: 20 }];
+const ROAD_NET: Road[] = [
+  ...ARTERIALS.map((a) => ({ pts: a.path, width: a.width })),
+  { pts: RING_ROAD, width: 20 },
+  // the streets between the blocks: without them the nearest drivable point can be 50 m from
+  // the player, which is why a police route used to end nowhere near them
+  ...LOCAL_STREETS.map((st) => ({ pts: st.path, width: st.width })),
+];
 
 /**
  * Deterministic A* over the map's road network.
@@ -106,6 +129,8 @@ export class RoadNav {
   colliders: Box[];
 
   readonly nodeCount: number;
+  /** 1 when a building stands on that road sample: routed around, never through if avoidable. */
+  private readonly blocked: Uint8Array;
   private readonly px: Float64Array;
   private readonly pz: Float64Array;
   /** CSR adjacency: neighbours of n are adjTo[adjStart[n] .. adjStart[n + 1]) */
@@ -120,6 +145,8 @@ export class RoadNav {
   private readonly heapCost: Float64Array;
   private readonly stack: Int32Array;
   private heapSize = 0;
+  /** diagnostics: nodes expanded and seeded by the last findPath call */
+  lastStats = { expanded: 0, seeded: 0, goalLeg: 0, shortfall: 0 };
   private readonly raw: number[] = [];
   private readonly tmpPts: number[] = [];
   private readonly obstacles: Box[] = [];
@@ -129,7 +156,7 @@ export class RoadNav {
     this.colliders = colliders;
 
     // 1. sample every road
-    const nodes: { x: number; z: number; road: number }[] = [];
+    const nodes: { x: number; z: number; road: number; kept: boolean }[] = [];
     const roadNodes: number[][] = [];
     for (let r = 0; r < ROAD_NET.length; r++) {
       const list: number[] = [];
@@ -142,62 +169,91 @@ export class RoadNav {
         for (let s = 0; s < steps; s++) {
           const t = s / steps;
           list.push(nodes.length);
-          nodes.push({ x: x1 + (x2 - x1) * t, z: z1 + (z2 - z1) * t, road: r });
+          nodes.push({ x: x1 + (x2 - x1) * t, z: z1 + (z2 - z1) * t, road: r, kept: true });
         }
       }
       const [lx, lz] = pts[pts.length - 1];
       list.push(nodes.length);
-      nodes.push({ x: lx, z: lz, road: r });
+      nodes.push({ x: lx, z: lz, road: r, kept: true });
       roadNodes.push(list);
     }
 
+    // 2. mark the samples that stand inside a building. The polylines are the map's intent, not
+    // the city as built: blocks are laid on their own pitch and a local street runs through some
+    // of them (measured: 12% of the samples are under a footprint). A route that runs through a
+    // wall is not a route, so those samples cost extra in A* - enough to prefer any legal detour,
+    // but they are still linked, because a graph cut in pieces strands a cruiser a block away
+    // from the player instead of sending it round.
+    const solid = colliders.filter((b) => (b.h ?? 0) >= OBSTACLE_MIN_H);
+    const blocked = new Uint8Array(nodes.length);
+    if (solid.length) {
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        for (const b of solid) {
+          if (n.x > b.minX - CAR_PAD && n.x < b.maxX + CAR_PAD && n.z > b.minZ - CAR_PAD && n.z < b.maxZ + CAR_PAD) {
+            blocked[i] = 1;
+            break;
+          }
+        }
+      }
+    }
+    this.blocked = blocked;
+
     const n = nodes.length;
-    this.nodeCount = n;
-    this.px = new Float64Array(n);
-    this.pz = new Float64Array(n);
+    const pxAll = new Float64Array(n);
+    const pzAll = new Float64Array(n);
     for (let i = 0; i < n; i++) {
-      this.px[i] = nodes[i].x;
-      this.pz[i] = nodes[i].z;
+      pxAll[i] = nodes[i].x;
+      pzAll[i] = nodes[i].z;
     }
 
-    // 2. adjacency: consecutive samples along a road, plus links where two roads meet
+    // 3. adjacency: consecutive samples along a road, plus links where two roads meet
     const edges: { a: number; b: number; cost: number }[] = [];
-    for (let r = 0; r < roadNodes.length; r++) {
-      const list = roadNodes[r];
+    for (const list of roadNodes) {
       for (let i = 0; i < list.length - 1; i++) {
         const a = list[i];
         const b = list[i + 1];
-        const cost = Math.hypot(this.px[a] - this.px[b], this.pz[a] - this.pz[b]);
+        const cost = Math.hypot(pxAll[a] - pxAll[b], pzAll[a] - pzAll[b]);
         edges.push({ a, b, cost });
       }
     }
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         if (nodes[i].road === nodes[j].road) continue;
-        const d = Math.hypot(this.px[i] - this.px[j], this.pz[i] - this.pz[j]);
+        const d = Math.hypot(pxAll[i] - pxAll[j], pzAll[i] - pzAll[j]);
         if (d > JOIN) continue;
         edges.push({ a: i, b: j, cost: d });
       }
     }
 
-    const start = new Int32Array(n + 1);
+    const liveNodes = n;
+    const px = pxAll;
+    const pz = pzAll;
+
+    const start = new Int32Array(liveNodes + 1);
     for (const e of edges) {
       start[e.a + 1]++;
       start[e.b + 1]++;
     }
-    for (let i = 0; i < n; i++) start[i + 1] += start[i];
+    for (let i = 0; i < liveNodes; i++) start[i + 1] += start[i];
     this.adjStart = start;
     this.adjTo = new Int32Array(edges.length * 2);
     this.adjCost = new Float64Array(edges.length * 2);
-    const cursor = Int32Array.from(start.subarray(0, n));
+    const cursor = Int32Array.from(start.subarray(0, liveNodes));
     for (const e of edges) {
-      this.adjTo[cursor[e.a]] = e.b;
-      this.adjCost[cursor[e.a]++] = e.cost;
-      this.adjTo[cursor[e.b]] = e.a;
-      this.adjCost[cursor[e.b]++] = e.cost;
+      const a = e.a;
+      const b = e.b;
+      this.adjTo[cursor[a]] = b;
+      this.adjCost[cursor[a]++] = e.cost;
+      this.adjTo[cursor[b]] = a;
+      this.adjCost[cursor[b]++] = e.cost;
     }
 
-    const slots = n + 1; // + the virtual target node
+    this.nodeCount = liveNodes;
+    this.px = px;
+    this.pz = pz;
+
+    const slots = liveNodes + 1; // + the virtual target node
     this.gScore = new Float64Array(slots);
     this.parent = new Int32Array(slots);
     this.closed = new Uint8Array(slots);
@@ -380,7 +436,10 @@ export class RoadNav {
   }
 
   private relax(from: number, to: number, edgeCost: number, gx: number, gz: number): void {
-    const ng = this.gScore[from] + edgeCost;
+    // a sample a building stands on is not forbidden (the graph would fall apart), just expensive:
+    // any legal detour is cheaper, so A* only goes through a wall when there is no other way
+    const penalty = this.blocked[to] ? BLOCKED_COST : 0;
+    const ng = this.gScore[from] + edgeCost + penalty;
     if (ng >= this.gScore[to]) return;
     this.gScore[to] = ng;
     this.parent[to] = from;
@@ -414,8 +473,8 @@ export class RoadNav {
       const d = Math.hypot(this.px[n] - sx, this.pz[n] - sz);
       if (d > LINK_MAX) continue;
       if (d > 2 && !this.clear(sx, sz, this.px[n], this.pz[n], CLOSE_PAD)) continue;
-      g[n] = d;
-      this.push(n, d + Math.hypot(this.px[n] - gx, this.pz[n] - gz));
+      g[n] = d + (this.blocked[n] ? BLOCKED_COST : 0);
+      this.push(n, g[n] + Math.hypot(this.px[n] - gx, this.pz[n] - gz));
       seeded++;
     }
     if (seeded === 0) {
@@ -433,8 +492,10 @@ export class RoadNav {
       this.push(best, bestD + Math.hypot(this.px[best] - gx, this.pz[best] - gz));
     }
 
+    this.lastStats = { expanded: 0, seeded, goalLeg: 0, shortfall: 0 };
     while (this.heapSize > 0) {
       const cur = this.pop();
+      this.lastStats.expanded++;
       if (closed[cur]) continue;
       closed[cur] = 1;
       if (cur === goal) break;
@@ -446,6 +507,7 @@ export class RoadNav {
         if (ng < g[goal]) {
           g[goal] = ng;
           parent[goal] = cur;
+          this.lastStats.goalLeg++;
           this.push(goal, ng);
         }
       }
@@ -463,26 +525,46 @@ export class RoadNav {
     const stack = this.stack;
     let node = goal;
     let cnt = 0;
+    let reachGoal = true;
     if (parent[goal] === -1) {
-      // target unreachable through a clear final leg: finish at the closest node
+      reachGoal = false;
+      // Target unreachable through a clear final leg. Finish at the road point nearest to the
+      // target that a route can actually reach, and report how far short that is.
+      //
+      // The comparison must be pure DISTANCE to the target. Ranking by cost-so-far plus that
+      // distance (the previous version) is dominated by the length of the route: the closest
+      // node to a target 700 m across the map carries a 750 m gScore, so the winner was a node
+      // 85 m from the START - and the cruiser got a two-point stub that ended where it began.
+      // Ties prefer a node with a parent chain, because a seed alone reconstructs to itself.
       let best = -1;
-      let bestCost = Infinity;
+      let bestD = Infinity;
       for (let n = 0; n < N; n++) {
         if (!closed[n] || g[n] === Infinity) continue;
-        const c = g[n] + Math.hypot(this.px[n] - gx, this.pz[n] - gz);
-        if (c < bestCost) {
-          bestCost = c;
+        const d = Math.hypot(this.px[n] - gx, this.pz[n] - gz);
+        const better =
+          best === -1 ||
+          d < bestD - 0.01 ||
+          (Math.abs(d - bestD) <= 0.01 && parent[n] !== -1 && parent[best] === -1);
+        if (better) {
+          bestD = d;
           best = n;
         }
       }
       if (best === -1) return 0;
       node = best;
+      // A route that cannot legally reach the target must not pretend to: appending the goal
+      // anyway made police drive into the wall behind which the player was standing, over and
+      // over. The path ends at the last reachable point and the shortfall is reported so the
+      // caller can decide to dismount and walk the rest.
+      this.lastStats.shortfall = Math.hypot(this.px[best] - gx, this.pz[best] - gz);
     }
 
     while (node !== -1 && cnt < stack.length) {
       stack[cnt++] = node;
       node = parent[node];
     }
+    // the first entry is the end of the route when it could not reach the target
+    const routeEnd = cnt > 0 ? stack[0] : -1;
 
     const raw = this.raw;
     raw.length = 0;
@@ -492,7 +574,46 @@ export class RoadNav {
       if (n === goal) continue;
       raw.push(this.px[n], this.pz[n]);
     }
-    raw.push(gx, gz);
+    if (!reachGoal && routeEnd !== -1) {
+      // The road is sampled every 10 m, so stopping exactly on the last reachable node can leave
+      // the cruiser a whole sample short of where the asphalt really ends in front of the target.
+      // Walk the last stretch toward the target and stop at the last legal metre: still on the
+      // asphalt corridor, still clear of every footprint.
+      const bx = this.px[routeEnd];
+      const bz = this.pz[routeEnd];
+      const d = Math.hypot(gx - bx, gz - bz);
+      if (d > 1) {
+        const ux = (gx - bx) / d;
+        const uz = (gz - bz) / d;
+        let lx = bx;
+        let lz = bz;
+        const limit = Math.min(d, LINK_MAX);
+        for (let t = MARCH; t <= limit; t += MARCH) {
+          const cx = bx + ux * t;
+          const cz = bz + uz * t;
+          if (!this.onRoadCorridor(lx, lz, cx, cz)) break;
+          if (!this.clear(lx, lz, cx, cz, CLOSE_PAD)) break;
+          lx = cx;
+          lz = cz;
+        }
+        if (lx !== bx || lz !== bz) {
+          raw.push(lx, lz);
+          this.lastStats.shortfall = Math.hypot(lx - gx, lz - gz);
+        }
+      }
+    }
+    if (reachGoal) {
+      // The final leg is the one stretch of the route that was never sampled by the graph: it is
+      // a verified-clear straight line up to LINK_MAX long. Subdivide it so every leg the caller
+      // receives fits MAX_LEG - the same promise the road legs make.
+      const lx = raw.length >= 2 ? raw[raw.length - 2] : sx;
+      const lz = raw.length >= 2 ? raw[raw.length - 1] : sz;
+      const legLen = Math.hypot(gx - lx, gz - lz);
+      const steps = Math.max(1, Math.ceil(legLen / MAX_LEG));
+      for (let k = 1; k <= steps; k++) {
+        raw.push(lx + ((gx - lx) * k) / steps, lz + ((gz - lz) * k) / steps);
+      }
+    }
 
     return this.smooth(raw, raw.length >> 1, out);
   }
@@ -517,7 +638,10 @@ export class RoadNav {
         // perpendicular distance from the previous point to the line a -> new
         const dev = Math.abs((x - ax) * vz - (z - az) * vx) / len;
         const forward = (bx - ax) * (x - bx) + (bz - az) * (z - bz);
-        if (dev < 0.6 && forward >= 0) {
+        const span = Math.hypot(x - ax, z - az);
+        // the chord also has to stay clear: merging samples that a building stands between is how
+        // a route ends up crossing a wall while every one of its nodes sat on a road
+        if (dev < 0.6 && forward >= 0 && span <= MAX_LEG && this.clear(ax, az, x, z, CLEARANCE)) {
           out[(n - 1) * 2] = x;
           out[(n - 1) * 2 + 1] = z;
           continue;
@@ -540,7 +664,7 @@ export class RoadNav {
       const limit = Math.min(i + 3, n - 1);
       for (let k = limit; k >= i + 2; k--) {
         const d = Math.hypot(pts[k * 2] - pts[i * 2], pts[k * 2 + 1] - pts[i * 2 + 1]);
-        if (d > 40) continue;
+        if (d > MAX_LEG) continue;
         // never shortcut across a block: the chord has to stay on the asphalt
         if (!this.onRoadCorridor(pts[i * 2], pts[i * 2 + 1], pts[k * 2], pts[k * 2 + 1])) continue;
         if (!this.clear(pts[i * 2], pts[i * 2 + 1], pts[k * 2], pts[k * 2 + 1])) continue;

@@ -49,6 +49,23 @@ const GUN_MAT = mat(0x2a2c31, { roughness: 0.4, metalness: 0.6, flat: false });
 
 // simple painted faces (eyes + brows + mouth), one crisp canvas per expression
 const FACE_TEX = new Map();
+// One material per expression, shared by the player and the whole crowd. A face used to get its
+// own MeshStandardMaterial per character: 46 pedestrians meant 46 materials on the GPU for six
+// distinct drawings, and the material is what a distance LOD should not have to own.
+const FACE_MAT = new Map();
+function faceMaterial(kind: string) {
+  const hit = FACE_MAT.get(kind);
+  if (hit) return hit;
+  const m = new THREE.MeshStandardMaterial({
+    map: faceTexture(kind),
+    transparent: true,
+    roughness: 0.9,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+  });
+  FACE_MAT.set(kind, m);
+  return m;
+}
 function faceTexture(kind = 'calm') {
   if (FACE_TEX.has(kind)) return FACE_TEX.get(kind);
   const tex = canvasTexture(256, 256, (ctx, w, h) => {
@@ -209,16 +226,7 @@ export class Character {
     }
 
     const faceKind = opts.face ?? pick(['calm', 'calm', 'angry', 'shades', 'smirk', 'stache']);
-    const face = new THREE.Mesh(
-      GEO.face,
-      new THREE.MeshStandardMaterial({
-        map: faceTexture(faceKind),
-        transparent: true,
-        roughness: 0.9,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-      })
-    );
+    const face = new THREE.Mesh(GEO.face, faceMaterial(faceKind));
     face.position.set(0, 0.21, 0.222);
     head.add(face);
     this.face = face;
@@ -282,12 +290,14 @@ export class Character {
     this.legL = legL;
     this.legR = legR;
     this.phase = 0;
-    // small parts that can be dropped at distance without changing the silhouette
-    this.detail = [face, nose, this.armL.children[1], this.armR.children[1]];
-    if (this.armL.children[2]) this.detail.push(this.armL.children[2]);
-    if (this.armR.children[2]) this.detail.push(this.armR.children[2]);
-    for (const child of head.children) {
-      if (child !== this.headMeshRef) this.detail.push(child);
+    // Small parts that can be dropped at distance without changing the silhouette. The face and
+    // the hair deliberately stay out of this list: dropping them turned every pedestrian past
+    // 30 m into a blank block, which reads as a different character from the player rather than
+    // as the same person further away. What a LOD may remove is a nose, a cuff and a hand.
+    this.detail = [nose];
+    for (const arm of [armL, armR]) {
+      if (arm.children[1]) this.detail.push(arm.children[1]); // cuff, or the hand on long sleeves
+      if (arm.children[2]) this.detail.push(arm.children[2]); // hand
     }
   }
 

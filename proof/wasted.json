@@ -1,0 +1,771 @@
+{
+ "url": "http://127.0.0.1:8993",
+ "viewport": {
+  "w": 1400,
+  "h": 900
+ },
+ "before": {
+  "file": "proof/wasted-before.png",
+  "w": 1400,
+  "h": 900,
+  "meanLuma": 63.71,
+  "meanSat": 15.67
+ },
+ "captureNote": "frames are parked with _test.wastedSeek(ms) because a headless SwiftShader screenshot costs ~0.8 s; the live pass records the same tracks crossing their thresholds on the real clock.",
+ "frames": [
+  {
+   "i": 0,
+   "targetMs": 300,
+   "file": "proof/wasted-0.png",
+   "state": {
+    "on": true,
+    "body": true,
+    "canvasFilter": "saturate(0.37931) brightness(0.857759)",
+    "hudFilter": "saturate(0.37931) brightness(0.857759)",
+    "wordOpacity": 0.574014,
+    "wordScale": 1.08405,
+    "wordBox": {
+     "x": 444,
+     "y": 374,
+     "w": 513,
+     "h": 133
+    },
+    "ruleScaleX": 0,
+    "ruleWidth": 473,
+    "blackOpacity": 0,
+    "hpText": "0",
+    "tracks": [
+     {
+      "name": "wasted-desat",
+      "ms": 300,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-desat",
+      "ms": 300,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-word",
+      "ms": 300,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-rule",
+      "ms": 300,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-black",
+      "ms": 300,
+      "state": "paused",
+      "duration": 2900
+     }
+    ]
+   },
+   "pixels": {
+    "w": 1400,
+    "h": 900,
+    "meanLuma": 56.66,
+    "meanSat": 5.2
+   }
+  },
+  {
+   "i": 1,
+   "targetMs": 1000,
+   "file": "proof/wasted-1.png",
+   "state": {
+    "on": true,
+    "body": true,
+    "canvasFilter": "saturate(0.04) brightness(0.78)",
+    "hudFilter": "saturate(0.04) brightness(0.78)",
+    "wordOpacity": 1,
+    "wordScale": 1.00688,
+    "wordBox": {
+     "x": 462,
+     "y": 379,
+     "w": 476,
+     "h": 124
+    },
+    "ruleScaleX": 1,
+    "ruleWidth": 473,
+    "blackOpacity": 0,
+    "hpText": "0",
+    "tracks": [
+     {
+      "name": "wasted-desat",
+      "ms": 1000,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-desat",
+      "ms": 1000,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-word",
+      "ms": 1000,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-rule",
+      "ms": 1000,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-black",
+      "ms": 1000,
+      "state": "paused",
+      "duration": 2900
+     }
+    ]
+   },
+   "pixels": {
+    "w": 1400,
+    "h": 900,
+    "meanLuma": 53.05,
+    "meanSat": 0.77
+   }
+  },
+  {
+   "i": 2,
+   "targetMs": 2500,
+   "file": "proof/wasted-2.png",
+   "state": {
+    "on": true,
+    "body": true,
+    "canvasFilter": "saturate(0.04) brightness(0.78)",
+    "hudFilter": "saturate(0.04) brightness(0.78)",
+    "wordOpacity": 1,
+    "wordScale": 1,
+    "wordBox": {
+     "x": 463,
+     "y": 380,
+     "w": 473,
+     "h": 123
+    },
+    "ruleScaleX": 1,
+    "ruleWidth": 473,
+    "blackOpacity": 1,
+    "hpText": "0",
+    "tracks": [
+     {
+      "name": "wasted-desat",
+      "ms": 2500,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-desat",
+      "ms": 2500,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-word",
+      "ms": 2500,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-rule",
+      "ms": 2500,
+      "state": "paused",
+      "duration": 2900
+     },
+     {
+      "name": "wasted-black",
+      "ms": 2500,
+      "state": "paused",
+      "duration": 2900
+     }
+    ]
+   },
+   "pixels": {
+    "w": 1400,
+    "h": 900,
+    "meanLuma": 6.79,
+    "meanSat": 5
+   }
+  }
+ ],
+ "after": {
+  "file": "proof/wasted-after.png",
+  "w": 1400,
+  "h": 900,
+  "meanLuma": 63.71,
+  "meanSat": 15.67
+ },
+ "diffs": {
+  "before_to_300": {
+   "changedPx": 794126,
+   "fraction": 0.6303,
+   "meanDelta": 17.1
+  },
+  "300_to_1000": {
+   "changedPx": 318406,
+   "fraction": 0.2527,
+   "meanDelta": 10.28
+  },
+  "1000_to_2500": {
+   "changedPx": 1167271,
+   "fraction": 0.9264,
+   "meanDelta": 48.09
+  },
+  "2500_to_after": {
+   "changedPx": 1242285,
+   "fraction": 0.9859,
+   "meanDelta": 63.28
+  }
+ },
+ "wordInk": {
+  "at1000": 26683,
+  "at300": 27608,
+  "box": {
+   "x": 462,
+   "y": 379,
+   "w": 476,
+   "h": 124
+  }
+ },
+ "liveTimeline": {
+  "wordFullAt": 740,
+  "ruleDoneAt": 1043,
+  "blackFullAt": 2447,
+  "atSpawn": 2677,
+  "cardClearedAt": 2905,
+  "exact": {
+   "cardOffAt": 2902,
+   "bodyOffAt": 2902,
+   "hpBackAt": 2615
+  },
+  "samples": [
+   {
+    "ms": 3,
+    "on": true,
+    "body": true,
+    "word": 0,
+    "rule": 0,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 134,
+    "on": true,
+    "body": true,
+    "word": 0.0355169,
+    "rule": 0,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 201,
+    "on": true,
+    "body": true,
+    "word": 0.188344,
+    "rule": 0,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 278,
+    "on": true,
+    "body": true,
+    "word": 0.480605,
+    "rule": 0,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 405,
+    "on": true,
+    "body": true,
+    "word": 0.770425,
+    "rule": 0,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 469,
+    "on": true,
+    "body": true,
+    "word": 0.84163,
+    "rule": 0,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 567,
+    "on": true,
+    "body": true,
+    "word": 0.922212,
+    "rule": 0,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 631,
+    "on": true,
+    "body": true,
+    "word": 0.952212,
+    "rule": 0,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 740,
+    "on": true,
+    "body": true,
+    "word": 0.987958,
+    "rule": 0.274066,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 857,
+    "on": true,
+    "body": true,
+    "word": 0.99977,
+    "rule": 0.609302,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 950,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 0.872727,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 1043,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 1821,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.0312135,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 1889,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.140678,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 1955,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.236087,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2045,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.398373,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2139,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.553381,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2203,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.645611,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2271,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.753493,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2337,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.863729,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2447,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 1,
+    "hp": 0,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2677,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.774672,
+    "hp": 100,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2776,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.43421,
+    "hp": 100,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2840,
+    "on": true,
+    "body": true,
+    "word": 1,
+    "rule": 1,
+    "black": 0.230307,
+    "hp": 100,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   },
+   {
+    "ms": 2905,
+    "on": false,
+    "body": false,
+    "word": 1,
+    "rule": 0,
+    "black": 0,
+    "hp": 100,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ]
+   }
+  ]
+ },
+ "liveRun": {
+  "elapsedMs": 3485,
+  "hp": 100,
+  "cash": 50,
+  "pos": [
+   -10.26,
+   0,
+   -46.17
+  ],
+  "cardOn": false,
+  "bodyWasted": false,
+  "canvasFilter": "none",
+  "simTime": 4.38,
+  "cashBefore": 150
+ },
+ "checks": [
+  {
+   "name": "the card runs four tracks on one 2.9 s clock",
+   "ok": true,
+   "detail": [
+    "wasted-desat@2900",
+    "wasted-desat@2900",
+    "wasted-word@2900",
+    "wasted-rule@2900",
+    "wasted-black@2900"
+   ]
+  },
+  {
+   "name": "exact captures: 0.3 / 1.0 / 2.5 s",
+   "ok": true,
+   "detail": [
+    "300/300/300/300/300",
+    "1000/1000/1000/1000/1000",
+    "2500/2500/2500/2500/2500"
+   ]
+  },
+  {
+   "name": "live: the four stages land in order on the real clock",
+   "ok": true,
+   "detail": {
+    "wordFullAt": 740,
+    "ruleDoneAt": 1043,
+    "blackFullAt": 2447,
+    "cardOffAt": 2902,
+    "bodyOffAt": 2902,
+    "hpBackAt": 2615
+   }
+  },
+  {
+   "name": "live: the whole card is over inside 3 s",
+   "ok": true,
+   "detail": 2902
+  },
+  {
+   "name": "live: the player is put back at the spawn under the black",
+   "ok": true,
+   "detail": 2615
+  },
+  {
+   "name": "0.3 s: the frame has lost most of its colour, the word is still arriving, no rule yet",
+   "ok": true,
+   "detail": {
+    "satBefore": 15.67,
+    "satAt300": 5.2,
+    "ratio": 0.33,
+    "word": 0.574014,
+    "scale": 1.08405,
+    "rule": 0
+   }
+  },
+  {
+   "name": "1.0 s: the frame is grey, the word is up and the hairline rule is drawn under it",
+   "ok": true,
+   "detail": {
+    "word": 1,
+    "scale": 1.00688,
+    "rule": 1,
+    "ink": 26683
+   }
+  },
+  {
+   "name": "2.5 s: the screen is black and the rule is complete",
+   "ok": true,
+   "detail": {
+    "black": 1,
+    "meanLuma": 6.79
+   }
+  },
+  {
+   "name": "0.3 s -> 1.0 s changed the picture",
+   "ok": true,
+   "detail": {
+    "changedPx": 318406,
+    "fraction": 0.2527,
+    "meanDelta": 10.28
+   }
+  },
+  {
+   "name": "1.0 s -> 2.5 s changed the picture",
+   "ok": true,
+   "detail": {
+    "changedPx": 1167271,
+    "fraction": 0.9264,
+    "meanDelta": 48.09
+   }
+  },
+  {
+   "name": "either side of the hit is visibly different",
+   "ok": true,
+   "detail": {
+    "changedPx": 794126,
+    "fraction": 0.6303,
+    "meanDelta": 17.1
+   }
+  },
+  {
+   "name": "the card owns the health readout while it is up",
+   "ok": true,
+   "detail": [
+    "0",
+    "0",
+    "0"
+   ]
+  },
+  {
+   "name": "drift control: card cleared returns the SAME frame, in colour",
+   "ok": true,
+   "detail": {
+    "diff": {
+     "changedPx": 1242285,
+     "fraction": 0.9859,
+     "meanDelta": 63.28
+    },
+    "satBefore": 15.67,
+    "satAfter": 15.67,
+    "lumaBefore": 63.71,
+    "lumaAfter": 63.71
+   }
+  },
+  {
+   "name": "live run: card gone, health back, bill charged once, world running",
+   "ok": true,
+   "detail": {
+    "elapsedMs": 3485,
+    "hp": 100,
+    "cash": 50,
+    "pos": [
+     -10.26,
+     0,
+     -46.17
+    ],
+    "cardOn": false,
+    "bodyWasted": false,
+    "canvasFilter": "none",
+    "simTime": 4.38,
+    "cashBefore": 150
+   }
+  },
+  {
+   "name": "no page errors",
+   "ok": true,
+   "detail": []
+  }
+ ],
+ "summary": {
+  "pass": 15,
+  "total": 15
+ }
+}

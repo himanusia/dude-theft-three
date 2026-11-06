@@ -5,6 +5,11 @@
  * Rendered as DOM (not canvas) so the controls inherit the HUD's type, colour
  * and blur treatment. Nothing here touches the game state: the module exposes
  * an analog stick axis, accumulated look deltas and one-shot action hooks.
+ *
+ * Two tiers, so the thumb cluster stays six buttons: the actions a player uses
+ * every second sit in `#touch-actions`, and the ones they reach for between
+ * fights (weapon picker, reload, map, mute) sit in a half-size rail directly
+ * above it. Only the weapon picker expands.
  */
 
 export interface TouchState {
@@ -19,6 +24,8 @@ export interface TouchState {
   sprint: boolean;
   jump: boolean;
   fire: boolean;
+  /** audio mute, mirrored back from the game so the SND chip can show it */
+  muted: boolean;
 }
 
 export interface TouchHooks {
@@ -28,17 +35,44 @@ export interface TouchHooks {
   vehicle(): void;
   interact(): void;
   punch(): void;
+  /** one magazine goes back in the equipped weapon */
+  reload(): void;
+  /** full-screen city map */
+  map(): void;
+  /** returns the new muted state */
+  mute(): boolean;
+  /** slot 1..6, the same slots Digit1..Digit6 pick on a keyboard */
+  weapon(slot: number): void;
+  /** slot of the weapon the player holds right now */
+  currentSlot(): number;
   /** fired once, when the controls first appear */
   activate(): void;
 }
 
+/** one entry of the weapon picker; main.ts builds these from WEAPONS */
+export interface TouchSlot {
+  id: string;
+  slot: number;
+  name: string;
+  /** what the 49 px cell prints, so "Micro Uzi" does not overflow it */
+  short: string;
+  glyph: string;
+}
+
 type ActionId = 'vehicle' | 'interact' | 'sprint' | 'punch' | 'jump' | 'fire';
+type ToolId = 'weapon' | 'reload' | 'map' | 'mute';
 
 interface ButtonSpec {
   id: ActionId;
   label: string;
   key: string;
   className?: string;
+}
+
+interface ToolSpec {
+  id: ToolId;
+  label: string;
+  aria: string;
 }
 
 /** 12% of the stick radius is ignored so a resting thumb never walks */
@@ -62,6 +96,18 @@ const BUTTONS: ButtonSpec[] = [
   { id: 'fire', label: 'FIRE', key: 'HOLD', className: 't-btn-fire' },
 ];
 
+/**
+ * Secondary tier. The labels are the exact words the "?" sheet prints, so a
+ * player reads one vocabulary: WPN opens the picker, RLD reloads, MAP opens the
+ * city map, SND mutes. Each is one tap; none of them hides inside a menu.
+ */
+const TOOLS: ToolSpec[] = [
+  { id: 'weapon', label: 'WPN', aria: 'Weapon select' },
+  { id: 'reload', label: 'RLD', aria: 'Reload' },
+  { id: 'map', label: 'MAP', aria: 'City map' },
+  { id: 'mute', label: 'SND', aria: 'Mute audio' },
+];
+
 export class TouchControls {
   readonly state: TouchState = {
     active: false,
@@ -71,6 +117,7 @@ export class TouchControls {
     sprint: false,
     jump: false,
     fire: false,
+    muted: false,
   };
 
   private readonly hooks: TouchHooks;
@@ -78,6 +125,10 @@ export class TouchControls {
   private readonly stick: HTMLDivElement;
   private readonly knob: HTMLDivElement;
   private readonly buttons = new Map<ActionId, HTMLButtonElement>();
+  private readonly tools = new Map<ToolId, HTMLButtonElement>();
+  private readonly slotButtons = new Map<number, HTMLButtonElement>();
+  private readonly tray: HTMLDivElement;
+  private trayOpen = false;
 
   private stickId: number | null = null;
   private lookId: number | null = null;
@@ -89,7 +140,7 @@ export class TouchControls {
   private readonly pointers = new Set<number>();
   private gesture: { t: number; x: number; y: number; moved: boolean } | null = null;
 
-  constructor(hooks: TouchHooks) {
+  constructor(hooks: TouchHooks, slots: TouchSlot[]) {
     this.hooks = hooks;
 
     this.root = document.createElement('div');
@@ -101,6 +152,46 @@ export class TouchControls {
     this.stick.innerHTML = '<div id="touch-stick-knob"></div>';
     this.root.appendChild(this.stick);
     this.knob = this.stick.firstElementChild as HTMLDivElement;
+
+    // weapon picker: three slots per row, opening above the rail
+    this.tray = document.createElement('div');
+    this.tray.id = 'touch-weapons';
+    this.tray.setAttribute('aria-hidden', 'true');
+    for (const slot of slots) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 't-slot';
+      btn.dataset.slot = String(slot.slot);
+      btn.dataset.weapon = slot.id;
+      btn.setAttribute('aria-label', `${slot.slot} ${slot.name}`);
+      btn.innerHTML =
+        `<span class="t-slot-num">${slot.slot}</span>` +
+        `<span class="t-slot-name">${slot.short.toUpperCase()}</span>`;
+      btn.addEventListener('pointerdown', this.onSlotDown);
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+      this.slotButtons.set(slot.slot, btn);
+      this.tray.appendChild(btn);
+    }
+    this.root.appendChild(this.tray);
+
+    const rail = document.createElement('div');
+    rail.id = 'touch-rail';
+    for (const spec of TOOLS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 't-mini';
+      btn.dataset.tool = spec.id;
+      btn.setAttribute('aria-label', spec.aria);
+      btn.setAttribute('aria-pressed', 'false');
+      btn.innerHTML = `<span class="t-mini-label">${spec.label}</span><span class="t-mini-state"></span>`;
+      btn.addEventListener('pointerdown', this.onToolDown);
+      btn.addEventListener('pointerup', this.onButtonUp);
+      btn.addEventListener('pointercancel', this.onButtonUp);
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+      this.tools.set(spec.id, btn);
+      rail.appendChild(btn);
+    }
+    this.root.appendChild(rail);
 
     const cluster = document.createElement('div');
     cluster.id = 'touch-actions';
@@ -121,6 +212,9 @@ export class TouchControls {
     this.root.appendChild(cluster);
     document.body.appendChild(this.root);
 
+    this.setWeaponSlot(hooks.currentSlot());
+    this.setMuted(false);
+
     window.addEventListener('pointerdown', this.onPointerDown, { passive: false });
     window.addEventListener('pointermove', this.onPointerMove, { passive: false });
     window.addEventListener('pointerup', this.onPointerUp, { passive: true });
@@ -139,13 +233,71 @@ export class TouchControls {
     this.hooks.activate();
   }
 
+  /** the weapon picker covers the HUD while it is open; tests read this */
+  get weaponPickerOpen() {
+    return this.trayOpen;
+  }
+
+  /** the equipped slot, so the WPN chip and the picker agree with the game */
+  setWeaponSlot(slot: number) {
+    const chip = this.tools.get('weapon');
+    if (chip) {
+      const readout = chip.querySelector('.t-mini-state');
+      if (readout) readout.textContent = String(slot);
+    }
+    for (const [n, btn] of this.slotButtons) btn.classList.toggle('on', n === slot);
+  }
+
+  setMuted(on: boolean) {
+    this.state.muted = !!on;
+    const chip = this.tools.get('mute');
+    if (!chip) return;
+    chip.classList.toggle('on', this.state.muted);
+    chip.setAttribute('aria-pressed', String(this.state.muted));
+    const readout = chip.querySelector('.t-mini-state');
+    if (readout) readout.textContent = this.state.muted ? 'OFF' : '';
+  }
+
+  /** the map owns the screen, so its chip has to say so and stay pressable */
+  setMapOpen(open: boolean) {
+    const chip = this.tools.get('map');
+    if (!chip) return;
+    chip.classList.toggle('on', !!open);
+    chip.setAttribute('aria-pressed', String(!!open));
+    if (open) this.closePicker();
+  }
+
+  closePicker() {
+    if (!this.trayOpen) return;
+    this.trayOpen = false;
+    this.tray.classList.remove('open');
+    this.tray.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('touch-weapons');
+    this.tools.get('weapon')?.classList.remove('on');
+    this.tools.get('weapon')?.setAttribute('aria-pressed', 'false');
+  }
+
+  private openPicker() {
+    this.trayOpen = true;
+    // a keyboard slot change must not leave the picker pointing at the old gun
+    this.setWeaponSlot(this.hooks.currentSlot());
+    this.tray.classList.add('open');
+    this.tray.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('touch-weapons');
+    this.tools.get('weapon')?.classList.add('on');
+    this.tools.get('weapon')?.setAttribute('aria-pressed', 'true');
+  }
+
   private onFirstTouch = () => {
     this.activate();
   };
 
   private isUiTarget(target: EventTarget | null) {
     const el = target as Element | null;
-    const closest = el && typeof el.closest === 'function' ? el.closest('#touch-actions, #help-btn, #help-sheet, .overlay') : null;
+    const closest =
+      el && typeof el.closest === 'function'
+        ? el.closest('#touch-actions, #touch-rail, #touch-weapons, #help-btn, #help-sheet, .overlay')
+        : null;
     return !!closest;
   }
 
@@ -285,6 +437,45 @@ export class TouchControls {
     }
   };
 
+  /** one-shot secondary controls: a tap does its job and lights up for 140 ms */
+  private onToolDown = (e: PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!this.state.active) this.activate();
+    const btn = e.currentTarget as HTMLButtonElement;
+    const id = btn.dataset.tool as ToolId | undefined;
+    if (!id) return;
+    btn.classList.add('active');
+    window.setTimeout(() => btn.classList.remove('active'), 140);
+    switch (id) {
+      case 'weapon':
+        if (this.trayOpen) this.closePicker();
+        else this.openPicker();
+        break;
+      case 'reload':
+        this.hooks.reload();
+        break;
+      case 'map':
+        this.hooks.map();
+        break;
+      case 'mute':
+        this.setMuted(this.hooks.mute());
+        break;
+    }
+  };
+
+  private onSlotDown = (e: PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const btn = e.currentTarget as HTMLButtonElement;
+    const slot = Number(btn.dataset.slot);
+    if (!Number.isFinite(slot)) return;
+    this.hooks.weapon(slot);
+    this.setWeaponSlot(slot);
+    // the picker is a chooser, not a HUD: it hands the screen back at once
+    this.closePicker();
+  };
+
   private onButtonUp = (e: PointerEvent) => {
     const btn = e.currentTarget as HTMLButtonElement;
     btn.classList.remove('active');
@@ -300,6 +491,7 @@ export class TouchControls {
     this.lookId = null;
     this.state.fire = false;
     this.state.jump = false;
+    this.closePicker();
     this.releaseStick();
     this.releaseButtons();
   };
@@ -308,5 +500,6 @@ export class TouchControls {
     this.state.fire = false;
     this.state.jump = false;
     for (const btn of this.buttons.values()) btn.classList.remove('active');
+    for (const btn of this.tools.values()) btn.classList.remove('active');
   }
 }

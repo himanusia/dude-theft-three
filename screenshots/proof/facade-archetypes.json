@@ -1,0 +1,183 @@
+{
+ "file": "screenshots/proof/facade-archetypes.png",
+ "legibleArchetypes": {
+  "colonial": {
+   "px": 144,
+   "dist": 52,
+   "at": [
+    297.5,
+    12.6
+   ],
+   "h": 11
+  },
+  "office": {
+   "px": 294,
+   "dist": 89,
+   "at": [
+    212.8,
+    -21.4
+   ],
+   "h": 43.8
+  },
+  "walkup": {
+   "px": 144,
+   "dist": 67,
+   "at": [
+    234.7,
+    -21.8
+   ],
+   "h": 16
+  },
+  "ruko": {
+   "px": 93,
+   "dist": 46,
+   "at": [
+    258.8,
+    -18.2
+   ],
+   "h": 7.7
+  },
+  "midrise": {
+   "px": 392,
+   "dist": 35,
+   "at": [
+    275.9,
+    -13.8
+   ],
+   "h": 29.1
+  },
+  "warung": {
+   "px": 100,
+   "dist": 24,
+   "at": [
+    290.1,
+    -17.3
+   ],
+   "h": 4.3
+  }
+ },
+ "legibleCount": 6,
+ "confirmedArchetypes": {
+  "colonial": {
+   "px": 144,
+   "dist": 52,
+   "at": [
+    297.5,
+    12.6
+   ],
+   "h": 11
+  },
+  "office": {
+   "px": 294,
+   "dist": 89,
+   "at": [
+    212.8,
+    -21.4
+   ],
+   "h": 43.8
+  },
+  "walkup": {
+   "px": 144,
+   "dist": 67,
+   "at": [
+    234.7,
+    -21.8
+   ],
+   "h": 16
+  },
+  "ruko": {
+   "px": 93,
+   "dist": 46,
+   "at": [
+    258.8,
+    -18.2
+   ],
+   "h": 7.7
+  },
+  "warung": {
+   "px": 100,
+   "dist": 24,
+   "at": [
+    290.1,
+    -17.3
+   ],
+   "h": 4.3
+  }
+ },
+ "confirmedCount": 5,
+ "inFrameKinds": [
+  "walkup",
+  "midrise",
+  "colonial",
+  "office",
+  "ruko",
+  "warung"
+ ],
+ "sampledStreet": {
+  "road": "Gatot Subroto",
+  "buildings": 25,
+  "kinds": [
+   "midrise",
+   "colonial",
+   "walkup",
+   "ruko",
+   "warung",
+   "office"
+  ]
+ },
+ "blocks": {
+  "sampled": 136,
+  "minDistinct": 3,
+  "medianDistinct": 4,
+  "meanBuildings": 13.5,
+  "shareWith4": 0.92,
+  "histogram": {
+   "3": 11,
+   "4": 62,
+   "5": 63
+  },
+  "thinnest": [
+   {
+    "n": 10,
+    "distinct": 3,
+    "kinds": [
+     "walkup",
+     "ruko",
+     "midrise"
+    ]
+   },
+   {
+    "n": 5,
+    "distinct": 3,
+    "kinds": [
+     "walkup",
+     "ruko",
+     "colonial"
+    ]
+   },
+   {
+    "n": 5,
+    "distinct": 3,
+    "kinds": [
+     "midrise",
+     "ruko",
+     "colonial"
+    ]
+   }
+  ]
+ },
+ "drawCalls": 894,
+ "triangles": 844879,
+ "textures": 192,
+ "geometries": 2528,
+ "stance": {
+  "back": 20,
+  "eye": 1.7,
+  "off": 20,
+  "cam": [
+   299.6,
+   1.7,
+   -39.2
+  ]
+ }
+}

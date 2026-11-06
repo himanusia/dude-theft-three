@@ -10,9 +10,16 @@
  * falls back to a fresh game.
  */
 
+import { STARTING_WEAPONS, WEAPONS, type WeaponId } from '../systems/weapons';
+
 export const SAVE_KEY = 'dta.save.v1';
 export const SETTINGS_KEY = 'dta.settings.v1';
-export const SAVE_VERSION = 1;
+// 2: the world was rescaled from 380 m to 2.5 km, so a save made in the old city would drop
+// the player into an empty field. Bumping the version discards the position (and only the
+// position that matters: settings live under their own key).
+// 3: `weapon` and `ownedWeapons` describe the real six-gun roster. A v2 writer typed `pistol`
+// into both fields, so a v2 blob is migrated to the starting pouch instead of being trusted.
+export const SAVE_VERSION = 3;
 export const SETTINGS_VERSION = 1;
 
 /** Objective progress, same shape as the `flags` record in main.ts. */
@@ -32,10 +39,11 @@ export interface SaveData {
   hp: number;
   wanted: number;
   dayT: number;
-  /** no weapon roster in this build: the pistol is the only gun, kept for forward compatibility */
+  /** equipped weapon id from the `WEAPONS` table (`fist|knife|pistol|uzi|shotgun|ak`) */
   weapon: string;
+  /** rounds in the magazine in hand; the magazine's size comes from `WEAPONS[weapon]` */
   ammo: number;
-  magSize: number;
+  /** the pouch: starting kit plus every gun picked up this run, in the order acquired */
   ownedWeapons: string[];
   objectives: Objectives;
 }
@@ -104,10 +112,43 @@ const isNum = (v: any): v is number => typeof v === 'number' && Number.isFinite(
 const clampNum = (v: any, lo: number, hi: number, fallback: number) =>
   isNum(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
 
+const isWeaponId = (v: unknown): v is WeaponId =>
+  typeof v === 'string' && Object.prototype.hasOwnProperty.call(WEAPONS, v);
+
+/**
+ * v2 could not describe the gun: its writer typed `weapon: 'pistol'` and `ownedWeapons: ['pistol']`
+ * into every blob, whatever was in hand. The run's numbers are still good, so keep them and hand
+ * the pouch the starting kit. Newer versions need no migration and are validated as they are.
+ */
+const MIGRATIONS: Record<number, (old: any) => any> = {
+  2: (old) => ({ ...old, version: 3, weapon: 'pistol', ownedWeapons: [...STARTING_WEAPONS] }),
+};
+
+function migrate(parsed: any): any {
+  let out = parsed;
+  for (let guard = 0; guard < 8; guard++) {
+    if (!out || typeof out !== 'object' || Array.isArray(out)) return out;
+    const step = MIGRATIONS[out.version as number];
+    if (!step) return out;
+    out = step(out);
+  }
+  return out;
+}
+
+/** The pouch, de-duplicated and bounded to real weapon ids; an empty list means the starting kit. */
+function normalizeOwned(src: any, equipped: WeaponId): WeaponId[] {
+  const out: WeaponId[] = [];
+  if (Array.isArray(src)) for (const w of src) if (isWeaponId(w) && !out.includes(w)) out.push(w);
+  if (!out.length) out.push(...STARTING_WEAPONS);
+  // the gun in hand is always part of the pouch, or equipping it after a load would invent one
+  if (!out.includes(equipped)) out.push(equipped);
+  return out;
+}
+
 /** Structural check: a save is either fully usable or rejected as a whole. */
 function saveProblem(v: any): string | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return 'payload is not an object';
-  if (v.version !== SAVE_VERSION) return `schema version ${String(v.version)} is not ${SAVE_VERSION}`;
+  if (v.version !== SAVE_VERSION) return `schema version ${String(v.version)} is not ${SAVE_VERSION} and has no migration`;
   const p = v.player;
   if (!p || typeof p !== 'object') return 'missing player block';
   for (const k of ['x', 'z']) if (!isNum(p[k])) return `player.${k} is not a number`;
@@ -120,6 +161,8 @@ function saveProblem(v: any): string | null {
 function normalizeSave(v: any): SaveData {
   const p = v.player;
   const src = v.objectives ?? {};
+  const weapon: WeaponId = isWeaponId(v.weapon) ? v.weapon : 'pistol';
+  const spec = WEAPONS[weapon];
   return {
     version: SAVE_VERSION,
     savedAt: isNum(v.savedAt) ? v.savedAt : Date.now(),
@@ -129,16 +172,18 @@ function normalizeSave(v: any): SaveData {
       z: clampNum(p.z, -1000, 1000, 0),
       yaw: clampNum(p.yaw, -Math.PI * 2, Math.PI * 2, 0),
       camYaw: clampNum(p.camYaw, -Math.PI * 2, Math.PI * 2, 0),
-      camPitch: clampNum(p.camPitch, -0.55, 1.05, 0.1),
+      // same range as the camera clamp in main.ts: a saved up-look may not be reset on load
+      camPitch: clampNum(p.camPitch, -0.96, 1.05, 0.1),
     },
     cash: clampNum(v.cash, 0, 1e9, 250),
     hp: clampNum(v.hp, 1, 100, 100),
     wanted: clampNum(v.wanted, 0, 5, 0),
     dayT: clampNum(v.dayT, 0, 1, 0.34) % 1,
-    weapon: typeof v.weapon === 'string' ? v.weapon : 'pistol',
-    ammo: Math.round(clampNum(v.ammo, 0, 999, 12)),
-    magSize: Math.round(clampNum(v.magSize, 1, 999, 12)),
-    ownedWeapons: Array.isArray(v.ownedWeapons) ? v.ownedWeapons.filter((w: any) => typeof w === 'string') : ['pistol'],
+    weapon,
+    // an absent magazine falls back to the equipped weapon's own spec, never to the pistol's 12,
+    // and the magazine is capped by that same spec: the blob says which gun, the table says how big
+    ammo: Math.round(clampNum(v.ammo, 0, spec.magSize, spec.magSize)),
+    ownedWeapons: normalizeOwned(v.ownedWeapons, weapon),
     objectives: {
       drove: !!src.drove,
       chaos: !!src.chaos,
@@ -161,13 +206,14 @@ export function loadSave(): SaveData | null {
     dropRaw(SAVE_KEY);
     return null;
   }
-  const problem = saveProblem(parsed);
+  const migrated = migrate(parsed);
+  const problem = saveProblem(migrated);
   if (problem) {
     warnOnce(SAVE_KEY, `ignoring unusable save at ${SAVE_KEY}: ${problem}`);
     dropRaw(SAVE_KEY);
     return null;
   }
-  return normalizeSave(parsed);
+  return normalizeSave(migrated);
 }
 
 export function writeSave(data: Omit<SaveData, 'version' | 'savedAt'> & { savedAt?: number }): void {

@@ -1,0 +1,52 @@
+{
+ "file": "screenshots/proof/gerobak-kerb.png",
+ "cart": {
+  "name": "kaki5-nasgor",
+  "at": [
+   "277.86",
+   "20.558",
+   "821.82"
+  ],
+  "yaw": 1.961,
+  "kerbDrop": 0.211,
+  "kerbNear": 1
+ },
+ "camera": {
+  "cam": [
+   278.6,
+   20.89,
+   818.34
+  ],
+  "camGround": 19.941,
+  "camIsRoad": true,
+  "kerbDistance": 2.4,
+  "distance": 3.55,
+  "reach": 1.15,
+  "camHeight": 0.95,
+  "azimuth": -1.361,
+  "farTyre": "tyre-Z",
+  "farTyrePx": [
+   961,
+   617
+  ],
+  "inFrame": true,
+  "inside": true,
+  "blocked": [],
+  "rect": {
+   "x": 587,
+   "y": 112,
+   "w": 487,
+   "h": 538
+  },
+  "farVisible": true,
+  "ok": true
+ },
+ "png": {
+  "width": 1600,
+  "height": 1000,
+  "luma": 91.8,
+  "cartPxRatio": 0.357
+ },
+ "ok": true,
+ "errors": []
+}

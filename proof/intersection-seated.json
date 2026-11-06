@@ -1,0 +1,23 @@
+{
+ "anchor": {
+  "x": 217,
+  "z": 319
+ },
+ "auditBottom": -0.321,
+ "measure": -0.321,
+ "drawnAsphalt": -0.321,
+ "seatGap": 0,
+ "walk": {
+  "y": -0.129,
+  "kind": "walk"
+ },
+ "tAnchor": null,
+ "player": {
+  "y": -0.321,
+  "ground": -0.321,
+  "gap": 0
+ },
+ "streetRows": 29,
+ "errors": [],
+ "url": "http://127.0.0.1:8991"
+}

@@ -30,7 +30,7 @@ const STEP = 300;
     if (m.type() === 'error') errs.push('console: ' + m.text());
   });
 
-  await page.goto((process.env.DTA_URL || 'http://localhost:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
+  await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
   await sleep(1500);
   await page.click('#start-btn');

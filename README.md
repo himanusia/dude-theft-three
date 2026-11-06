@@ -38,10 +38,78 @@ Run one suite, one group, or everything:
 npm test               # gameplay + world + ui
 npm run test:world     # the city: geometry, traffic, pedestrians, police
 node tests/world/audit.mjs
+node tools/shoot-ojek.mjs          # headless: aims a camera at a live ojek and writes
+                                   # screenshots/proof/kurir.png, or fails if the cargo box
+                                   # is not actually in the frame
+node tools/proof-bullets.mjs       # headless: 20 shots, then proves the muzzle flash sits on the
+                                   # barrel tip for ~60 ms, the wall hit leaves a puff sized by the
+                                   # surface, and firing allocates NOTHING after warm-up (scene
+                                   # objects, GPU geometries and the pool's own counter all flat).
+                                   # Writes screenshots/proof/muzzle-flash.png and bullet-impact.png
+node tests/world/pointblank-shots.mjs # 10/10: a body 0.02 m from the barrel takes the round. 30
+                                   # one-round shots, half with the wall 1.8 m behind the body and
+                                   # half with the camera pushed inside the building behind the
+                                   # player: 30 hit, 30 die, 0 spent on a bestDist-0 wall
+                                   # (starts its own server on :9420)
+node tests/world/terminal-level.mjs # 14/14: the Blok M terminal and every pos ronda stand level
+                                   # (group rotation zero on X and Z, the apron top on one plane),
+                                   # the whole 48 x 32 m apron misses every carriageway, its skirt
+                                   # reaches the ground, and the access run joins both the apron
+                                   # and the kerb. Reports the metres, not a verdict
+node tools/shoot-terminal-level.mjs # headless: a street-level frame of the terminal and one of a
+                                   # pos ronda, writes screenshots/proof/terminal-level.png and
+                                   # -ronda.png, and fails unless the subject is what changed the
+                                   # frame (with a drift control)
+node tests/world/ground.mjs        # 7/7: the player's sole, the crowd's soles and the ground
+                                   # measure against the surface that is actually drawn (asphalt,
+                                   # trotoar, kerb ramp), plus a full walking stride
+node tests/world/death-interior.mjs # 15/15: E during the death card must not walk you into a shop,
+                                   # and the respawn must drop the room, its colliders and its shell;
+                                   # reports inInterior, room distance and whether peds/traffic move
+node tests/world/engine-audio.mjs  # 13/13: the engine loop that ships as audio/sfx/engine.ogg is
+                                   # decoded and audible while driving: one live looping node, level
+                                   # and pitch sampled at three road speeds, quieter in a closed
+                                   # cabin than in the open cockpit, silent behind a shop wall
+node tools/measure-ground.mjs      # prints foot / drawn surface / measure / terrain at three
+                                   # points and fails if any foot-to-surface delta is over 2 cm
+node tools/shoot-feet.mjs          # headless: a pavement-level frame of the feet on the trotoar,
+                                   # writes screenshots/proof/feet-on-trotoar.png and checks the
+                                   # pixels (tread row over the paving row) instead of eyeballing it
+node tools/shoot-facades.mjs       # headless: searches the city's own facade audit for the street
+                                   # frame that shows the most DISTINCT building archetypes, saves
+                                   # screenshots/proof/facade-archetypes.png, raycast-confirms each
+                                   # type it counts, and fails if fewer than five are legible or if
+                                   # the frame costs 1600+ draw calls
+node tools/shoot-look-up.mjs       # headless: drags the look control (touch and pointer-locked
+                                   # mouse) to its stop and measures the pitch it reaches, then
+                                   # photographs the frame at max up-pitch from a pavement under
+                                   # the MRT guideway, checking the saved PNG: sky where the
+                                   # geometry says sky, deck where the guideway is. Writes
+                                   # proof/look-up.png and look-up.json, fails below 50 deg
+node tools/shoot-wasted.mjs        # headless: kills the player and reads the death card. Parks the
+                                   # same four tracks on 300 / 1000 / 2500 ms (a headless frame
+                                   # costs ~0.8 s, so a wall-clock screenshot cannot land on a
+                                   # millisecond) and writes proof/wasted-0..2.png, then samples
+                                   # the LIVE clock every 60 ms to prove the stages fire in order
+                                   # and the player is back at the spawn inside 3 s
+node tools/probe-shop-boards.mjs   # one city load: enterable shops vs name plates (unmarked must
+                                   # be 0), each plate's text against its own room, doors that sit
+                                   # on their facade instead of inside the building, frontage
+                                   # shopfronts with a door in their street face, and the draw calls
+                                   # the shop signage costs. Writes nothing unless asked, exits 2 on
+                                   # a defect
+node tools/shoot-shop-boards.mjs   # headless: searches the city for the stance where the most
+                                   # shop plates land legibly in frame, photographs it from across
+                                   # the street and measures the saved PNG (ink inside each plate's
+                                   # projected rect). Writes proof/shop-boards.png
 node tests/world/crash-frame.mjs  # 12/12: a crash may never fill the frame with one colour
                                   # (samples the centre pixel and the whole frame for 2 s after
                                   # the hit, and fails if the boom ends up inside a wall)
 ```
+
+`city.ojeks` lists every live bike with its real group position and the cargo box's local
+bounds, so a capture (or a game system) aims at the mesh instead of at the `propAudit` placement
+slot: the slot is a map coordinate, not where the group ended up.
 
 ## Stack
 
@@ -146,6 +214,17 @@ point is not on the ground (`groundHeightAt(x,z)` per sidewalk/road):
 { "peds": [], "cars": [], "player": 0, "ragdolls": [], "props": [], "buildings": [] }
 ```
 
+The measure it reads is `City.groundHeightAt`: every walking slab registers itself as it is built -
+the block plates, the kerb ring under them, parks, lots, the landmark squares, and every quad of the
+swept roads/gutter/kerb/trotoar/kerb-ramp - and the bare terrain is the drawn plane's own
+interpolation. Actors are planted by the shoe's real lowest corner, so a stride cannot sink the
+planted foot into the paving (`src/actors/plant.ts`).
+
+Measured on the commit before that change (same probe, `node tools/measure-ground.mjs`): the sole
+sat 5.2 cm under the asphalt, 7.06 m under a hillside plate and 19 cm under a crossing ramp, a
+walking stride sank 9.1 cm into the trotoar, and pedestrians floated or sank 7-26 cm. After it all
+three points are 0.0000 m and a stride never leaves the ground.
+
 It found and fixed real floaters: benches with no legs, traffic-light heads hanging above the
 mast, billboards 11 cm off the facade, police lightbars floating above the roof, shoes 1 cm into
 the pavement, and pedestrians that lifted both feet during the walk cycle (the body now drops by
@@ -156,16 +235,18 @@ the pendulum lift, so the planted foot always touches the ground — works for L
 Automated harness (`puppeteer-core`) drives the real page and asserts **state**, not screenshots:
 
 ```bash
-npm run test:qa        # 19/19 gameplay assertions
+npm run test:qa        # 21/21 gameplay assertions
 npm run test:interior  # 11/11 interior assertions
 npm run test:audit     # floating-geometry audit
 node tests/world/npc-behavior.mjs  # 13/13 pedestrian AI assertions (starts its own server on :8795)
+node tests/world/ground.mjs        # 7/7 ground contract assertions (starts its own server)
 ```
 
 ```
-19/19 gameplay checks pass — boot, walk, sprint, jump+land, sidewalk step-up, enter/exit vehicle,
-acceleration, shooting + ammo, punch, ragdoll settle, police spawn/approach, death respawn,
-cash pickup, night lighting, pause/resume, perf budget, zero console errors
+21/21 gameplay checks pass — boot, walk, sprint, jump+land, sidewalk step-up, enter/exit vehicle,
+acceleration, shooting + ammo, punch, ragdoll settle, police spawn/approach, the wasted card
+raising + clearing, death respawn, cash pickup, night lighting, pause/resume, perf budget, zero
+console errors
 11/11 interior checks pass — doors registered, 4 reusable rooms, prompt, enter, walk inside,
 exit, all four kinds reachable, audit clean indoors
 audit: 0 floating actors, 0 floating props

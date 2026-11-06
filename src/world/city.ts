@@ -1,21 +1,153 @@
+import { POIS } from './jakartamap';
+import { buildHalte } from './halte';
+import { buildKakiLima, buildSppg, buildKoperasi, KakiLimaKind } from './kakilima';
+import { TransjakartaBus } from '../vehicles/transjakarta';
+import { buildLayang } from './layang';
+import { buildMrtLine, buildMrtStation } from './mrt';
+import { buildKrl } from './krl';
+import { buildMinimarket } from './minimarket';
+import { buildPosPolisi } from './pospolisi';
+import { buildRumahPadang } from './rumahpadang';
+import { buildMasjid } from './masjid';
+import { buildPasar } from './pasar';
+import { buildRonda } from './ronda';
+import { buildTerminal, TERMINAL_DIMENSIONS } from './terminal';
 import * as THREE from 'three';
-import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB } from '../core/utils';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { clamp, lerp, rand, randInt, pick, TAU, box, canvasTexture, AABB, rotatedFootprint, writeRotatedFootprint, FootprintBox } from '../core/utils';
 import { districtAt, landmarkAt, DISTRICTS, buildMonas, buildBundaran, buildKotaTua, buildMarketStalls, buildGlodokGate, buildAncolShore } from './jakarta';
-import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater } from './jakartamap';
+import { COASTLINE, ISLANDS, RIVERS, RING_ROAD, ARTERIALS, LANDMARKS, DISTRICTS as JKT_DISTRICTS, districtAtPoint, isWater, pointInPoly } from './jakartamap';
 import { buildInterior, Interior, InteriorKind, PlacedInterior } from './interior';
+import { terrainHeight } from './terrain';
+import { GroundKind, GroundPlate } from './ground';
+import { LOCAL_STREETS } from './streets';
 import { Car, driverLook } from '../vehicles/car';
-import { Bajaj } from '../vehicles/bajaj';
 import { Ojek } from '../vehicles/ojek';
+import {
+  buildSignalIntersection,
+  buildStreetRun,
+  buildTIntersection,
+  type StreetGround,
+} from './streetkit';
+import {
+  ArchetypeMixer,
+  FacadePlan,
+  archetypeBody,
+  buildFacadeDetail,
+  entranceOffset,
+  facadeEmissiveKeys,
+  facadeMaterial,
+  setShopNames,
+  tileBoxUV,
+  trimFor,
+  windowTexture,
+} from './facade';
 
-export const PITCH = 52;
-export const BLOCK = 38;
+// City-block scale. A block is 140 m and the pitch is 170 m, so the street between two
+// blocks is 30 m of asphalt and pavement - close to a real Jakarta block, and wide enough
+// that a 22 m arterial no longer looks like a motorway through a village.
+export const PITCH = 170;
+export const BLOCK = 140;
 export const ROAD = PITCH - BLOCK;
-export const GRID = 3; // blocks from -3..3 on each axis
+export const GRID = 7; // blocks from -7..7 on each axis: a 2.5 km city
 export const WORLD_HALF = GRID * PITCH + BLOCK * 0.5;
 
 // light panels + blue glass, like the reference city blocks
 const WALLS = ['#e9e7ef', '#dfe6ee', '#f2e7d8', '#d9e4e6', '#efe3ea', '#e6ecdf'];
 const NIGHT = 0x0a0d18;
+
+/**
+ * The roads that carry a raised trotoar: the arterials and the ring.
+ *
+ * One list, because four things have to agree about it - the kerb that is swept along it, the
+ * paving behind that kerb, where a pedestrian can cross it, and the ground height anything
+ * standing on it needs. Local streets are asphalt only, so they are not here.
+ */
+const WALK_ROADS = [
+  ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })),
+  { path: RING_ROAD as [number, number][], width: 20 },
+];
+
+/**
+ * The heights of the surfaces the city draws, in metres above the terrain each one is built from:
+ * the block plate is a 26 cm box lifted by the terrain under the block's own centre, the kerb ring
+ * under it 16 cm, a park lawn 34 cm, a lot 33 cm, and the arterial trotoar +26 cm.
+ *
+ * The swept ribbons do not need these: they register the quads they build (`groundQuads`), so the
+ * measure reads their real height. The same is true of the street kit, which registers the
+ * carriageway, kerb and trotoar it lays (`streetQuads`). These constants are only what the flat
+ * *slabs* are registered with.
+ */
+/** the arterial trotoar is 26 cm over the terrain it is swept from (`buildRoadRibbons`) */
+const WALK_MEASURE_TOP = 0.26;
+const KERB_RING_TOP = 0.16;
+const LAWN_TOP = 0.34;
+const LOT_TOP = 0.33;
+
+/** The drawn terrain plane, exactly as `buildGround` builds it: same span, same segments. */
+const TERRAIN_SPAN = WORLD_HALF * 2 + 900;
+const TERRAIN_SEGS = 190;
+
+/**
+ * Where an ojek rank stands, and how it is seated.
+ *
+ * The bike is 1.27 m between its axles (front 0.74 m ahead of the group origin, rear 0.53 m
+ * behind) and parks nose-in at the kerb, so the whole machine needs 1.27 m of depth plus its
+ * overhang. The generic kerbside slot `snapToVerge` hands out sits at half-width + 3.5 m, which is
+ * 0.3 m short of the BACK edge of the 3.6 m trotoar: a nose-in bike therefore hung one tyre over
+ * that edge, onto whatever was behind the paving - usually a crossing carriageway 0.2 m lower.
+ * Pulling the slot 1.1 m toward the kerb leaves 0.66 m of paving behind the rear tyre and 1.4 m in
+ * front of the front tyre, so both tyres stand on the slab for any yaw the random layout picks.
+ */
+const OJEK_FRONT = 0.74;
+const OJEK_REAR = -0.53;
+const OJEK_KERB_INSET = 1.1;
+/** Fallback slot for paving that is not one plane: the kerbside lane, 2 m off the centre line. */
+const OJEK_ROAD_INSET = 5.5;
+
+/**
+ * How far toward the kerb a gerobak rank is pulled off the generic kerbside slot.
+ *
+ * The generic slot is `half + 3.5` from the centre line and the paving runs `half+0.2 .. half+3.8`,
+ * so it is the shopfront end of the walk: measured on the rank, the outermost tyre stood 1.62-3.89 m
+ * from the kerb line (t_6cd9aa18), which reads as a cart in the middle of the pavement rather than
+ * a prop at the kerb. A gerobak parks broadside with its 1.0 m track ACROSS the kerb line, so its
+ * outer tyre sits half of that track nearer the road than the slot does: at 2.55 m of inset the
+ * slot is 0.95 m off the asphalt, the outer tyre 0.45 m, the inner one 1.45 m and the two braced
+ * feet 0.66 / 1.24 m - the whole cart on the 3.6 m slab, 0.45 m from the kerb.
+ *
+ * 0.45 m is deliberately the middle of the 0.2-0.7 m band a kerbside prop reads as: `wideStance`
+ * treats the inset as a starting point, not a promise, and slides the cart 0.2 m either side along
+ * this same kerb normal to find level paving without leaving the band.
+ */
+const CART_KERB_INSET = 2.55;
+/** The band an outermost tyre is expected to park in, measured as `distToPath - half`. */
+const CART_KERB_MIN = 0.2;
+const CART_KERB_MAX = 0.7;
+/** Half the track across the cart's tyres: a SLOT sits this much further out than its outer tyre. */
+const CART_TRACK_HALF = 0.5;
+/**
+ * The largest spread between a stance's four contacts that `standOnContacts` can still seat.
+ *
+ * Its tilt cap is 11.5 deg (0.2 rad) over the 1.26 m footprint diagonal, which is 0.25 m of height
+ * difference; 0.22 leaves margin. This is the "seat it, do not abandon it" threshold: at 0.16 a
+ * stance on a 10 deg crossfall was rejected and the search parked the cart 1 m further out
+ * (measured, t_6cd9aa18) even though the tilt solver could have seated it.
+ */
+const SEATABLE = 0.22;
+
+/**
+ * What a cart is allowed to stand on and still read as a kerbside prop.
+ *
+ * `groundInfoAt` reports the surface as it is DRAWN (`plate` blocks, the `walk` trotoar ribbon, the
+ * `kerb` stone and a `ramp` at a crossing mouth), which is the difference between paving and the
+ * bare verge a plate sits on: a cart down in the gutter beside a 26 cm slab is level and grounded,
+ * and only the surface's name says it is wrong (t_6cd9aa18). The mesh names are the same surfaces
+ * as the ray in `contactGround` sees them, so the analytic test and the seated ray agree.
+ */
+const PAVED_KINDS = new Set<GroundKind>(['plate', 'walk', 'kerb', 'ramp']);
+const PAVED_MESHES = new Set(['plate', 'trotoar', 'kerb', 'kerb-ramp']);
+
 
 // Every interior kind is built once; shop doors cycle through this pool, so all
 // seven rooms are reachable no matter how the city is randomised.
@@ -41,131 +173,12 @@ const KIND_MAT: Record<InteriorKind, number> = {
   salon: 0x8a4a5f,
 };
 
-function fitFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, startSize: number) {
-  let size = startSize;
-  ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
-  while (size > 10 && ctx.measureText(text).width > maxWidth) {
-    size -= 2;
-    ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
-  }
-}
+/** The lit-window mask. One canvas for the whole city: the tiling comes from the geometry UVs. */
+let emissiveTextureCache: THREE.Texture | null = null;
 
-function windowTexture(wall: any, style = 'grid') {
-  const map = canvasTexture(128, 128, (ctx, w, h) => {
-    if (style === 'bands') {
-      // horizontal ribbon windows, common on the reference city blocks
-      ctx.fillStyle = wall;
-      ctx.fillRect(0, 0, w, h);
-      for (let y = 0; y < h; y += 32) {
-        const g = ctx.createLinearGradient(0, y + 6, 0, y + 26);
-        g.addColorStop(0, '#8fb6d8');
-        g.addColorStop(0.5, '#5c86a8');
-        g.addColorStop(1, '#3f5f7d');
-        ctx.fillStyle = g;
-        ctx.fillRect(4, y + 6, w - 8, 20);
-        ctx.fillStyle = 'rgba(255,255,255,0.35)';
-        for (let x = 6; x < w - 6; x += 16) ctx.fillRect(x, y + 6, 3, 20);
-        ctx.fillStyle = 'rgba(0,0,0,0.16)';
-        ctx.fillRect(0, y + 27, w, 5);
-      }
-      return;
-    }
-    if (style === 'strips') {
-      // vertical glass strips with concrete piers
-      ctx.fillStyle = wall;
-      ctx.fillRect(0, 0, w, h);
-      for (let x = 8; x < w - 8; x += 24) {
-        const g = ctx.createLinearGradient(x, 0, x + 14, h);
-        g.addColorStop(0, '#9dc4e0');
-        g.addColorStop(0.5, '#5f8aa8');
-        g.addColorStop(1, '#43637f');
-        ctx.fillStyle = g;
-        ctx.fillRect(x, 4, 14, h - 8);
-        ctx.fillStyle = 'rgba(0,0,0,0.12)';
-        for (let y = 6; y < h; y += 18) ctx.fillRect(x, y, 14, 3);
-      }
-      return;
-    }
-    ctx.fillStyle = wall;
-    ctx.fillRect(0, 0, w, h);
-    // subtle vertical grime
-    for (let i = 0; i < 24; i++) {
-      ctx.fillStyle = `rgba(0,0,0,${rand(0.02, 0.07)})`;
-      ctx.fillRect(rand(0, w), 0, rand(1, 5), h);
-    }
-    const cols = 4;
-    const rows = 4;
-    const pad = 6;
-    const cw = w / cols;
-    const ch = h / rows;
-    for (let x = 0; x < cols; x++) {
-      for (let y = 0; y < rows; y++) {
-        const wx = x * cw + pad;
-        const wy = y * ch + pad;
-        const ww = cw - pad * 2;
-        const wh = ch - pad * 2.2;
-        ctx.fillStyle = '#5c86a8';
-        ctx.fillRect(wx, wy, ww, wh);
-        // glass sheen
-        const g = ctx.createLinearGradient(wx, wy, wx + ww, wy + wh);
-        g.addColorStop(0, 'rgba(195,225,255,0.55)');
-        g.addColorStop(0.5, 'rgba(110,140,170,0.18)');
-        g.addColorStop(1, 'rgba(225,245,255,0.42)');
-        ctx.fillStyle = g;
-        ctx.fillRect(wx, wy, ww, wh);
-        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(wx, wy, ww, wh);
-        if (Math.random() < 0.35) {
-          ctx.fillStyle = 'rgba(255,214,140,0.55)';
-          ctx.fillRect(wx + 1, wy + 1, ww - 2, wh - 2);
-        }
-      }
-    }
-  });
-  return map;
-}
-
-function shopTexture(hue: any) {
-  return canvasTexture(256, 64, (ctx, w, h) => {
-    // facade base
-    ctx.fillStyle = hue.wall;
-    ctx.fillRect(0, 0, w, h);
-    // awning stripe
-    ctx.fillStyle = hue.awning;
-    ctx.fillRect(0, 0, w, 12);
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    for (let x = 0; x < w; x += 16) ctx.fillRect(x, 0, 8, 12);
-    // shop windows
-    const panes = 4;
-    const pw = w / panes;
-    for (let i = 0; i < panes; i++) {
-      const x = i * pw + 6;
-      const y = 16;
-      const ww = pw - 12;
-      const wh = h - y - 6;
-      const g = ctx.createLinearGradient(x, y, x + ww, y + wh);
-      g.addColorStop(0, 'rgba(255,226,160,0.95)');
-      g.addColorStop(0.45, 'rgba(160,205,225,0.85)');
-      g.addColorStop(1, 'rgba(70,95,115,0.95)');
-      ctx.fillStyle = g;
-      ctx.fillRect(x, y, ww, wh);
-      // door frame on the second pane
-      ctx.strokeStyle = 'rgba(20,22,26,0.85)';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x, y, ww, wh);
-      if (i === 1) {
-        ctx.fillStyle = 'rgba(30,34,40,0.9)';
-        ctx.fillRect(x + ww * 0.3, y + wh * 0.1, ww * 0.4, wh * 0.9);
-        ctx.fillStyle = 'rgba(200,220,235,0.5)';
-        ctx.fillRect(x + ww * 0.33, y + wh * 0.15, ww * 0.34, wh * 0.5);
-      }
-    }
-  });
-}
-
-function emissiveTexture() {
-  return canvasTexture(128, 128, (ctx, w, h) => {
+function emissiveTexture(): THREE.Texture {
+  if (emissiveTextureCache) return emissiveTextureCache;
+  const tex = canvasTexture(128, 128, (ctx, w, h) => {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
     const cols = 4;
@@ -182,8 +195,10 @@ function emissiveTexture() {
       }
     }
   });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  emissiveTextureCache = tex;
+  return tex;
 }
-
 type InstancedAdder = (
   geo: THREE.BufferGeometry,
   material: THREE.Material,
@@ -193,23 +208,220 @@ type InstancedAdder = (
   audit?: boolean
 ) => THREE.InstancedMesh | null;
 
+/**
+ * A point where a prop meets the ground, in the prop's own frame.
+ *
+ * `x`/`z` are where the contact is; `y` is left out on purpose — it is measured back out of the
+ * built mesh (see `contactBottom`), so a tread sunk 5 mm into the paving or a rubber foot on the
+ * group origin both seat on the surface they actually touch instead of on a constant repeated from
+ * the builder.
+ */
+interface GroundContact {
+  x: number;
+  z: number;
+  /** contact patch radius: how far to look for the lowest vertex of this foot or tread */
+  r: number;
+  /** a road wheel: the rank's distance from the kerb is measured on the outermost one */
+  tyre?: boolean;
+}
+
+/**
+ * The carriageway a kerbside prop stands beside, as `snapToVerge` measured it: the path, its
+ * half-width, and the unit normal pointing away from the centre line (the direction the slot is
+ * pushed along when it is inset). `kerbGap` is `distToPath - half`, so 0 is the edge of the
+ * asphalt, 0..0.2 is the kerb cap, and anything past 0.2 is paving.
+ */
+interface KerbFrame {
+  path: [number, number][];
+  half: number;
+  nx: number;
+  nz: number;
+}
+
+/**
+ * Where a gerobak touches the ground: both tyres and both braced feet (src/world/kakilima.ts).
+ * The tyres sit at local x=0.38, outboard at z=±0.50, so the cart is 1.0 m across the track; the
+ * feet are 1.16 m behind the axle at z=±0.29. Those four points are the reason one ground sample at
+ * the slot cannot seat this prop: the kerbside slots sit on the pavement edge, and a 1.0 m track
+ * across that edge puts one tyre 26 cm over the carriageway (t_3bbf1bce).
+ */
+const CART_CONTACTS: GroundContact[] = [
+  { x: 0.38, z: 0.5, r: 0.2, tyre: true },
+  { x: 0.38, z: -0.5, r: 0.2, tyre: true },
+  { x: -0.6, z: 0.29, r: 0.2 },
+  { x: -0.6, z: -0.29, r: 0.2 },
+];
+
+/**
+ * Least-squares plane `e = d + a*x + b*z` through a prop's contact errors.
+ *
+ * Four contacts, three unknowns: a rigid body can lift and tilt but not bend, so the fit splits the
+ * error the way a prop actually settles - half the residual at one corner goes into a tilt rather
+ * than into one foot floating. Solved with Cramer's rule on the 3x3 normal equations, which is
+ * stable here because the contacts span both axes (a prop with all four contacts on one line has no
+ * tilt to fit and falls back to the mean).
+ */
+function fitContactPlane(xs: number[], zs: number[], es: number[]): { d: number; a: number; b: number } {
+  const n = xs.length;
+  let Sx = 0, Sz = 0, Sxx = 0, Sxz = 0, Szz = 0, Se = 0, Sxe = 0, Sze = 0;
+  for (let i = 0; i < n; i++) {
+    Sx += xs[i]; Sz += zs[i];
+    Sxx += xs[i] * xs[i]; Sxz += xs[i] * zs[i]; Szz += zs[i] * zs[i];
+    Se += es[i]; Sxe += xs[i] * es[i]; Sze += zs[i] * es[i];
+  }
+  const A = [[n, Sx, Sz], [Sx, Sxx, Sxz], [Sz, Sxz, Szz]];
+  const rhs = [Se, Sxe, Sze];
+  const det = (m: number[][]) =>
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const d0 = det(A);
+  if (Math.abs(d0) < 1e-6) return { d: Se / n, a: 0, b: 0 };
+  const swapped = (col: number) => A.map((row, i) => row.map((v, j) => (j === col ? rhs[i] : v)));
+  return { d: det(swapped(0)) / d0, a: det(swapped(1)) / d0, b: det(swapped(2)) / d0 };
+}
+
+/**
+ * The height of one registered ground quad at (x, z), or null when the point is outside it.
+ *
+ * The two triangles are the ones `stripGeometry` indexes, and the barycentric weights are solved in
+ * the xz plane: a vertical face (the back of a pavement slab, the step of a kerb stone) projects to
+ * a zero-area triangle and is rejected, which is what keeps a foot off a wall.
+ */
+function quadHeightAt(
+  q: { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3 },
+  x: number,
+  z: number
+): number | null {
+  const tri = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3): number | null => {
+    const den = (p1.z - p2.z) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.z - p2.z);
+    if (Math.abs(den) < 1e-7) return null;
+    const l0 = ((p1.z - p2.z) * (x - p2.x) + (p2.x - p1.x) * (z - p2.z)) / den;
+    const l1 = ((p2.z - p0.z) * (x - p2.x) + (p0.x - p2.x) * (z - p2.z)) / den;
+    const l2 = 1 - l0 - l1;
+    if (l0 < -1e-4 || l1 < -1e-4 || l2 < -1e-4) return null;
+    return l0 * p0.y + l1 * p1.y + l2 * p2.y;
+  };
+  const first = tri(q.a, q.b, q.c);
+  if (first !== null) return first;
+  return tri(q.c, q.b, q.d);
+}
+
+
 export class City {
   declare scene: any;
   declare colliders: any[];
-  declare vehicleCounts: { bajaj: number; ojek: number };
+  declare blockGroups: { x: number; z: number; group: any }[];
   declare blocks: any[];
   declare roadLines: any[];
+  declare roads: { name: string; width: number; path: [number, number][] }[];
   declare jumpPads: any[];
   declare parkedSpots: any[];
   declare emissiveMats: any[];
   declare lampMats: any[];
   declare group: THREE.Group;
-  declare shopTextures: THREE.Texture[];
-  declare shopMats: THREE.MeshStandardMaterial[];
   declare focusTarget: THREE.Vector3;
   declare daylight: number;
-  declare propAudit: { name: string; x: number; z: number; bottom: number }[];
+  declare rootGroup: THREE.Group;
+  /**
+   * Placement audit rows. `x`/`z` are the slot the prop stands on; `bottom` is where its ground face
+   * is. For a prop seated from one sample (`placeOnGround`) that is the slot's ground height. For a
+   * prop seated on its contacts (`standOnContacts`, the kaki lima carts) it is the LOWEST contact,
+   * and `bx`/`bz` are where that contact is, so the floating-prop check measures the gap under the
+   * contact instead of under the slot: comparing a tyre 60 cm from the slot on a 12% grade against
+   * the slot sample reports the slope as a gap and hides the straddle it is looking for.
+   */
+  declare propAudit: { name: string; x: number; z: number; bottom: number; bx?: number; bz?: number }[];
+
+  /**
+   * The berthed TransJakarta buses and the collider boxes that belong to them.
+   *
+   * A bus is 17.9 m of solid bodywork, and it used to have a fixed axis-aligned box registered
+   * beside the halte while the bus itself was left standing at the world origin: the body was
+   * walk-through at the haltes and a phantom wall stood in the busway. The boxes here are rewritten
+   * from the group's own transform in `update`, so the collider is always on the bus (and stays on
+   * it if the bus is ever driven, towed or nudged).
+   */
+  declare buses: {
+    group: THREE.Group;
+    boxes: FootprintBox[];
+    halfWidth: number;
+    halfLength: number;
+    height: number;
+    audit: { name: string; x: number; z: number; bottom: number };
+  }[];
+
+  /**
+   * The kit's streets as centre lines, for tools and proof shots - the numeric handle a harness can
+   * walk. NOT a ground source: a spine is a line, not a surface, and treating it as one is what made
+   * a junction's carriageway read as a 17 cm trotoar. The measure reads `streetQuads`.
+   */
+  declare streetSpines: { ax: number; az: number; bx: number; bz: number; half: number; walkW: number }[];
+
+  /**
+   * Every flat walking slab the city builds, in world height: the block plates, the kerb ring under
+   * each of them, parks, lots and the landmark squares. Registered as the mesh is created, so the
+   * ground measure cannot describe a plate that is not there. See `groundInfoAt`.
+   */
+  declare grounds: GroundPlate[];
+
+  /** grounds bucketed into a coarse grid; rebuilt whenever the slab list grows (see platesNear) */
+  private groundGrid: Map<number, GroundPlate[]> | null = null;
+  private groundGridCount = 0;
+
+  /**
+   * Every quad the swept ground ribbons are made of (roads, gutter, kerb, trotoar, crossing ramps),
+   * registered as they are swept. The measure reads these instead of re-deriving a cross-section:
+   * a quad IS what is drawn, so the foot and the paving cannot disagree.
+   */
+  declare groundQuads: { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3; kind: GroundKind }[];
+
+  /** groundQuads bucketed into a coarse grid; rebuilt when the list grows (see quadsNear) */
+  private quadGrid: Map<number, number[]> | null = null;
+  private quadGridCount = 0;
+
+  /**
+   * The ground surfaces the STREET KIT lays - carriageway, kerb, trotoar, ramps - registered by
+   * `buildStreetKit` through `StreetCtx.groundQuad` as they are built.
+   *
+   * They are kept apart from `groundQuads` for two reasons: the kit's own `gy` has to answer "what
+   * is under this street", which may not include the street itself (or every slab would climb on
+   * top of the one before it), and the kit is built last, so its quads are the only layer that can
+   * still appear while the measure is live. `baseGroundAt` reads the layers below, `groundInfoAt`
+   * reads all of them.
+   */
+  declare streetQuads: { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3; kind: GroundKind }[];
+
+  /** streetQuads bucketed into a coarse grid; rebuilt when the list grows (see streetQuadsNear) */
+  private streetQuadGrid: Map<number, number[]> | null = null;
+  private streetQuadGridCount = 0;
+
+  /** the mapped roads as segments in a grid, built on first use by the street-kit site search */
+  declare roadGrid: { grid: Map<string, number[]>; segs: number[]; CELL: number } | null;
+
+  /**
+   * Live ojeks, so a capture or a game system can find one without reverse-engineering a
+   * propAudit slot: the group is where the mesh actually stands, and box is the delivery box's
+   * local bounds (null when a bike is built without one).
+   */
+  declare ojeks: {
+    group: THREE.Group;
+    x: number;
+    z: number;
+    yaw: number;
+    box: { center: THREE.Vector3; size: THREE.Vector3 } | null;
+  }[];
   declare shopDoors: { x: number; z: number; nx: number; nz: number; kind: InteriorKind; name: string }[];
+  /**
+   * Every name plate on a shopfront, in world space: where it hangs and what it says.
+   *
+   * The plates are merged into one mesh with the rest of the facade detail, so the scene graph
+   * cannot answer "does this door have a board, and does the board name its room". This is that
+   * answer, written by the same call that draws the plate.
+   */
+  declare shopSigns: { x: number; y: number; z: number; kind: InteriorKind; name: string }[];
+  /** welcome mats, painted per kind, merged into a single mesh once the city is laid out */
+  declare shopMatGeos: THREE.BufferGeometry[];
   declare interiors: PlacedInterior[];
   declare clouds: THREE.Group;
   declare starMat: THREE.PointsMaterial;
@@ -224,6 +436,11 @@ export class City {
   declare skyTop: THREE.Color;
   declare skyBottom: THREE.Color;
   declare dashMatrices: any[];
+  /** [roadIndex, distanceAlongRoad] for every pedestrian crossing the network implies. */
+  crossings: { road: number; u: number }[] = [];
+  /** built surfaces a prop can be seated on; collected on first use (see surfaces()) */
+  private surfaceCache: THREE.Object3D[] | null = null;
+
   declare doorMatrices: THREE.Matrix4[];
   declare handleMatrices: THREE.Matrix4[];
   declare stepMatrices: { m: THREE.Matrix4; scale: number }[];
@@ -242,7 +459,12 @@ export class City {
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.colliders = [];
+    this.buses = [];
+    this.blockGroups = [];
     this.blocks = [];
+    this.grounds = [];
+    this.groundQuads = [];
+    this.streetQuads = [];
     this.roadLines = [];
     this.jumpPads = [];
     this.parkedSpots = [];
@@ -252,11 +474,14 @@ export class City {
     scene.add(this.group);
 
     this.shopDoors = [];
+    this.shopSigns = [];
+    this.shopMatGeos = [];
     this.interiors = [];
     this.facades = [];
     this.dressingSpots = [];
     this.shopDoorKindCursor = randInt(0, SHOP_KINDS.length - 1);
     this.buildInteriors();
+    this.buildShopSignage();
     this.dayT = 0.32; // 0..1, 0.25 = sunrise, 0.5 = noon
     this.buildLights();
     this.buildClouds();
@@ -266,7 +491,9 @@ export class City {
   }
 
   buildLights() {
-    const hemi = new THREE.HemisphereLight(0xbfe6ff, 0x59a05e, 1.15);
+    // bounce light in a Jakarta street is warm concrete, not grass: a saturated green ground
+    // colour painted every underside in the city mossy, worst of all the toll deck soffit
+    const hemi = new THREE.HemisphereLight(0xbfe6ff, 0x8a8377, 1.15);
     this.scene.add(hemi);
     this.hemi = hemi;
 
@@ -323,6 +550,100 @@ export class City {
   roomFor(kind: InteriorKind) {
     return this.interiors.find((r) => r.kind === kind);
   }
+
+  /**
+   * Hand the facade kit the rooms this city actually built, so a fascia plate can only carry the
+   * name of the shop behind its door.
+   *
+   * Seven rooms, seven cells, one texture: the plates cost one draw call for the whole city. The
+   * cell order is the room order, which is the same order `nextShop` cycles through, so a plate's
+   * cell and the kind of the door under it cannot drift apart.
+   */
+  buildShopSignage() {
+    setShopNames(this.interiors.map((r) => ({ name: r.name, bg: KIND_SIGN[r.kind] })));
+  }
+
+  /**
+   * The next shop identity: the room its door opens into, that room's name, and the plate cell
+   * that says so.
+   *
+   * Shop kinds cycle, so all seven rooms are reachable however the city is randomised; what
+   * changed is that the identity is decided once, before the facade is drawn, and then used for
+   * the plate, the door and the door's registration alike.
+   */
+  nextShop(): { kind: InteriorKind; name: string; cell: number } | null {
+    const kind = SHOP_KINDS[this.shopDoorKindCursor++ % SHOP_KINDS.length];
+    const room = this.roomFor(kind);
+    if (!room) return null;
+    return { kind, name: room.name, cell: this.interiors.findIndex((r) => r.kind === kind) };
+  }
+
+  /** Paint a geometry one colour so a thousand shop mats merge into a single mesh. */
+  tint(geo: THREE.BufferGeometry, hex: number) {
+    const c = new THREE.Color(hex);
+    const n = geo.attributes.position.count;
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      arr[i * 3] = c.r;
+      arr[i * 3 + 1] = c.g;
+      arr[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  }
+
+  /**
+   * Merge the collected ground-floor plinths into one mesh per texture variant. Called once,
+   * after every block and frontage row has been laid out.
+   */
+  /**
+   * Clear the spawn square of street furniture, whoever placed it.
+   *
+   * Props come from half a dozen paths -- becak, benches, crates, ojek ranks, carts, parking --
+   * and each was allowed to ignore where the player starts. Every guard added so far fixed one
+   * path and left the others, so the player kept starting with a gerobak or a becak inside him.
+   * This sweeps once, at the end, over small ground-level objects near the spawn point.
+   */
+  finalizeSpawnClearance() {
+    const sp = this.getSpawn();
+    const doomed: THREE.Object3D[] = [];
+    const box = new THREE.Box3();
+    for (const child of this.group.children) {
+      if ((child as any).isLight) continue;
+      box.setFromObject(child);
+      const size = box.getSize(new THREE.Vector3());
+      if (size.y > 4 || Math.max(size.x, size.z) > 6) continue;      // buildings and decks stay
+      const c = box.getCenter(new THREE.Vector3());
+      if (Math.hypot(c.x - sp.x, c.z - sp.z) > 7) continue;
+      doomed.push(child);
+    }
+    for (const o of doomed) o.removeFromParent();
+    // and the colliders that belonged to them
+    this.colliders = this.colliders.filter((c) => {
+      const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+      const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
+      if (Math.max(w, d) > 8 || c.h > 4) return true;                 // buildings stay
+      return Math.hypot(cx - sp.x, cz - sp.z) > 7;
+    });
+  }
+
+  /** Merge every collected building body into one mesh per material, per block group. */
+  finalizeBuildings() {
+    for (const [group, bucket] of this.buildingBuckets) {
+      for (const { mat, geos } of bucket.values()) {
+        if (!geos.length) continue;
+        const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+        if (!merged) continue;
+        const mesh = new THREE.Mesh(merged, mat);
+        mesh.name = 'building-body';
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+        for (const g of geos) g.dispose();
+      }
+    }
+    this.buildingBuckets.clear();
+  }
+
 
   buildClouds() {
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, fog: false, depthWrite: false });
@@ -387,9 +708,42 @@ export class City {
     asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
     asphaltTex.repeat.set(70, 70);
     const asphalt = new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.96 });
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), asphalt);
-    ground.rotation.x = -Math.PI / 2;
+    // The plane is the *pavement*, not the road: asphalt is drawn on top as a ribbon with the
+    // real width of each road, so the strip between the kerb and the asphalt reads as sidewalk
+    // instead of one 30 m sheet of tarmac.
+    const concreteTex = canvasTexture(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#b7b2a8';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 900; i++) {
+        const g = Math.round(176 + Math.random() * 26);
+        ctx.fillStyle = `rgba(${g},${g - 3},${g - 9},0.5)`;
+        ctx.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 3, 1 + Math.random() * 2);
+      }
+    });
+    concreteTex.wrapS = concreteTex.wrapT = THREE.RepeatWrapping;
+    concreteTex.repeat.set(90, 90);
+    const pavement = new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0.97 });
+    const groundGeo = new THREE.PlaneGeometry(TERRAIN_SPAN, TERRAIN_SPAN, TERRAIN_SEGS, TERRAIN_SEGS);
+    groundGeo.rotateX(-Math.PI / 2);
+    {
+      // displace the plane with the terrain function: the shore, the canal banks and the
+      // southern rise all come from src/world/terrain.ts, the same function physics uses
+      const pos = groundGeo.attributes.position as any;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        pos.setY(i, terrainHeight(x, z));
+      }
+      groundGeo.computeVertexNormals();
+    }
+    const ground = new THREE.Mesh(groundGeo, pavement);
+    // geometry was rotated and displaced already; rotating the mesh again stood the city on
+    // its edge and left the sky showing where the ground should be
     ground.receiveShadow = true;
+    // named, so a prop that has to be seated on the built surface can ray this instead of the
+    // analytic height: the plane is 190 segments over 3 km, so on a hill its triangles are up to
+    // 0.3 m away from what terrainHeight() says, and a prop seated on the analytic number floats
+    ground.name = 'terrain';
     this.group.add(ground);
 
     // sidewalk plates + block contents
@@ -415,6 +769,7 @@ export class City {
     const dashMat = new THREE.MeshStandardMaterial({ color: 0xf7f5e8, roughness: 0.6 });
     const dashGeo = new THREE.BoxGeometry(0.42, 0.02, 2.6);
     this.dashMatrices = [];
+    this.crossings = [];
     this.doorMatrices = [];
     this.handleMatrices = [];
     this.stepMatrices = [];
@@ -432,34 +787,55 @@ export class City {
     // sites are generated on a coarse scatter, then rejected if they land in the bay, on a
     // river, in a road corridor or on top of a landmark.
     const sites = this.planBlockSites();
+    const blockLayer = this.group;
+    this.rootGroup = this.group;
     for (const site of sites) {
       const { x: cx, z: cz, size } = site;
       const district = districtAtPoint(cx, cz);
+      // One group per block: a 2.5 km city cannot draw every block, so each block toggles by
+      // distance (see updateCulling). Everything the block owns goes into its own group.
+      const blockGroup = new THREE.Group();
+      const base = terrainHeight(cx, cz);
+      blockGroup.position.y = base;
+      blockLayer.add(blockGroup);
+      this.group = blockGroup;
+      this.blockGroups.push({ x: cx, z: cz, group: blockGroup });
       const isPark = Math.random() < 0.13;
       const isLot = !isPark && Math.random() < 0.18;
 
       const plate = new THREE.Mesh(new THREE.BoxGeometry(size, 0.26, size), sidewalkMat);
       plate.position.set(cx, 0.13, cz);
       plate.receiveShadow = true;
+      plate.name = 'plate';        // a built walking surface, for contact seating (see contactGround)
       this.group.add(plate);
+      // the plate is one flat box lifted by the terrain under the block CENTRE, so the measure has
+      // to remember that height: terrainHeight(x, z) at the query point is a different number, and
+      // on a slope it is metres away from the slab the player is actually standing on
+      this.grounds.push({ x: cx, z: cz, hx: size / 2, hz: size / 2, top: base + 0.26, kind: 'plate' });
 
       const curb = new THREE.Mesh(new THREE.BoxGeometry(size + 0.9, 0.16, size + 0.9), curbMat);
       curb.position.set(cx, 0.08, cz);
       curb.receiveShadow = true;
+      curb.name = 'kerb';          // the 45 cm stone ring around a plate is walkable too
       this.group.add(curb);
+      this.grounds.push({ x: cx, z: cz, hx: (size + 0.9) / 2, hz: (size + 0.9) / 2, top: base + KERB_RING_TOP, kind: 'kerb' });
 
       if (isPark) {
         const lawn = new THREE.Mesh(new THREE.BoxGeometry(size - 6, 0.12, size - 6), parkMat);
         lawn.position.set(cx, 0.28, cz);
         lawn.receiveShadow = true;
+        lawn.name = 'lawn';        // 8 cm of turf on the plate: walkable, so the measure must see it
         this.group.add(lawn);
+        this.grounds.push({ x: cx, z: cz, hx: (size - 6) / 2, hz: (size - 6) / 2, top: base + LAWN_TOP, kind: 'lawn' });
         this.decoratePark(cx, cz);
         this.blocks.push({ x: cx, z: cz, type: 'park', size });
       } else if (isLot) {
         const lot = new THREE.Mesh(new THREE.BoxGeometry(size - 6, 0.1, size - 6), lotMat);
         lot.position.set(cx, 0.28, cz);
         lot.receiveShadow = true;
+        lot.name = 'lot';
         this.group.add(lot);
+        this.grounds.push({ x: cx, z: cz, hx: (size - 6) / 2, hz: (size - 6) / 2, top: base + LOT_TOP, kind: 'lot' });
         this.decorateLot(cx, cz);
         this.blocks.push({ x: cx, z: cz, type: 'lot', size });
       } else {
@@ -469,12 +845,27 @@ export class City {
 
       this.decorateBlockEdge(cx, cz);
       this.collectDistrictProps(district, cx, cz);
+      this.group = blockLayer;
     }
 
     // Landmarks sit exactly where the map puts them
     for (const lm of LANDMARKS) {
       if (!this.propAudit) this.propAudit = [];
-      const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+      // landmarks are modelled on a flat origin, so they get a parent lifted to their ground
+      const lmGroup = new THREE.Group();
+      const lmBase = terrainHeight(lm.x, lm.z);
+      lmGroup.position.y = lmBase;
+      this.group.add(lmGroup);
+      const ctx = {
+        group: lmGroup,
+        colliders: this.colliders,
+        audit: this.propAudit,
+        groundHeightAt: (x: number, z: number) => this.groundHeightAt(x, z),
+        // a landmark's own square is a built walking surface too: it registers it, in world height,
+        // so the measure knows the paving it stands on instead of guessing 26 cm off the block list
+        grounds: this.grounds,
+        lift: lmBase,
+      };
       if (lm.id === 'monas') buildMonas(ctx, lm.x, lm.z);
       else if (lm.id === 'bundaran-hi') buildBundaran(ctx, lm.x, lm.z);
       else if (lm.id === 'stadhuis') buildKotaTua(ctx, lm.x, lm.z);
@@ -483,25 +874,42 @@ export class City {
       this.blocks.push({ x: lm.x, z: lm.z, type: 'landmark', landmark: lm.id, size: 40 });
     }
 
-    this.buildIndonesianVehicles();
+    this.buildFrontage();
+    this.buildTerrainFeatures();
     this.buildRoadRibbons();
     this.buildWater();
     this.buildDistrictProps();
+    this.buildStreetLife();
+    this.buildOjekBases();
+    this.buildLayangRoad();
+    this.buildMrt();
+    this.buildKrlLine();
+    // The street goes in last of the world passes: its site search reads `this.blocks` to find a
+    // corridor with room for a full cross-section, and the MRT, the layang and the landmarks all
+    // push plates after the block loop. Built earlier it could pick ground that a later plate then
+    // covered, which showed up as kit props standing 9 cm inside a 26 cm plate.
+    this.buildStreetKit();
 
-    // road markings (instanced)
-    const half = GRID * PITCH;
+    // road markings (instanced): dashed centre lines along the roads the map defines
     const mtx = new THREE.Matrix4();
-    for (let i = -GRID; i < GRID; i++) {
-      const rc = (i + 0.5) * PITCH;
-      for (let t = -half; t <= half; t += 7) {
-        // skip intersections
-        const nearCross = Math.abs(((t / PITCH) % 1 + 1) % 1 - 0.5) < 0.2;
-        if (nearCross) continue;
-        this.dashMatrices.push(mtx.clone().makeTranslation(rc, 0.02, t));
-        this.dashMatrices.push(mtx.clone().makeTranslation(t, 0.02, rc));
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const dashRoads = [...ARTERIALS.map((a) => ({ pts: a.path, width: a.width })), { pts: RING_ROAD, width: 20 }];
+    for (const road of dashRoads) {
+      for (let i = 0; i < road.pts.length - 1; i++) {
+        const [x1, z1] = road.pts[i];
+        const [x2, z2] = road.pts[i + 1];
+        const len = Math.hypot(x2 - x1, z2 - z1);
+        const yaw = Math.atan2(x2 - x1, z2 - z1);
+        const steps = Math.floor(len / 9);
+        for (let k = 0; k < steps; k++) {
+          const t = (k + 0.5) / steps;
+          const x = x1 + (x2 - x1) * t;
+          const z = z1 + (z2 - z1) * t;
+          q.setFromAxisAngle(up, yaw);
+          this.dashMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.056, z), q, new THREE.Vector3(1, 1, 1)));
+        }
       }
-      this.roadLines.push({ axis: 'x', coord: rc });
-      this.roadLines.push({ axis: 'z', coord: rc });
     }
     const dashMesh = new THREE.InstancedMesh(dashGeo, dashMat, this.dashMatrices.length);
     this.dashMatrices.forEach((m, i) => dashMesh.setMatrixAt(i, m));
@@ -510,34 +918,17 @@ export class City {
     dashMesh.frustumCulled = false;
     this.group.add(dashMesh);
 
-    // crosswalks at intersections (instanced)
-    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xe4e2ea, roughness: 0.85 });
-    const stripeGeo = new THREE.BoxGeometry(0.7, 0.02, 3.2);
-    const stripeMatrices = [];
-    for (let i = -GRID - 1; i <= GRID; i++) {
-      for (let j = -GRID - 1; j <= GRID; j++) {
-        const x = (i + 0.5) * PITCH;
-        const z = (j + 0.5) * PITCH;
-        for (let k = -3; k <= 3; k++) {
-          stripeMatrices.push(
-            new THREE.Matrix4().makeTranslation(x + k * 1.7, 0.03, z + BLOCK * 0.5 + ROAD * 0.5 + 1.4)
-          );
-          const rot = new THREE.Matrix4().makeRotationY(Math.PI / 2);
-          rot.setPosition(x + BLOCK * 0.5 + ROAD * 0.5 + 1.4, 0.03, z + k * 1.7);
-          stripeMatrices.push(rot);
-        }
-      }
-    }
-    const stripeMesh = new THREE.InstancedMesh(stripeGeo, stripeMat, stripeMatrices.length);
-    stripeMatrices.forEach((m, i) => stripeMesh.setMatrixAt(i, m));
-    stripeMesh.instanceMatrix.needsUpdate = true;
-    stripeMesh.frustumCulled = false;
-    this.group.add(stripeMesh);
+    // Crossings are built from the road network in buildRoadRibbons(); the old stripes here were
+    // instanced on the (i+0.5)*PITCH block lattice at y=0.03, which is inside blocks now that
+    // districts are polygons, and under the carriageway even where it was on a road.
 
     this.buildEntranceInstances();
     this.buildLampInstances();
     this.buildTreeInstances();
     this.buildNightLights();
+    this.finalizeBuildings();
+    this.finalizeFacadeDetails();
+    this.finalizeSpawnClearance();
   }
 
   buildNightLights() {
@@ -594,9 +985,9 @@ export class City {
   }
 
   buildTreeInstances() {
-    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 2.8, 6);
+    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 3.6, 6);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4f34, roughness: 1 });
-    const crownGeo = new THREE.IcosahedronGeometry(1.7, 0);
+    const crownGeo = new THREE.IcosahedronGeometry(1.45, 0);
     const crownMat = new THREE.MeshStandardMaterial({ color: 0x2bae4a, roughness: 1, flatShading: true });
 
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, this.treeTrunks.length);
@@ -643,6 +1034,22 @@ export class City {
       mesh.frustumCulled = false;
       this.group.add(mesh);
     }
+
+    // Welcome mats: every enterable shop has one, each in its own kind's colour, and they used to
+    // be one mesh and one material per shop. Merged into a single vertex-coloured mesh, because
+    // one mat per shopfront is hundreds of draw calls for a 2 m slab of painted rubber.
+    if (this.shopMatGeos.length) {
+      const merged = mergeGeometries(this.shopMatGeos, false);
+      if (merged) {
+        const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }));
+        mesh.name = 'shop-mats';       // named so a probe can price the whole city's mats as one call
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+        this.group.add(mesh);
+      }
+      for (const g of this.shopMatGeos) g.dispose();
+      this.shopMatGeos = [];
+    }
   }
 
   /** Street dressing that makes a district legible at ground level, batched into one mesh
@@ -669,6 +1076,1386 @@ export class City {
         this.washMats.push(m.clone().makeTranslation(cx, 3.1 + i * 0.2, z));
       }
     }
+  }
+
+
+  /**
+   * TransJakarta haltes, where the map says they are: on the verge of the arterial they serve,
+   * parallel to it, roof over the platform and the tactile edge facing the carriageway.
+   */
+  buildHaltes() {
+    let buses = 0;
+    for (const poi of POIS) {
+      if (poi.kind !== 'halte') continue;
+      let best = { d: Infinity, yaw: 0, nx: 0, nz: 1, half: 10 };
+      for (const a of ARTERIALS) {
+        for (let i = 0; i < a.path.length - 1; i++) {
+          const [x1, z1] = a.path[i];
+          const [x2, z2] = a.path[i + 1];
+          const dx = x2 - x1;
+          const dz = z2 - z1;
+          const len2 = dx * dx + dz * dz || 1;
+          const t = clamp(((poi.x - x1) * dx + (poi.z - z1) * dz) / len2, 0, 1);
+          const cx = x1 + dx * t;
+          const cz = z1 + dz * t;
+          const d = Math.hypot(poi.x - cx, poi.z - cz);
+          if (d < best.d) {
+            const len = Math.sqrt(len2) || 1;
+            best = { d, yaw: Math.atan2(dx, dz), nx: -dz / len, nz: dx / len, half: a.width / 2 };
+          }
+        }
+      }
+      if (best.d > 90) continue;
+      // stand it on the verge on the far side of the kerb, never in a traffic lane
+      const off = best.half + 3.4;
+      const px = poi.x + best.nx * off;
+      const pz = poi.z + best.nz * off;
+      const g = buildHalte({ group: this.group, colliders: this.colliders, audit: this.propAudit }, px, pz, best.yaw);
+      g.position.y = terrainHeight(px, pz);
+    }
+  }
+
+
+  /**
+   * Ojek pangkalan: the row of motorbikes waiting for a fare on the kerb. Two per stop, angled
+   * to the street, only at the POIs the map marks as passenger/food places, because a bike is
+   * 11 draw calls and the frame has a budget to hold.
+   */
+
+  /**
+   * Put something on the pavement instead of on a map coordinate.
+   *
+   * Every POI in the map is a point on a district, not a kerbside slot, which is why the first
+   * halte and the first row of ojeks ended up inside a frontage wall. This projects the point
+   * onto the nearest arterial, walks out to the middle of that road's pavement, and picks the
+   * side that is actually free.
+   */
+  /** the player's start, cached so street furniture can keep out of it */
+  spawnCache: { x: number; z: number } | null = null;
+
+  /** true when a proposed prop slot would land on the player's spawn */
+  tooCloseToSpawn(x: number, z: number, pad = 6): boolean {
+    if (!this.spawnCache) this.spawnCache = this.getSpawn();
+    return Math.hypot(x - this.spawnCache.x, z - this.spawnCache.z) < pad;
+  }
+
+  /**
+   * Push a point out of every carriageway.
+   *
+   * Hero assets were placed relative to getSpawn(), and the spawn sits on the arterial
+   * centreline, so six of them ended up standing in the road. This projects the point onto the
+   * nearest road and moves it to the far side of the kerb, which is where a building belongs.
+   *
+   * `pushOffRoadOnce` resolves one road per pass, so at a junction it can hand the point from one
+   * carriageway to the other and back: after six passes the masjid still stood 4.9 m from the
+   * centreline of Gatot Subroto, i.e. in the inside lane, and `tests/world/placement.mjs` caught
+   * it only on the loads where the random city put it there. So the pass loop now ends with a
+   * proof instead of a hope: if the point is still on tarmac, search outward for the nearest slot
+   * that clears every road in the map's list, and only then hand it back.
+   */
+  pushOffRoad(x: number, z: number, extra: number): { x: number; z: number } {
+    let px = x, pz = z;
+    for (let pass = 0; pass < 6; pass++) {
+      const moved = this.pushOffRoadOnce(px, pz, extra);
+      if (moved.x === px && moved.z === pz) break;
+      px = moved.x; pz = moved.z;
+    }
+    if (!this.onAnyRoad(px, pz, extra)) return { x: px, z: pz };
+    // still on tarmac: the slot is the nearest point that is not (the caller asked for `extra`
+    // metres of clearance, so the rings start at that radius and walk outward)
+    for (const r of [extra + 4, extra + 10, extra + 18, extra + 28, extra + 40]) {
+      let best: { x: number; z: number; d: number } | null = null;
+      for (let a = 0; a < 24; a++) {
+        const t = (a / 24) * Math.PI * 2;
+        const qx = px + Math.cos(t) * r;
+        const qz = pz + Math.sin(t) * r;
+        if (this.onAnyRoad(qx, qz, extra)) continue;
+        const d = Math.hypot(qx - px, qz - pz);
+        if (!best || d < best.d) best = { x: qx, z: qz, d };
+      }
+      if (best) return { x: best.x, z: best.z };
+    }
+    return { x: px, z: pz };
+  }
+
+  /** is (x,z) on any carriageway, with `margin` metres of kerb clearance? */
+  onAnyRoad(x: number, z: number, margin = 0): boolean {
+    const roads: { path: [number, number][]; half: number }[] = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], half: a.width / 2 })),
+      { path: RING_ROAD as [number, number][], half: 10 },
+      ...LOCAL_STREETS.map((l) => ({ path: l.path as [number, number][], half: l.width / 2 })),
+    ];
+    for (const { path, half } of roads) {
+      const need = half + margin;
+      for (let i = 1; i < path.length; i++) {
+        const [x1, z1] = path[i - 1];
+        const [x2, z2] = path[i];
+        const dx = x2 - x1, dz = z2 - z1;
+        const l2 = dx * dx + dz * dz || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / l2;
+        t = Math.max(0, Math.min(1, t));
+        if (Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)) < need) return true;
+      }
+    }
+    return false;
+  }
+
+  private pushOffRoadOnce(x: number, z: number, extra: number): { x: number; z: number } {
+    const roads: { path: [number, number][]; half: number }[] = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], half: a.width / 2 })),
+      { path: RING_ROAD as [number, number][], half: 10 },
+      ...LOCAL_STREETS.map((l) => ({ path: l.path as [number, number][], half: l.width / 2 })),
+    ];
+    for (const { path, half } of roads) {
+      for (let i = 1; i < path.length; i++) {
+        const [x1, z1] = path[i - 1];
+        const [x2, z2] = path[i];
+        const dx = x2 - x1, dz = z2 - z1;
+        const len = Math.hypot(dx, dz) || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / (len * len);
+        t = Math.max(0, Math.min(1, t));
+        const px = x1 + dx * t, pz = z1 + dz * t;
+        const dist = Math.hypot(x - px, z - pz);
+        const need = half + extra;
+        if (dist < need) {
+          const nx = (x - px) / (dist || 1);
+          const nz = (z - pz) / (dist || 1);
+          return { x: px + nx * need, z: pz + nz * need };
+        }
+      }
+    }
+    return { x, z };
+  }
+
+  /** every carriageway in the map, as a polyline with its half width */
+  private carriageways(): { name: string; path: [number, number][]; half: number }[] {
+    return [
+      ...ARTERIALS.map((a) => ({ name: a.name, path: a.path as [number, number][], half: a.width / 2 })),
+      { name: 'Ring Road', path: RING_ROAD as [number, number][], half: 10 },
+      ...LOCAL_STREETS.map((s, i) => ({ name: `Local Street ${i}`, path: s.path as [number, number][], half: s.width / 2 })),
+    ];
+  }
+
+  /** distance from a point to one polyline's centreline, in metres */
+  private distanceTo(path: [number, number][], x: number, z: number): number {
+    let best = Infinity;
+    for (let i = 1; i < path.length; i++) {
+      const [x1, z1] = path[i - 1];
+      const [x2, z2] = path[i];
+      const dx = x2 - x1, dz = z2 - z1;
+      const len2 = dx * dx + dz * dz || 1;
+      let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      best = Math.min(best, Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)));
+    }
+    return best;
+  }
+
+  /**
+   * The clearance from a *footprint* to the nearest carriageway edge, in metres.
+   *
+   * `onRoad()` answers for a point, and that is how a 48 x 32 m terminal stood in a lane with its
+   * centre 5 m clear of the kerb: the slab, not the centre, is what a player sees on the tarmac
+   * (owner report, t_accfc928). This samples the rectangle's outline, so a positive number means
+   * the whole apron misses every road by that much.
+   */
+  apronClearance(x: number, z: number, yaw: number, width: number, depth: number): number {
+    const cs = Math.cos(yaw), sn = Math.sin(yaw);
+    const hw = width / 2, hd = depth / 2;
+    // only roads whose centreline is near enough to matter: the apron's own circumradius
+    const reach = Math.hypot(hw, hd);
+    const near = this.carriageways().filter((r) => this.distanceTo(r.path, x, z) < r.half + reach + 6);
+    let best = Infinity;
+    const sample = (lx: number, lz: number) => {
+      const px = x + lx * cs + lz * sn;
+      const pz = z - lx * sn + lz * cs;
+      for (const r of near) best = Math.min(best, this.distanceTo(r.path, px, pz) - r.half);
+    };
+    const step = 2;
+    for (let u = -hw; u <= hw; u += step) { sample(u, -hd); sample(u, hd); }
+    for (let v = -hd; v <= hd; v += step) { sample(-hw, v); sample(hw, v); }
+    return best;
+  }
+
+  /** the closest point on any carriageway centreline to (x, z), with that road's half width */
+  private nearestRoad(x: number, z: number): { px: number; pz: number; half: number; dist: number } | null {
+    let best: { px: number; pz: number; half: number; dist: number } | null = null;
+    for (const r of this.carriageways()) {
+      for (let i = 1; i < r.path.length; i++) {
+        const [x1, z1] = r.path[i - 1];
+        const [x2, z2] = r.path[i];
+        const dx = x2 - x1, dz = z2 - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px = x1 + dx * t, pz = z1 + dz * t;
+        const dist = Math.hypot(x - px, z - pz);
+        if (!best || dist < best.dist) best = { px, pz, half: r.half, dist };
+      }
+    }
+    return best;
+  }
+
+  /**
+   * the ground's own fall under a rectangle, in metres, and how far its highest point rises above
+   * the sample the prop is seated on. 0 / 0 means a level slab can sit on it and nothing will
+   * stand through the concrete.
+   */
+  private footprintSpread(foot: { minX: number; maxX: number; minZ: number; maxZ: number }): { spread: number; rise: number } {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i <= 4; i++) {
+      for (let k = 0; k <= 4; k++) {
+        const x = foot.minX + ((foot.maxX - foot.minX) * i) / 4;
+        const z = foot.minZ + ((foot.maxZ - foot.minZ) * k) / 4;
+        const h = this.groundHeightAt(x, z);
+        if (h < lo) lo = h;
+        if (h > hi) hi = h;
+      }
+    }
+    const centre = this.groundHeightAt((foot.minX + foot.maxX) / 2, (foot.minZ + foot.maxZ) / 2);
+    return { spread: hi - lo, rise: hi - centre };
+  }
+
+  /**
+   * Is the driveway between the apron's street front and the kerb standing on a building?
+   *
+   * An apron that clears every carriageway is what the owner asked for, but it also has to be
+   * reachable: a driveway straight through a shophouse is not an entrance, so a site whose
+   * approach is blocked is rejected while the site is still being chosen.
+   */
+  private accessBlocked(x: number, z: number, yaw: number): boolean {
+    const frontX = x + Math.sin(yaw) * (TERMINAL_DIMENSIONS.depth / 2);
+    const frontZ = z + Math.cos(yaw) * (TERMINAL_DIMENSIONS.depth / 2);
+    const hit = this.nearestRoad(frontX, frontZ);
+    if (!hit) return true;
+    const nx = (frontX - hit.px) / (hit.dist || 1), nz = (frontZ - hit.pz) / (hit.dist || 1);
+    const ex = hit.px + nx * hit.half, ez = hit.pz + nz * hit.half;
+    const len = Math.hypot(frontX - ex, frontZ - ez);
+    const steps = Math.max(1, Math.ceil(len / 2));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const px = ex + (frontX - ex) * t, pz = ez + (frontZ - ez) * t;
+      if (this.colliders.some((c) => px > c.minX - 4 && px < c.maxX + 4 && pz > c.minZ - 4 && pz < c.maxZ + 4)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A short access run from the kerb of the nearest street to the terminal apron.
+   *
+   * The apron is deliberately clear of every carriageway, which leaves it an island; a terminal
+   * with no way in is not a terminal (card t_accfc928, deliverable 3). The run follows the
+   * *built* ground rather than the terrain line, because it has to climb the block plate and its
+   * kerb on the way to the apron instead of disappearing underneath them.
+   */
+  buildTerminalAccess(x: number, z: number, yaw: number) {
+    const accessWidth = 8;
+    // The run comes off the apron's street front, +Z in the terminal's own frame, and goes
+    // straight at the kerb: a driveway that left the back of the canopy would cross the building.
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const frontX = x + fx * (TERMINAL_DIMENSIONS.depth / 2);
+    const frontZ = z + fz * (TERMINAL_DIMENSIONS.depth / 2);
+    const hit = this.nearestRoad(frontX, frontZ);
+    if (!hit) return;
+    const toSite = hit.dist || 1;
+    const nx = (frontX - hit.px) / toSite, nz = (frontZ - hit.pz) / toSite;
+    // from the road edge, not its centreline: the run starts where the asphalt ends
+    const ex = hit.px + nx * hit.half, ez = hit.pz + nz * hit.half;
+    const ax = frontX, az = frontZ;
+    const run = Math.hypot(ax - ex, az - ez);
+    if (run < 1.5) return;      // the apron already meets the kerb; nothing to bridge
+    const path: [number, number][] = [[ex, ez], [ax, az]];
+    const geo = this.ribbonOnGround(path, accessWidth);
+    const asphalt = this.group.getObjectByName('road-local') as THREE.Mesh | null;
+    const mesh = new THREE.Mesh(
+      geo,
+      asphalt ? asphalt.material : new THREE.MeshStandardMaterial({ color: 0x282c32, roughness: 1 })
+    );
+    mesh.name = 'road-access';
+    mesh.receiveShadow = true;
+    this.group.add(mesh);
+    // Kept out of `this.roads` on purpose: the pedestrian walk-path generator and the police
+    // graph both walk every entry there, and a dead-end stub inside the apron's collider would
+    // send them into a wall. It is a forecourt, not a through street; the test reads it from
+    // `terminalAccess` instead.
+    this.terminalAccess = { path, width: accessWidth };
+  }
+
+  /**
+   * A ribbon that lies on the built surface under it instead of on the terrain line.
+   *
+   * `sweepSurface` lifts a ribbon from `terrainHeight`, which is right for a street but wrong for
+   * an entrance: the block plate and its kerb sit 26 cm over that line, so a terrain-lifted run
+   * to a terminal would pass underneath the block it is supposed to enter.
+   */
+  private ribbonOnGround(points: [number, number][], width: number, lift = 0.06, step = 2): THREE.BufferGeometry {
+    const stations: { x: number; z: number; y: number; u: number }[] = [];
+    let u = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const [x1, z1] = points[i];
+      const [x2, z2] = points[i + 1];
+      const len = Math.hypot(x2 - x1, z2 - z1);
+      const n = Math.max(1, Math.ceil(len / step));
+      for (let k = 0; k < n; k++) {
+        const t = k / n;
+        const px = x1 + (x2 - x1) * t, pz = z1 + (z2 - z1) * t;
+        stations.push({ x: px, z: pz, y: this.groundHeightAt(px, pz) + lift, u });
+        u += len / n;
+      }
+    }
+    const end = points[points.length - 1];
+    stations.push({ x: end[0], z: end[1], y: this.groundHeightAt(end[0], end[1]) + lift, u });
+    const rows: THREE.Vector3[][] = stations.map((s, i) => {
+      const prev = stations[Math.max(0, i - 1)];
+      const next = stations[Math.min(stations.length - 1, i + 1)];
+      const dx = next.x - prev.x, dz = next.z - prev.z;
+      const l = Math.hypot(dx, dz) || 1;
+      const nx = -dz / l, nz = dx / l;
+      return [
+        new THREE.Vector3(s.x - nx * (width / 2), s.y, s.z - nz * (width / 2)),
+        new THREE.Vector3(s.x + nx * (width / 2), s.y, s.z + nz * (width / 2)),
+      ];
+    });
+    return this.stripGeometry(rows, stations.map((s) => s.u / 4), [0, width / 4], undefined, 'road');
+  }
+
+  /**
+   * The kerbside slot nearest (x, z): on the paving, 0.3 m short of the shopfront line.
+   *
+   * `inset` moves the slot that many metres toward the kerb before it is tested. Everything that
+   * just needs "on the pavement" leaves it at 0; a prop too deep for the 0.6 m of paving behind
+   * that slot passes its own depth, so the collider test runs where the prop ends up rather than
+   * at a slot it will not occupy.
+   *
+   * `accept` rejects a candidate slot the caller cannot use - the ojek rank needs both tyres on one
+   * surface, and the paving is not one surface at a crossing mouth. The walk along the kerb is a
+   * fixed order, so the slot a caller gets is deterministic for a given layout.
+   *
+   * The returned `kerb` frame names the carriageway the slot was measured against, so a caller can
+   * keep working in the same frame: `kerbGap()` on a contact is its distance from that kerb line.
+   */
+  snapToVerge(
+    x: number,
+    z: number,
+    inset = 0,
+    accept?: (p: { x: number; z: number; yaw: number }) => boolean
+  ): { x: number; z: number; yaw: number; kerb: KerbFrame } | null {
+    let best: { d: number; cx: number; cz: number; nx: number; nz: number; yaw: number; half: number; path: [number, number][] } | null = null;
+    for (const a of [...ARTERIALS, { path: RING_ROAD, width: 20 } as any]) {
+      const pts = a.path as [number, number][];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x1, z1] = pts[i];
+        const [x2, z2] = pts[i + 1];
+        const dx = x2 - x1;
+        const dz = z2 - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        const t = clamp(((x - x1) * dx + (z - z1) * dz) / len2, 0, 1);
+        const cx = x1 + dx * t;
+        const cz = z1 + dz * t;
+        const d = Math.hypot(x - cx, z - cz);
+        if (!best || d < best.d) {
+          const len = Math.sqrt(len2) || 1;
+          best = { d, cx, cz, nx: -dz / len, nz: dx / len, yaw: Math.atan2(dx, dz), half: a.width / 2, path: pts };
+        }
+      }
+    }
+    if (!best) return null;
+    // The kerb cap ends at half+0.2 and the paving runs 3.6 m behind it, so this is 0.3 m short of
+    // the shopfront line, not the middle of the slab: a prop deeper than 0.6 m has to inset itself.
+    const off = best.half + 1.9 + 1.6 - inset;
+    const free = (px: number, pz: number) => this.slotFree(px, pz);
+    // walk along the kerb as well as across it: one POI can land where a shopfront juts out, and
+    // the slot two doors down is still on the same pavement
+    const dirX = best.nz;
+    const dirZ = -best.nx;
+    for (const along of [0, 12, -12, 24, -24, 36, -36, 48, -48]) {
+      for (const side of [1, -1]) {
+        const px = best.cx + dirX * along + best.nx * off * side;
+        const pz = best.cz + dirZ * along + best.nz * off * side;
+        if (!free(px, pz) || isWater(px, pz)) continue;
+        if (accept && !accept({ x: px, z: pz, yaw: best.yaw })) continue;
+        // the normal is reported at the side the slot actually took, so a caller can walk further
+        // toward the kerb (or away from it) along the same line
+        return { x: px, z: pz, yaw: best.yaw, kerb: { path: best.path, half: best.half, nx: best.nx * side, nz: best.nz * side } };
+      }
+    }
+    return null;
+  }
+
+  /** is (x,z) clear of every collider, keeping `margin` metres off its edges? */
+  private slotFree(px: number, pz: number, margin = 1.2): boolean {
+    return this.colliders.every(
+      (c) => px < c.minX - margin || px > c.maxX + margin || pz < c.minZ - margin || pz > c.maxZ + margin
+    );
+  }
+
+  /**
+   * The nearest kerb line of ANY mapped carriageway, as `distToPath - half`.
+   *
+   * A stance is inset along one road's normal, but a cart can land beside a junction where the
+   * crossing street's kerb is half a metre nearer than the one it was measured against. Measuring
+   * only the frame put three carts of six inside 0.09 m of the crossing kerb (t_6cd9aa18): the tyre
+   * band has to be judged against the kerb the eye actually sees.
+   */
+  private kerbGapAny(px: number, pz: number): number {
+    let best = Infinity;
+    for (const a of [...ARTERIALS, { path: RING_ROAD, width: 20 } as any]) {
+      const gap = this.distToPath(px, pz, a.path as [number, number][]) - a.width / 2;
+      if (gap < best) best = gap;
+    }
+    return best;
+  }
+
+  /** is the drawn ground here paving (`plate`/`trotoar`/kerb/ramp) rather than the bare verge? */
+  private onPaving(px: number, pz: number): boolean {
+    return PAVED_KINDS.has(this.groundInfoAt(px, pz).kind);
+  }
+
+  /** Haltes, food carts, the nutrition kitchen and the village cooperative, all kerbside. */
+
+  /** Place a street item on the ground and make its audit entry say the same height. */
+  private placeOnGround(g: THREE.Object3D, x: number, z: number) {
+    const y = this.groundHeightAt(x, z);
+    g.position.y = y;
+    const last = this.propAudit[this.propAudit.length - 1];
+    if (last) last.bottom = y;
+  }
+
+  /**
+   * The built walking surfaces a prop can be seated on, collected once.
+   *
+   * A contact seat costs one ray per contact per pass, so the ray has to be cheap and it has to
+   * see ground and nothing else. Raying the whole city group instead picked up other props'
+   * geometry (a cart's own tyres, a halte roof) and tested every instanced tree; the named surfaces
+   * are the terrain, the block plates and the street kit's trotoar/kerb/gutter/road ribbons.
+   */
+  private surfaces(): THREE.Object3D[] {
+    if (!this.surfaceCache) {
+      const wanted = new Set(['terrain', 'plate', 'lawn', 'lot', 'trotoar', 'kerb', 'gutter', 'kerb-ramp', 'road-arterial', 'road-local', 'road-shoulder', 'road-access']);
+      this.surfaceCache = [];
+      this.group.traverse((o) => {
+        if (wanted.has(o.name)) this.surfaceCache!.push(o);
+      });
+    }
+    return this.surfaceCache;
+  }
+
+  /**
+   * The height of the built surface under (x, z), or null when nothing is under it.
+   *
+   * This is the contact target, and it has to be the built mesh rather than `groundHeightAt`: the
+   * pavement ribbon is swept as a flat cross-section from the terrain at each path station, so on a
+   * cross-slope the paving can sit 24 cm under the analytic `terrain + 0.26`, and a prop seated on
+   * the analytic number floats over the paving the player can see (measured on the southern rise,
+   * t_3bbf1bce). The window is wide because of that same slope, and narrow enough that a roof or a
+   * wall two metres up cannot be mistaken for the street.
+   */
+  private contactGround(x: number, z: number): number | null {
+    const s = this.contactSurface(x, z);
+    return s ? s.y : null;
+  }
+
+  /**
+   * The built surface under (x, z), and which mesh it is.
+   *
+   * The height is the contact target (see `contactGround`); the name is what tells paving from the
+   * bare verge. `groundHeightAt` carries a 1.2 m margin past a block plate's visible edge, so the
+   * analytic height calls bare ground "on the pavement" - only the mesh the ray actually hit knows.
+   */
+  private contactSurface(x: number, z: number): { y: number; mesh: string } | null {
+    const near = this.groundHeightAt(x, z);
+    const ray = new THREE.Raycaster(new THREE.Vector3(x, near + 1.2, z), new THREE.Vector3(0, -1, 0), 0, 2.4);
+    const hits = ray.intersectObjects(this.surfaces(), true) as { point: THREE.Vector3; face: { normal: THREE.Vector3 } | null; object: THREE.Object3D }[];
+    const n = new THREE.Vector3();
+    const nm = new THREE.Matrix3();
+    let best: { y: number; mesh: string } | null = null;
+    for (const h of hits) {
+      if (h.point.y > near + 0.32 || h.point.y < near - 0.6) continue;
+      // only an upward face can be stood on. A ray that lands on the vertical back of a paving slab
+      // returns a height anywhere between the slab and the ground under it, and that number seated
+      // one cart 24 cm into the street; a prop rests on a face with a normal, not on an edge.
+      if (h.face) {
+        n.copy(h.face.normal).applyMatrix3(nm.getNormalMatrix(h.object.matrixWorld)).normalize();
+        if (n.y < 0.5) continue;
+      }
+      if (best === null || h.point.y > best.y) best = { y: h.point.y, mesh: h.object.name };
+    }
+    return best;
+  }
+
+  /** where a prop yawed by `yaw` and centred at (x, z) puts one contact (three.js Y-rotation) */
+  private contactWorld(x: number, z: number, yaw: number, c: GroundContact) {
+    const c1 = Math.cos(yaw);
+    const s1 = Math.sin(yaw);
+    return { x: x + c.x * c1 + c.z * s1, z: z - c.x * s1 + c.z * c1 };
+  }
+
+  /**
+   * The height of a prop's contact face, read back out of the built mesh: the lowest vertex within
+   * `r` of the contact, in the prop's own frame.
+   *
+   * Measuring beats repeating the builder's constants: the cart's tread is built 5 mm sunk into the
+   * paving (a tangent tyre otherwise contacts on one anti-aliased pixel and reads as floating) and
+   * its rubber feet sit on the group origin, so the two contact kinds do not share a y.
+   */
+  private contactBottom(g: THREE.Object3D, lx: number, lz: number, r: number): number {
+    g.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+    const v = new THREE.Vector3();
+    const local = new THREE.Vector3();
+    let best = Infinity;
+    g.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.geometry || !m.geometry.attributes.position) return;
+      if (Array.isArray(m.material) ? m.material.some((mm) => mm.transparent) : m.material?.transparent) return;
+      const pos = m.geometry.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+        local.copy(v).applyMatrix4(inv);
+        if (Math.hypot(local.x - lx, local.z - lz) > r) continue;
+        if (local.y < best) best = local.y;
+      }
+    });
+    return best === Infinity ? 0 : best;
+  }
+
+  /**
+   * A stance where a wide prop's four contacts all stand on the same surface.
+   *
+   * `placeOnGround` samples the slot once, which seats a narrow prop and mis-seats a wide one: the
+   * kerbside slot sits on the pavement edge, a gerobak's track is 1.0 m across that edge, and one
+   * tyre ended up 26 cm over the carriageway (measured, t_3bbf1bce). This walks the slot along the
+   * kerb normal and then outward in 30 cm rings, and scores every candidate on three things: are
+   * the built heights under the four contacts within 3 cm of each other, is every contact standing
+   * on paving (`plate`/`trotoar`) rather than bare terrain, and - when the caller passes the kerb
+   * frame - is the outermost tyre 0.2-0.7 m off the kerb line.
+   *
+   * The preference order is the point of the search: a level stance on paving beats a level stance
+   * on bare terrain even 2.4 m away, because a cart in the gutter beside a 26 cm plate reads as a
+   * prop in a ditch, while a cart a ring out still reads as a kerbside cart (t_6cd9aa18). Bare
+   * terrain is only taken when no paving is reachable, and then the flattest grounded spot wins.
+   *
+   * Two budgets keep the ray count sane: the cheap analytic ground (`groundInfoAt`, no ray) picks
+   * the candidates worth raycasting first, and the ray total is capped per cart. The cap is on RAYS
+   * actually cast, not candidates visited, so the cheap rejections cannot starve the search.
+   *
+   * Returns a stance, not a correction: the caller builds the prop there, so the audit entry, the
+   * collider and the mesh all describe the same place.
+   */
+  private wideStance(x: number, z: number, yaw: number, contacts: GroundContact[], kerb?: KerbFrame) {
+    const spreadOf = (g: number[]) => Math.max(...g) - Math.min(...g);
+    // a stance is only a stance when the built surface under each contact is the surface
+    // `groundHeightAt` describes. On the verge that is not free: the plate is 26 cm high and
+    // `groundHeightAt` carries a 1.2 m margin past its edge, so a cart can stand on the ground
+    // beside a slab and read "on the pavement" analytically. Level, but in the gutter.
+    const agrees = (built: number, px: number, pz: number) => Math.abs(built - this.groundHeightAt(px, pz)) <= 0.08;
+
+    type Cand = { x: number; z: number; inset: number };
+    type Scored = Cand & { rank: number; spread: number; grounded: boolean };
+    // The kerb band is a narrow corridor, not a disc: the tyre has 0.5 m of legal kerb and the slot
+    // already sits in the middle of it. So the search walks ALONG the kerb first (the paving is
+    // rarely one plane for 6 m, and a step or a collider at the slot is not an argument for parking
+    // mid-slab), staying inside the band across it. Measured on load 3 of the verification: the
+    // disc-only search had to leave the band by 0.9 m on one layout of three (t_6cd9aa18).
+    const corridorCands: Cand[] = [{ x, z, inset: 0 }];
+    const ringCands: Cand[] = [];
+    if (kerb) {
+      const tx = kerb.nz;            // the kerb's own direction, i.e. the corridor
+      const tz = -kerb.nx;
+      for (const along of [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.8, -1.8, 2.4, -2.4, 3.0, -3.0]) {
+        for (const d of [0, -0.2, 0.2]) {
+          if (along === 0 && d === 0) continue;
+          corridorCands.push({ x: x + tx * along + kerb.nx * d, z: z + tz * along + kerb.nz * d, inset: Math.abs(along) + Math.abs(d) });
+        }
+      }
+    }
+    // then a ring walk out to 2.4 m, for a layout where the paving is cut at the slot altogether
+    for (const r of [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4]) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        ringCands.push({ x: x + Math.cos(a) * r, z: z + Math.sin(a) * r, inset: r });
+      }
+    }
+
+    const pick: { best: Scored | null; rays: number } = { best: null, rays: 0 };
+
+    /** score one candidate; true when it is the stance the rank wants and the search can stop */
+    const evaluate = (c: Cand, budget: number): boolean => {
+      if (pick.rays >= budget) return false;
+      // the collider test has to run on the stance the prop actually takes: the slot was clear when
+      // snapToVerge picked it, but the search can walk the prop a couple of metres off that slot.
+      // Same 1.2 m clearance the slot itself was chosen with, so the whole rank obeys one rule.
+      if (!this.slotFree(c.x, c.z) || isWater(c.x, c.z)) return false;
+      const pts = contacts.map((k) => this.contactWorld(c.x, c.z, yaw, k));
+      const ground: { y: number; mesh: string }[] = [];
+      for (const p of pts) {
+        const s = this.contactSurface(p.x, p.z);
+        if (!s) return false;
+        ground.push(s);
+      }
+      pick.rays += pts.length;
+      const spread = spreadOf(ground.map((g) => g.y));
+      const kinds = pts.map((p) => this.groundInfoAt(p.x, p.z).kind);
+      // paving, on both measures: the surface `groundInfoAt` draws there, and the mesh the contact
+      // ray actually hit. One of them alone is enough to seat a cart in the gutter (t_6cd9aa18).
+      const paved = ground.every((g, k) => PAVED_MESHES.has(g.mesh) && PAVED_KINDS.has(kinds[k]));
+      const grounded = ground.every((g, k) => agrees(g.y, pts[k].x, pts[k].z));
+      const tyres = contacts.map((k, i) => (k.tyre ? pts[i] : null)).filter((p): p is { x: number; z: number } => p !== null);
+      // The band is judged against the nearest kerb line of ANY carriageway, not only the road the
+      // slot was inset along: at a junction the crossing street's kerb is closer than the frame's.
+      // TWO numbers come out of that measurement - nothing may stand inside a carriageway's corridor
+      // (gap < 0.2 means over the asphalt or on the kerb cap), and the outermost tyre has to be
+      // within 0.7 m of the nearest kerb to read as a cart parked at the kerb.
+      const gaps = pts.map((p) => this.kerbGapAny(p.x, p.z));
+      const outsideKerb = gaps.every((g) => g >= CART_KERB_MIN);
+      const atKerb = Math.min(...tyres.map((p) => this.kerbGapAny(p.x, p.z))) <= CART_KERB_MAX;
+      const inBand = !kerb || tyres.length === 0 ? true : outsideKerb && atKerb;
+      const safe = !kerb || gaps.every((g) => g >= 0);
+      // a cart on the asphalt is worse than a cart in the gutter: the carriageway is the one place
+      // a street prop may never stand, so a level pose on it loses to everything else
+      const onCarriageway = ground.some((g, k) => kinds[k] === 'road' || String(g.mesh).startsWith('road'));
+      // Paving beats the verge, and once the cart is on paving the KERB BAND outranks levelness: a
+      // paved stance 4 cm out of level can be tilted onto its contacts (standOnContacts solves two
+      // tilts, capped at 11.5 deg), while a stance 0.6 m further from the kerb cannot be untilted
+      // into reading as a kerbside cart. Ranking levelness first put three carts of six back within
+      // 0.09 m of the crossing kerb, which is the defect this card is fixing (t_6cd9aa18).
+      let rank: number;
+      if (onCarriageway) rank = 9;
+      else if (paved && inBand && spread <= 0.03) rank = 0;
+      else if (paved && inBand && spread <= SEATABLE) rank = 1;
+      else if (paved && safe && spread <= 0.03) rank = 2;
+      else if (paved && safe && spread <= SEATABLE) rank = 3;
+      else if (paved && spread <= 0.03) rank = 4;
+      else if (paved && spread <= SEATABLE) rank = 5;
+      else if (spread <= 0.03) rank = 6;
+      else if (spread <= SEATABLE) rank = 7;
+      else rank = 8;
+      const b = pick.best;
+      const better =
+        !b ||
+        rank < b.rank ||
+        (rank === b.rank &&
+          (grounded !== b.grounded
+            ? grounded
+            : spread < b.spread - 1e-4 ||
+              (spread <= b.spread + 1e-4 && Math.abs(c.inset) < Math.abs(b.inset) - 1e-4)));
+      if (better) pick.best = { ...c, rank, spread, grounded };
+      return rank === 0;
+    };
+
+    // pass 1: the corridor, in the order the rank wants it (the slot first, then further along the
+    // kerb). It costs no ray, and it is what lets a paved stance 2.4 m away beat a level one on the
+    // verge.
+    const onBand = (c: Cand) => contacts.every((k) => {
+      const p = this.contactWorld(c.x, c.z, yaw, k);
+      return this.onPaving(p.x, p.z);
+    });
+    for (const c of corridorCands) {
+      if (!onBand(c)) continue;
+      if (evaluate(c, 320)) break;
+    }
+    // pass 2: no paved stance in the corridor. Walk the disc, so a layout whose paving is cut at the
+    // slot still gets a cart on the street rather than one dropped on the verge.
+    const bestRank = pick.best ? pick.best.rank : Infinity;
+    if (bestRank > 1) {
+      for (const c of ringCands) {
+        if (evaluate(c, 460)) break;
+      }
+      // last: the corridor again without the analytic prefilter, for a plate the analytic ground does
+      // not know about (the mesh name still has to say paving for a paved rank)
+      if ((pick.best ? pick.best.rank : Infinity) > 1) {
+        for (const c of corridorCands) {
+          if (evaluate(c, 620)) break;
+        }
+      }
+    }
+    const best = pick.best;
+    return best ? { x: best.x, z: best.z } : { x, z };
+  }
+
+  /**
+   * Put a wide prop down on its own contact plane.
+   *
+   * Two degrees of freedom are solved, the way `standOjek` solves two for a bike: the mean error
+   * lifts or drops the group, and the slope of the errors across the footprint tilts it, so a cart
+   * on a crossfall or on the southern rise has both tyres and both feet on the ground instead of
+   * one end in the paving. The tilt is the ground's own fall, not a styling choice, and it is
+   * capped: a stance is only accepted when its four contacts already agree within 3 cm, so anything
+   * past the cap is a bad stance rather than a hill.
+   *
+   * `bottom` on the audit entry becomes the LOWEST contact, not the slot sample. That is what lets
+   * `_test.audit()` see a straddling prop: a cart whose far tyre is down on the carriageway reports
+   * 26 cm under the pavement its slot stands on, and the suite fails instead of passing.
+   */
+  private standOnContacts(g: THREE.Object3D, yaw: number, stance: { x: number; z: number }, contacts: GroundContact[]) {
+    g.rotation.order = 'YXZ';
+    g.rotation.set(0, yaw, 0);
+    g.position.set(stance.x, 0, stance.z);
+    g.updateMatrixWorld(true);
+    const local = contacts.map((c) => ({ x: c.x, z: c.z, y: this.contactBottom(g, c.x, c.z, c.r) }));
+    const p = new THREE.Vector3();
+    const MAX_TILT = 0.2;       // 11.5 deg: the steepest grade the southern rise reaches
+    for (let pass = 0; pass < 3; pass++) {
+      g.updateMatrixWorld(true);
+      const err = local.map((c) => {
+        p.set(c.x, c.y, c.z);
+        g.localToWorld(p);
+        // analytic only when nothing is built there at all: no cart is dropped through a hole
+        const ground = this.contactGround(p.x, p.z);
+        return (ground === null ? this.groundHeightAt(p.x, p.z) : ground) - p.y;
+      });
+      const { d, a, b } = fitContactPlane(local.map((c) => c.x), local.map((c) => c.z), err);
+      g.position.y += d;
+      g.rotation.z = clamp(g.rotation.z + a, -MAX_TILT, MAX_TILT);   // about the prop's own x
+      g.rotation.x = clamp(g.rotation.x - b, -MAX_TILT, MAX_TILT);   // about the prop's own z
+    }
+    g.updateMatrixWorld(true);
+    let lowest = Infinity;
+    let lowX = stance.x;
+    let lowZ = stance.z;
+    for (const c of local) {
+      p.set(c.x, c.y, c.z);
+      g.localToWorld(p);
+      if (p.y < lowest) {
+        lowest = p.y;
+        lowX = p.x;
+        lowZ = p.z;
+      }
+    }
+    const last = this.propAudit[this.propAudit.length - 1];
+    if (last) {
+      last.bottom = lowest;
+      last.bx = lowX;
+      last.bz = lowZ;
+    }
+  }
+
+
+  buildStreetLife() {
+    const ctx = { group: this.group, colliders: this.colliders, audit: this.propAudit };
+    let buses = 0;
+
+    for (const poi of POIS) {
+      if (poi.kind !== 'halte') continue;
+      const spot = this.snapToVerge(poi.x, poi.z);
+      if (!spot) continue;
+      const g = buildHalte(ctx, spot.x, spot.z, spot.yaw);
+      this.placeOnGround(g, spot.x, spot.z);
+      // A bus berthed at the first two haltes, so the street shows the busway running.
+      //
+      // Two things were wrong here. The body was rotated and then only given a *height*
+      // (`placeOnGround` writes y and nothing else), so every bus in the city stood at the world
+      // origin while a fixed axis-aligned box was registered 70 m away beside the halte: the body
+      // was walk-through and the busway had a phantom wall in it. And the berth itself was picked
+      // on the wrong side of the shelter, which on this map put 17.9 m of bus inside a shophouse -
+      // a body walking at it was stopped by the building two metres before the bumper.
+      //
+      // So the berth is the carriageway side of the shelter (the direction of the nearest mapped
+      // road), the body is placed there, and the berth is only used if the bus's own footprint is
+      // clear of everything already standing on the ground.
+      if (buses < 2) {
+        const road = this.nearestRoadPoint(spot.x, spot.z);
+        const side = Math.cos(spot.yaw) * (road.x - spot.x) - Math.sin(spot.yaw) * (road.z - spot.z) < 0 ? -1 : 1;
+        const bus = new TransjakartaBus({ simple: false });
+        const { halfWidth, halfLength, height } = bus.footprint;
+        let berth: { x: number; z: number; boxes: FootprintBox[] } | null = null;
+        for (const along of [0, 7, -7, 14, -14]) {
+          const bx = spot.x + Math.cos(spot.yaw) * 3.4 * side + Math.sin(spot.yaw) * along;
+          const bz = spot.z - Math.sin(spot.yaw) * 3.4 * side + Math.cos(spot.yaw) * along;
+          if (!this.onRoad(bx, bz, 8) || isWater(bx, bz)) continue;
+          const boxes = rotatedFootprint(bx, bz, spot.yaw, halfWidth, halfLength, height);
+          const clear = boxes.every((b) => !this.colliders.some((o) =>
+            b.minX < o.maxX + 0.3 && b.maxX > o.minX - 0.3 && b.minZ < o.maxZ + 0.3 && b.maxZ > o.minZ - 0.3));
+          if (!clear) continue;
+          berth = { x: bx, z: bz, boxes };
+          break;
+        }
+        if (!berth) continue;            // no clear berth at this shelter: no bus, not a bus in a wall
+        bus.group.rotation.y = spot.yaw;
+        bus.group.position.set(berth.x, 0, berth.z);
+        this.group.add(bus.group);
+        const audit = { name: 'transjakarta', x: berth.x, z: berth.z, bottom: 0 };
+        this.propAudit.push(audit);
+        this.placeOnGround(bus.group, berth.x, berth.z);
+        for (const b of berth.boxes) this.colliders.push(b);
+        this.buses.push({ group: bus.group, boxes: berth.boxes, halfWidth, halfLength, height, audit });
+        buses++;
+      }
+    }
+
+    const carts: KakiLimaKind[] = ['bakso', 'nasgor', 'sate'];
+    let placedCarts = 0;
+    for (const poi of POIS) {
+      if (poi.kind !== 'kaki5') continue;
+      for (let i = 0; i < 3 && placedCarts < 6; i++) {
+        // The rank parks AT the kerb, not in the middle of the walk: `CART_KERB_INSET` pulls the
+        // slot 2.45 m toward the roadway. A slot with no paving under it is not a kerbside slot at
+        // all - the Kemang cart used to stand on the bare verge 4 m past the back edge of the slab
+        // (t_6cd9aa18) - so the accept test asks for paving and lets `snapToVerge` walk down the
+        // kerb to a door that still has a walk in front of it. If no inset finds paving at all the
+        // cart is dropped rather than put in the road: a rank of five on the walk is the honest
+        // outcome of a kerb with no walk on it.
+        const px = poi.x + (i - 1) * 9;
+        const pz = poi.z + (i - 1) * 4;
+        // the slot is only accepted where BOTH hold: `groundInfoAt` draws a walk there, and the
+        // slot is at the distance that puts the outer tyre inside the 0.2-0.7 m band. The second
+        // test matters because the walk along the kerb can carry the slot round a fork where two
+        // arterials' kerb lines are 0.5 m apart, and a slot 1.5 m out parks the cart mid-slab
+        // again. A paving slot outside the band is the fallback, one inset step at a time.
+        const accept = (p: { x: number; z: number }) => {
+          const gap = this.kerbGapAny(p.x, p.z);
+          return this.onPaving(p.x, p.z) && gap >= CART_KERB_MIN + CART_TRACK_HALF && gap <= CART_KERB_MAX + CART_TRACK_HALF;
+        };
+        const acceptPaved = (p: { x: number; z: number }) => this.onPaving(p.x, p.z);
+        let spot = this.snapToVerge(px, pz, CART_KERB_INSET, accept);
+        for (let k = 1; !spot && k < 4; k++) spot = this.snapToVerge(px, pz, CART_KERB_INSET - k * 0.4, acceptPaved);
+        if (!spot) spot = this.snapToVerge(px, pz, CART_KERB_INSET, acceptPaved);
+        if (!spot) continue;
+        const yaw = spot.yaw + Math.PI / 2;
+        // a cart is 1.0 m across its tyres and stands broadside, so it is built on a stance where
+        // all four contacts are on one surface, searched along the kerb normal as well as around
+        // the slot, and where the outer tyre is 0.2-0.7 m off the kerb line
+        const stance = this.wideStance(spot.x, spot.z, yaw, CART_CONTACTS, spot.kerb);
+        const g = buildKakiLima(ctx, carts[placedCarts % carts.length], stance.x, stance.z, yaw);
+        this.standOnContacts(g, yaw, stance, CART_CONTACTS);
+        placedCarts++;
+      }
+    }
+
+    // the two institutions: a nutrition kitchen by the Blok M terminal, a koperasi in Kemang
+    const blokM = POIS.find((p) => p.name.startsWith('Terminal Blok M'));
+    if (blokM) {
+      const spot = this.snapToVerge(blokM.x, blokM.z + 26);
+      if (spot) {
+        // the kitchen stands 4 m off its slot, so it has to be seated on the ground under that
+        // spot: sampling at the slot left a 26 cm gap to the pavement it actually stands on
+        const g = buildSppg(ctx, spot.x + 4, spot.z, spot.yaw);
+        this.placeOnGround(g, spot.x + 4, spot.z);
+      }
+    }
+    // One minimarket on a fixed, verifiable site: 22 m up the spawn street, facing back at the
+    // player. Automatic placement put this asset in the wrong place five times, so the first one
+    // is placed by hand and photographed before anything else uses snapToVerge.
+    const sp = this.getSpawn();
+    const mmSpot = this.pushOffRoad(sp.x, sp.z + 22, 3.6 + 5.5);
+    const mg = buildMinimarket(ctx, mmSpot.x, mmSpot.z, Math.PI, 'INDOMERET');
+    this.placeOnGround(mg, mmSpot.x, mmSpot.z);
+    // police post beside the minimarket, on the first slot that clears every collider
+    for (const [dx, dz] of [[13, 0], [17, 0], [21, 0], [-13, 0], [-17, 0], [13, 12], [13, -12], [0, 16]]) {
+      const raw = { x: sp.x + dx, z: sp.z + 22 + dz };
+      const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 4);
+      const cx = spot.x, cz = spot.z;
+      if (this.nearLayang(cx, cz, 14)) continue;
+      if (this.colliders.some((c) => cx > c.minX - 8 && cx < c.maxX + 8 && cz > c.minZ - 8 && cz < c.maxZ + 8)) continue;
+      const pg = buildPosPolisi(ctx, cx, cz, 0);
+      this.placeOnGround(pg, cx, cz);
+      break;
+    }
+    // pos ronda: small, repeated three times, on the first clear verge slots found
+    {
+      let placed = 0;
+      for (const r of [18, 26, 34, 44, 56, 70, 86, 104]) {
+        for (let a = 0; a < 12 && placed < 3; a++) {
+          const t = (a / 12) * Math.PI * 2 + placed;
+          const raw = { x: sp.x + Math.cos(t) * r, z: sp.z + 22 + Math.sin(t) * r };
+          const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 5);
+          const cx = spot.x, cz = spot.z;
+          if (this.nearLayang(cx, cz, 8)) continue;
+          if (this.colliders.some((c) => cx > c.minX - 5 && cx < c.maxX + 5 && cz > c.minZ - 5 && cz < c.maxZ + 5)) continue;
+          const yaw = Math.atan2(sp.x - cx, sp.z - cz);
+          // the hut is a level platform on a flat plate, so a slot that straddles the plate edge
+          // or a grade leaves one side of it on air: that is the owner's "pos ronda miring"
+          const cs = Math.cos(yaw), sn = Math.sin(yaw);
+          const gy = [[-2.3, -1.6], [2.3, -1.6], [-2.3, 1.6], [2.3, 1.6]]
+            .map(([lx, lz]) => this.groundHeightAt(cx + lx * cs + lz * sn, cz - lx * sn + lz * cs));
+          if (Math.max(...gy) - Math.min(...gy) > 0.06) continue;
+          const rg = buildRonda(ctx, cx, cz, yaw);
+          this.placeOnGround(rg, cx, cz);
+          placed++;
+        }
+        if (placed >= 3) break;
+      }
+    }
+
+    // pasar daerah, on a wide clear lot a little further out than the mosque
+    for (const r of [46, 58, 72, 88, 104, 120]) {
+      let placed = false;
+      for (let a = 0; a < 18; a++) {
+        const t = (a / 18) * Math.PI * 2;
+        const raw = { x: sp.x + Math.cos(t) * r, z: sp.z + 22 + Math.sin(t) * r };
+      const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 10);
+      const cx = spot.x, cz = spot.z;
+        if (this.nearLayang(cx, cz, 26)) continue;
+        if (this.mrtSpine.some((pt) => Math.hypot(pt[0] - cx, pt[1] - cz) < 30)) continue;
+        // it is 28 x 20 m: it needs more room than the shops
+        if (this.colliders.some((c) => cx > c.minX - 17 && cx < c.maxX + 17 && cz > c.minZ - 17 && cz < c.maxZ + 17)) continue;
+        const pg = buildPasar(ctx, cx, cz, Math.atan2(sp.x - cx, sp.z - cz));
+        this.placeOnGround(pg, cx, cz);
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+
+    // terminal bus: 48 x 32 m of apron, canopy and bays needs a lot nothing else wants. The two
+    // elevated spines are only assigned by buildLayangRoad/buildMrt, which run *after* this pass,
+    // so clearance is measured against the same map paths those builders use -- nearLayang() and
+    // mrtSpine[] are still empty here and would pass every candidate (a check that cannot fail is
+    // not a clearance). 26 m from the layang deck, 30 m from the metro guideway, 3 m from every
+    // collider, and the exact footprint must clear every building rectangle.
+    //
+    // Two owner reports reshaped this pass (t_accfc928): "terminal blok m masih di tengah jalan",
+    // although the *centre* was 5 m clear of the kerb, and "terminal blok m miring", because a
+    // level slab was seated from one sample on ground that fell half a metre across its span. So
+    // the site is chosen by tests the old pass did not have:
+    //   - the whole footprint is pushed off every carriageway with pushOffRoad(), then measured
+    //     against every road as a rectangle rather than as a point,
+    //   - the terminal faces the street it belongs to, so its long side runs parallel to that
+    //     street and the apron stops at the kerb instead of poking a corner across it,
+    //   - the collider test is the apron plus a kerb (it used to be a 17 m ring around the
+    //     centre, which forbade neighbours on the long axis and allowed one inside the slab),
+    //   - the ground under the footprint has to be near-level, because the apron is one level
+    //     slab, and the flattest site wins rather than the first one found.
+    {
+      const tollPath = ARTERIALS[0].path as [number, number][];
+      const metroPath = ARTERIALS[1].path as [number, number][];
+      const metroOffset = (ARTERIALS[1].width ?? 20) / 2 + 5.5;   // guideway runs beside the artery
+      const TW = 48, TD = 32;
+      const APRON_CLEAR = 4.0;      // metres of forecourt between the apron edge and any lane
+      let best: { x: number; z: number; yaw: number; spread: number; foot: { minX: number; maxX: number; minZ: number; maxZ: number } } | null = null;
+      for (const r of [58, 72, 88, 106, 124, 144, 168, 196, 228]) {
+        for (let a = 0; a < 36 && !(best && best.spread <= 0.02); a++) {
+          const t = (a / 36) * Math.PI * 2 + 0.13;
+          const raw = { x: sp.x + Math.cos(t) * r, z: sp.z + 22 + Math.sin(t) * r };
+          // pushOffRoad() moves a *point* out of the carriageways; the apron needs its own
+          // half-depth on top of that, or the slab the owner sees still hangs over a lane
+          const spot = this.pushOffRoad(raw.x, raw.z, TD / 2 + APRON_CLEAR);
+          const cx = spot.x, cz = spot.z;
+          if (this.distToPath(cx, cz, tollPath) < 26) continue;
+          if (this.distToPath(cx, cz, metroPath) < 30 + metroOffset) continue;
+          if (isWater(cx, cz)) continue;
+          // The terminal faces the street it belongs to, not the spawn: local +Z is the apron
+          // side, so the yaw comes from the kerb normal. That is also the only way a 48 m slab
+          // keeps a kerb's clearance inside a 112 m block grid, because then the apron's long
+          // side runs parallel to the road and its whole 48 x 32 rectangle projects inside the
+          // near kerb instead of poking a corner across it.
+          const kerb = this.nearestRoad(cx, cz);
+          if (!kerb) continue;
+          const yaw = Math.atan2((cx - kerb.px) / (kerb.dist || 1), (cz - kerb.pz) / (kerb.dist || 1));
+          if (this.apronClearance(cx, cz, yaw, TW, TD) < APRON_CLEAR) continue;
+          const halfX = Math.abs(Math.cos(yaw)) * (TW / 2) + Math.abs(Math.sin(yaw)) * (TD / 2);
+          const halfZ = Math.abs(Math.sin(yaw)) * (TW / 2) + Math.abs(Math.cos(yaw)) * (TD / 2);
+          const foot = { minX: cx - halfX, maxX: cx + halfX, minZ: cz - halfZ, maxZ: cz + halfZ };
+          // The collider test used to be a 17 m ring around the centre, which both forbade a
+          // neighbour 40 m out on the apron's long axis and allowed one inside it on the short
+          // axis. The apron is what must stay clear, so the test is the footprint plus a kerb.
+          if (this.colliders.some((c) => foot.minX - 3 < c.maxX && foot.maxX + 3 > c.minX && foot.minZ - 3 < c.maxZ && foot.maxZ + 3 > c.minZ)) continue;
+          if (this.footprints.some((f) => foot.minX < f.maxX && foot.maxX > f.minX && foot.minZ < f.maxZ && foot.maxZ > f.minZ)) continue;
+          // the block-edge tree pass ran before this one, so trunks already stand on most verges.
+          // A tree in the middle of the apron is the one thing a reserved lot cannot have.
+          if (this.treeTrunks.some((m: THREE.Matrix4) => {
+            const tx = m.elements[12], tz = m.elements[14];
+            return tx > foot.minX && tx < foot.maxX && tz > foot.minZ && tz < foot.maxZ;
+          })) continue;
+          // the entrance must not run through a shophouse: the driveway is sampled the way
+          // buildTerminalAccess() will draw it, and a blocked approach rejects the site
+          if (this.accessBlocked(cx, cz, yaw)) continue;
+          const { spread, rise } = this.footprintSpread(foot);
+          // a graded site is only taken when nothing flatter exists: the apron skirt is 0.8 m
+          // deep, so 0.3 m of fall is still hidden, but ground rising past the slab's own
+          // thickness would stand through the concrete, and that is the "miring" report
+          if (spread > 0.3 || rise > TERMINAL_DIMENSIONS.apron - 0.07) continue;
+          if (!best || spread < best.spread) best = { x: cx, z: cz, yaw, spread, foot };
+        }
+      }
+      if (best) {
+        const tg = buildTerminal(ctx, best.x, best.z, best.yaw);
+        this.placeOnGround(tg, best.x, best.z);
+        // reserve the lot, so nothing built later can stand on the apron
+        this.footprints.push(best.foot);
+        // an apron that clears every carriageway is an island without this
+        this.buildTerminalAccess(best.x, best.z, best.yaw);
+      }
+    }
+
+    // masjid kampung, on the widest clear slot near the spawn
+    for (const r of [30, 40, 52, 64, 78, 92]) {
+      let placed = false;
+      for (let a = 0; a < 16; a++) {
+        const t = (a / 16) * Math.PI * 2;
+        const raw = { x: sp.x + Math.cos(t) * r, z: sp.z + 22 + Math.sin(t) * r };
+        const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 8);
+        const cx = spot.x, cz = spot.z;
+        if (this.nearLayang(cx, cz, 24)) continue;
+        if (this.mrtSpine.some((pt) => Math.hypot(pt[0] - cx, pt[1] - cz) < 26)) continue;
+        if (this.colliders.some((c) => cx > c.minX - 11 && cx < c.maxX + 11 && cz > c.minZ - 11 && cz < c.maxZ + 11)) continue;
+        const mg = buildMasjid(ctx, cx, cz, Math.atan2(sp.x - cx, sp.z - cz));
+        this.placeOnGround(mg, cx, cz);
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+
+    // rumah makan Padang, same street, first slot that clears every collider
+    const ring: [number, number][] = [];
+    for (const r of [26, 34, 42, 50, 60, 72]) {
+      for (let a = 0; a < 12; a++) {
+        const t = (a / 12) * Math.PI * 2;
+        ring.push([Math.round(Math.cos(t) * r), Math.round(Math.sin(t) * r)]);
+      }
+    }
+    for (const [dx, dz] of ring) {
+      const raw = { x: sp.x + dx, z: sp.z + 22 + dz };
+
+      const spot = this.pushOffRoad(raw.x, raw.z, 3.6 + 11);
+
+      const cx = spot.x, cz = spot.z;
+      if (this.nearLayang(cx, cz, 16)) continue;
+      if (this.colliders.some((c) => cx > c.minX - 9 && cx < c.maxX + 9 && cz > c.minZ - 9 && cz < c.maxZ + 9)) continue;
+      const rg = buildRumahPadang(ctx, cx, cz, 0);
+      this.placeOnGround(rg, cx, cz);
+      break;
+    }
+
+    const kemang = POIS.find((p) => p.kind === 'minimarket');
+    if (kemang) {
+      const spot = this.snapToVerge(kemang.x, kemang.z + 18);
+      if (spot) {
+        const g = buildKoperasi(ctx, spot.x, spot.z, spot.yaw);
+        this.placeOnGround(g, spot.x, spot.z);
+      }
+    }
+  }
+
+
+  /**
+   * Jakarta's elevated toll: a deck running beside Thamrin on its own piers, so the skyline has a
+   * second road level. Piers stand on the block edge, never in a traffic lane.
+   */
+  /** the deck the layang was built on, so a shop never ends up underneath it */
+  layangSpine: [number, number][] = [];
+
+  /** the terminal's access run, so a test can prove the apron is not an island (t_accfc928) */
+  terminalAccess: { path: [number, number][]; width: number } | null = null;
+
+  /** facade materials shared by colour, style and repeat, so their geometry can be merged */
+  buildingMatCache = new Map<string, THREE.MeshStandardMaterial>();
+
+  /** geometry waiting to be merged, bucketed per block group and material */
+  buildingBuckets = new Map<THREE.Group, Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>>();
+
+  /** every building footprint already placed, so two of them can never occupy the same ground */
+  footprints: { minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
+
+  /**
+   * Facade detail (ledges, rails, shutters, awnings, signs, painted walls) grouped by material key.
+   * One merge per key at the end of generation, so six archetypes of detail cost a handful of draw
+   * calls for the whole city instead of a handful per building.
+   */
+  facadeDetailBuckets = new Map<THREE.Group, Map<string, THREE.BufferGeometry[]>>();
+
+  /**
+   * What was actually built, so the proof harness can count distinct types in one frame instead of
+   * trusting that the palette varied. Written by addFacade, read by tools/shoot-facades.mjs.
+   *
+   * `retail` is the archetype's own contract (its ground floor is a shop) and `shop` records that
+   * this lot actually got one: a named plate, a door and a room. The census in
+   * tools/probe-shop-boards.mjs reads both, so "a shopfront with no door" is a countable defect.
+   */
+  facadeAudit: { archetype: string; source: 'block' | 'frontage'; x: number; y: number; z: number; yaw: number; w: number; d: number; h: number; wall: number; trim: number; retail: boolean; shop: boolean }[] = [];
+
+  /** per-block / per-row archetype pickers, so a run of lots never repeats one type */
+  facadeMixers = new Map<string, ArchetypeMixer>();
+
+
+  /**
+   * true when (x, z) lies within `margin` metres of the *edge* of any arterial or the ring.
+   *
+   * The margin is what makes a pavement possible. A building needs road half-width + 3.6 m of
+   * trotoar + ~2 m of setback, and the first version only asked for half the building's own
+   * width, which put frontage 0.5 m from the kerb and left the sidewalk ribbon nowhere to go --
+   * the reason a street and its pavement looked like one flat surface.
+   */
+  onRoad(x: number, z: number, margin: number): boolean {
+    const roads: { path: [number, number][]; half: number }[] = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], half: a.width / 2 })),
+      { path: RING_ROAD, half: 10 },
+    ];
+    for (const { path, half } of roads) {
+      const pad = half + margin;
+      for (let i = 1; i < path.length; i++) {
+        const [x1, z1] = path[i - 1];
+        const [x2, z2] = path[i];
+        const dx = x2 - x1, dz = z2 - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+        t = Math.max(0, Math.min(1, t));
+        if (Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)) < pad) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The nearest point on the mapped carriageway, and how far away it is.
+   *
+   * `onRoad` only answers yes/no with a margin; a vehicle that has to be berthed on the asphalt
+   * side of a kerbside shelter needs the direction of the road, not just membership.
+   */
+  nearestRoadPoint(x: number, z: number): { x: number; z: number; dist: number } {
+    const roads: { path: [number, number][] }[] = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][] })),
+      { path: RING_ROAD },
+    ];
+    let best = { x, z, dist: Infinity };
+    for (const { path } of roads) {
+      for (let i = 1; i < path.length; i++) {
+        const [x1, z1] = path[i - 1];
+        const [x2, z2] = path[i];
+        const dx = x2 - x1;
+        const dz = z2 - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        const t = clamp(((x - x1) * dx + (z - z1) * dz) / len2, 0, 1);
+        const px = x1 + dx * t;
+        const pz = z1 + dz * t;
+        const d = Math.hypot(x - px, z - pz);
+        if (d < best.dist) best = { x: px, z: pz, dist: d };
+      }
+    }
+    return best;
+  }
+
+  /** true when (x, z) is within `pad` metres of the elevated deck's centreline */
+  nearLayang(x: number, z: number, pad: number): boolean {
+    for (let i = 1; i < this.layangSpine.length; i++) {
+      const [x1, z1] = this.layangSpine[i - 1];
+      const [x2, z2] = this.layangSpine[i];
+      const dx = x2 - x1, dz = z2 - z1;
+      const len2 = dx * dx + dz * dz || 1;
+      let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      if (Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)) < pad) return true;
+    }
+    return false;
+  }
+
+  buildLayangRoad() {
+    const spine = ARTERIALS[0].path as [number, number][];
+    this.layangSpine = spine;
+    // over the artery itself, which is where a Jakarta layang actually runs
+    const shifted = spine;
+    buildLayang(
+      {
+        group: this.group,
+        colliders: this.colliders,
+        audit: this.propAudit,
+        groundHeightAt: (x, z) => this.groundHeightAt(x, z),
+      },
+      shifted,
+      { deckY: 13.2, width: 16.5, pierEvery: 28 }
+    );
+  }
+
+
+  /**
+   * The MRT: the third elevated structure in the city, and the one that reads as modern —
+   * narrower guideway, slimmer piers, glass stations instead of concrete.
+   */
+  buildMrt() {
+    const spine = ARTERIALS[1]?.path as [number, number][] | undefined;
+    if (!spine || spine.length < 2) return;
+    // Run the line beside the artery, not over it: the toll already owns the centre, and a
+    // guideway dropped straight onto the artery centreline puts its piers in the traffic lanes.
+    const shifted: [number, number][] = spine.map(([x, z], i) => {
+      const [ax, az] = spine[Math.max(0, i - 1)];
+      const [bx, bz] = spine[Math.min(spine.length - 1, i + 1)];
+      const dx = bx - ax, dz = bz - az;
+      const len = Math.hypot(dx, dz) || 1;
+      // Over the pavement, not 24 m inside the blocks: an elevated metro in Jakarta runs above
+      // the verge at the road edge, and that is also the only place its piers and its stairs
+      // can stand without a building underneath.
+      const off = (ARTERIALS[1].width ?? 20) / 2 + 5.5;
+      return [x + (dz / len) * off, z - (dx / len) * off] as [number, number];
+    });
+    buildMrtLine(
+      {
+        group: this.group,
+        colliders: this.colliders,
+        audit: this.propAudit,
+        groundHeightAt: (x, z) => this.groundHeightAt(x, z),
+      },
+      shifted
+    );
+    this.mrtSpine = shifted;
+    // A station belongs on its own guideway, so it is not displaced for clearance: the first
+    // version asked for 20 m of empty ground beside a line whose own piers are colliders, and
+    // every candidate was rejected, which is why the MRT line had no station at all.
+    // A station is only usable if you can walk to it. Pick the point on the line nearest the
+    // spawn *whose stair foot is clear*, rather than the nearest point full stop -- the first
+    // version put the hall and its stairs inside a block and it was invisible from the street.
+    const sp = this.getSpawn();
+    const stairClear = (x: number, z: number) =>
+      this.colliders.every((c) => x < c.minX - 6 || x > c.maxX + 6 || z + 20 < c.minZ - 6 || z + 26 > c.maxZ + 6);
+    // and it must not stand in a carriageway: the line runs 5.5 m past the arterial edge, which at
+    // a crossing with another arterial puts the hall in its inside lane (the placement audit found
+    // it 1 m into Grogol-Pluit on a third of the random loads)
+    const candidates = shifted.filter((pt) => stairClear(pt[0], pt[1]) && !this.onAnyRoad(pt[0], pt[1], 1.5));
+    let mid = shifted[0], bestD = Infinity;
+    for (const pt of candidates.length ? candidates : shifted) {
+      const d = Math.hypot(pt[0] - sp.x, pt[1] - sp.z);
+      if (d < bestD) { bestD = d; mid = pt; }
+    }
+    const sg = buildMrtStation(
+      { group: this.group, colliders: this.colliders, audit: this.propAudit, groundHeightAt: (x, z) => this.groundHeightAt(x, z) },
+      mid[0], mid[1], 0
+    );
+    // the station was built against y = 0 while the ground under it sits 1.2 m lower, so the
+    // stair landing hung in the air until the audit caught it
+    this.placeOnGround(sg, mid[0], mid[1]);
+  }
+
+  /** the MRT line this city built, so nothing else is placed underneath it */
+  mrtSpine: [number, number][] = [];
+
+  /**
+   * The commuter line: a viaduct crossing the city east to west, above the rooftops, with one
+   * station where the deck meets the kampung. This is the structure that makes the skyline read
+   * as Jakarta rather than as a set of boxes.
+   */
+  buildKrlLine() {
+    const z = -300;
+    const path: [number, number][] = [];
+    for (let x = -820; x <= 820; x += 105) path.push([x, z + Math.sin(x / 260) * 26]);
+    buildKrl(
+      {
+        group: this.group,
+        colliders: this.colliders,
+        audit: this.propAudit,
+        groundHeightAt: (x, zz) => this.groundHeightAt(x, zz),
+      },
+      path,
+      { y: 12.5, station: true, stationName: 'STASIUN MANGGIS' }
+    );
+  }
+
+  buildOjekBases() {
+    if (!this.ojeks) this.ojeks = [];
+    // the built-street rays below read matrixWorld, and nothing has been rendered yet
+    this.group.updateMatrixWorld(true);
+    let placed = 0;
+    for (const poi of POIS) {
+      if (poi.kind !== 'kaki5' && poi.kind !== 'terminal') continue;
+      if (placed >= 3) break;
+      placed++;
+      for (let i = 0; i < 2; i++) {
+        const yawOf = (spotYaw: number) => spotYaw + Math.PI / 2 + i * 0.1;
+        // A bike stands on ONE plane or it stands on neither: both tyres have to read the same
+        // drawn surface, which is what the slot predicate below tests.
+        const onOneSurface = (p: { x: number; z: number; yaw: number }) =>
+          this.ojekContact(p.x, p.z, yawOf(p.yaw)) !== null;
+        // The rank is pulled 1.1 m toward the kerb: the generic kerbside slot sits 0.3 m from the
+        // BACK edge of the 3.6 m trotoar, so the 1.86 m nose-in machine always had one tyre over
+        // the edge, 0.2 m above the crossing road. The inset is applied inside snapToVerge so the
+        // kerbside-collider test runs on the spot the bike actually takes.
+        const spot =
+          this.snapToVerge(poi.x + i * 3.2 - 1.6, poi.z + 6, OJEK_KERB_INSET, onOneSurface) ??
+          // no patch of paving here is one plane under the whole machine (a crossing mouth, a
+          // driveway cut, a kerb return): draw the rank up on the carriageway instead, where the
+          // asphalt is continuous, rather than drop a bike or straddle the kerb
+          this.snapToVerge(poi.x + i * 3.2 - 1.6, poi.z + 6, OJEK_ROAD_INSET, onOneSurface);
+        if (!spot) continue;
+        const yaw = yawOf(spot.yaw);
+        const contact = this.ojekContact(spot.x, spot.z, yaw);
+        if (!contact) continue;
+        const bike = new Ojek({ color: i === 0 ? 0xc0392b : 0x1f6f4a });
+        // The bike has to stand at its slot. placeOnGround only sets the height, so a group left
+        // at x=0/z=0 parked every ojek in the middle of the map: six slots audited as "on the
+        // ground" while the meshes were somewhere nobody could ever see them.
+        bike.group.name = `ojek-${this.ojeks.length}`;
+        this.group.add(bike.group);
+        this.standOjek(bike, spot, contact, yaw);
+        this.ojeks.push({ group: bike.group, x: spot.x, z: spot.z, yaw, box: bike.cargoBoxBounds });
+        // the audit row is the SLOT sample, not the tyre contact: it compares every prop against
+        // the analytic ground (a 0.06 m band), while the tyres are seated on the drawn slab, and
+        // on a grade the swept slab and `groundHeightAt` legitimately differ by more than that.
+        // Tyre contact is proved by tools/shoot-ojek-fix.mjs, not by this row.
+        this.propAudit.push({ name: 'ojek', x: spot.x, z: spot.z, bottom: this.groundHeightAt(spot.x, spot.z) });
+        this.colliders.push({ minX: spot.x - 0.55, maxX: spot.x + 0.55, minZ: spot.z - 1.1, maxZ: spot.z + 1.1, h: 1.6 });
+      }
+    }
+  }
+
+  /**
+   * Seat a bike on the plane both its tyres stand on.
+   *
+   * `placeOnGround` seats a prop from a single sample at its audit slot and assumes the group
+   * origin is the contact plane; an ojek's origin is `contactY` above its tread, and the trotoar
+   * follows the terrain grade, so the two axles sit at slightly different heights. The contact is
+   * solved against the measured tread rather than a formula: each wheel's own bounding box is read
+   * back, the gap to the surface under its axle is measured, and position plus pitch are corrected
+   * until both treads are down. The pitch is about the bike's lateral axis because the Euler order
+   * is YXZ (yaw first, then lean in the machine's own frame).
+   */
+  private standOjek(
+    bike: Ojek,
+    spot: { x: number; z: number },
+    contact: { gF: number; gR: number },
+    yaw: number
+  ) {
+    bike.group.rotation.order = 'YXZ';
+    bike.group.rotation.y = yaw;
+    bike.group.rotation.x = 0;
+    bike.group.position.set(spot.x, (contact.gF + contact.gR) / 2 - bike.contactY, spot.z);
+    const [frontPivot, rearPivot] = bike.wheels;
+    const span = frontPivot.pivot.position.z - rearPivot.pivot.position.z || 1;
+    for (let pass = 0; pass < 4; pass++) {
+      bike.group.updateMatrixWorld(true);
+      const tread = bike.wheels.map((w) => new THREE.Box3().setFromObject(w.pivot).min.y);
+      const err = [contact.gF - tread[0], contact.gR - tread[1]];
+      bike.group.position.y += (err[0] + err[1]) / 2;
+      bike.group.rotation.x += -(err[0] - err[1]) / span;
+    }
+    bike.group.updateMatrixWorld(true);
+  }
+
+  /**
+   * The plane the bike would stand on at this stance, or null when its tyres would straddle an edge.
+   *
+   * Each tyre is measured separately against the drawn street (`builtGround`), because a rigid prop
+   * gets one pitch and the kerb is only 0.26 m high. A bike on a slope is pitched to the grade, so
+   * a height difference alone is not a defect; a STEP is. The midpoint tells the two apart: on a
+   * slope the ground under the middle of the machine sits between the axles' heights, while across
+   * an edge it sits on one of them.
+   */
+  private ojekContact(x: number, z: number, yaw: number): { gF: number; gR: number } | null {
+    const s = Math.sin(yaw);
+    const c = Math.cos(yaw);
+    const at = (k: number) => this.builtGround(x + s * k, z + c * k);
+    const gF = at(OJEK_FRONT);
+    const gR = at(OJEK_REAR);
+    const gM = at((OJEK_FRONT + OJEK_REAR) / 2);
+    if (gF === null || gR === null || gM === null) return null;
+    if (Math.abs(gM - (gF + gR) / 2) > 0.02) return null;
+    // no street here is steeper than ~25% over 1.27 m; more than that is an edge, not a grade
+    if (Math.abs(gF - gR) > 0.35) return null;
+    return { gF, gR };
+  }
+
+  /**
+   * The topmost drawn surface under (x, z), or null when there is none.
+   *
+   * This is what a player sees a tyre rest on, and the same thing the contact harness measures.
+   * `pavementBand` is where paving is PLANNED: at a crossing mouth or a kerb return the analytic
+   * height and the swept slab disagree by up to the kerb height, and a bike seated on the analytic
+   * number floats 20 cm over the drawn street. The ray starts 0.6 m above the analytic ground so a
+   * shop awning, a signboard or a cart deck three metres up cannot be mistaken for the ground.
+   */
+  private builtGround(x: number, z: number): number | null {
+    const near = this.groundHeightAt(x, z);
+    const ray = new THREE.Raycaster(new THREE.Vector3(x, near + 0.6, z), new THREE.Vector3(0, -1, 0), 0, 1.2);
+    const hit = ray.intersectObject(this.group, true)[0];
+    return hit ? hit.point.y : null;
   }
 
   buildDistrictProps() {
@@ -782,86 +2569,1137 @@ export class City {
    * corridor, no landmark footprint. The result is a city that follows the arterials and the
    * ring instead of sitting on a lattice.
    */
+  /**
+   * Candidate block sites on a city-block pitch, jittered a little, then filtered against
+   * water, the road corridors and the landmark footprints. A block is 110-150 m, so the
+   * streets between them are 20-60 m of asphalt and pavement - the width a real Jakarta
+   * block has, not the 30 m road that made the old 380 m city look like a village.
+   */
+  /** Half extent of the built world, so actors clamp to the city and not to a stale constant. */
+  get bound() {
+    return WORLD_HALF;
+  }
+
   planBlockSites() {
+    // Fill each district, not the whole map on one lattice. A global grid leaves holes wherever
+    // a site is rejected (and the player could stand 180 m from the nearest building); tiling
+    // inside the district polygon keeps the street wall continuous.
     const sites: { x: number; z: number; size: number }[] = [];
-    const step = 40;
-    for (let gx = -5; gx <= 5; gx++) {
-      for (let gz = -5; gz <= 5; gz++) {
-        // small jitter only: big jitter plus a spacing rule is what emptied the map
-        const x = gx * step + rand(-3.5, 3.5);
-        const z = gz * step + rand(-3.5, 3.5);
-        if (Math.abs(x) > 186 || Math.abs(z) > 186) continue;
-        if (isWater(x, z)) continue;
+    const PITCH_BLOCK = 90;
+    const SIZE = 64;
+    // Block centres sit on multiples of the pitch, which is where src/world/streets.ts draws the
+    // local streets: halfway between two centres. Offsetting the lattice by the district's own
+    // bounding box (the old code) put streets straight through blocks - 12% of the road samples
+    // ended up under a footprint, and a police route handed such a leg drove into the wall.
+    for (const d of JKT_DISTRICTS) {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const [x, z] of d.poly) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
+      }
+      const firstX = Math.ceil((minX + SIZE / 2) / PITCH_BLOCK) * PITCH_BLOCK;
+      const firstZ = Math.ceil((minZ + SIZE / 2) / PITCH_BLOCK) * PITCH_BLOCK;
+      for (let x = firstX; x <= maxX + SIZE / 2; x += PITCH_BLOCK) {
+        for (let z = firstZ; z <= maxZ + SIZE / 2; z += PITCH_BLOCK) {
+          const jx = x + rand(-3, 3);
+          const jz = z + rand(-3, 3);
+          // the block centre has to be inside the district, and its corners too, so a block
+          // never spills into the bay or the next district's park
+          if (!pointInPoly(jx, jz, d.poly)) continue;
+          if (!pointInPoly(jx - SIZE * 0.45, jz - SIZE * 0.45, d.poly)) continue;
+          if (!pointInPoly(jx + SIZE * 0.45, jz + SIZE * 0.45, d.poly)) continue;
+          if (isWater(jx, jz)) continue;
+          let blocked = false;
+          // the roads come first: a block may not sit on an arterial, or the street the player
+          // spawns on has a building in the middle of it
+          for (const a of ARTERIALS) {
+            if (this.distToPath(jx, jz, a.path) < a.width / 2 + (SIZE / 2) * 1.42 + 2) { blocked = true; break; }
+          }
+          if (blocked) continue;
+          if (this.distToPath(jx, jz, RING_ROAD) < 12 + (SIZE / 2) * 1.42 + 2) continue;
+          for (const lm of LANDMARKS) {
+            if (Math.hypot(jx - lm.x, jz - lm.z) < SIZE / 2 + 34) { blocked = true; break; }
+          }
+          if (blocked) continue;
+          for (const r of RIVERS) {
+            if (this.distToPath(jx, jz, r.path) < r.width / 2 + SIZE * 0.42) { blocked = true; break; }
+          }
+          if (blocked) continue;
+          // a plate may not grow past half the gap to the street line (56 - 6), or its outer
+          // buildings stand on the carriageway
+          sites.push({ x: jx, z: jz, size: SIZE + rand(-6, 2) });
+        }
+      }
+    }
+    // Second pass: the districts are polygons, and the ground between them used to stay empty -
+    // which is the void you could walk into a hundred metres from the spawn. Fill the land
+    // inside the ring on the same lattice, taking the style of the nearest district.
+    const near = (x: number, z: number) =>
+      sites.some((s) => Math.hypot(s.x - x, s.z - z) < PITCH_BLOCK * 0.62);
+    const half = WORLD_HALF - 120;
+    for (let x = -half; x <= half; x += PITCH_BLOCK) {
+      for (let z = -half; z <= half; z += PITCH_BLOCK) {
+        const jx = x + rand(-3, 3);
+        const jz = z + rand(-3, 3);
+        if (near(jx, jz)) continue;
+        if (isWater(jx, jz)) continue;
+        if (Math.abs(jx) > half || Math.abs(jz) > half) continue;
         let blocked = false;
         for (const a of ARTERIALS) {
-          if (this.distToPath(x, z, a.path) < a.width / 2 + 4) { blocked = true; break; }
+          if (this.distToPath(jx, jz, a.path) < a.width / 2 + (SIZE / 2) * 1.42 + 2) { blocked = true; break; }
         }
         if (blocked) continue;
-        if (this.distToPath(x, z, RING_ROAD) < 10) continue;
-        for (const r of RIVERS) {
-          if (this.distToPath(x, z, r.path) < r.width / 2 + 3) { blocked = true; break; }
-        }
-        if (blocked) continue;
+        if (this.distToPath(jx, jz, RING_ROAD) < 12 + (SIZE / 2) * 1.42 + 2) continue;
         for (const lm of LANDMARKS) {
-          if (Math.hypot(x - lm.x, z - lm.z) < 24) { blocked = true; break; }
+          if (Math.hypot(jx - lm.x, jz - lm.z) < SIZE / 2 + 34) { blocked = true; break; }
         }
         if (blocked) continue;
-        // squarish lots that leave an 8-12 m street between neighbours; the variety comes from
-        // size and district, not from scattering them apart
-        const size = rand(26, 32);
-        sites.push({ x, z, size });
+        for (const r of RIVERS) {
+          if (this.distToPath(jx, jz, r.path) < r.width / 2 + SIZE * 0.42) { blocked = true; break; }
+        }
+        if (blocked) continue;
+        sites.push({ x: jx, z: jz, size: SIZE + rand(-6, 2) });
       }
     }
     return sites;
   }
 
-  /** One flat ribbon per road and river: quad strips merged into a single geometry each. */
+  /** A flat ribbon of `width` at height `y` above the terrain, sampled every ~8 m. */
   ribbon(points: [number, number][], width: number, y: number): THREE.BufferGeometry {
-    const pos: number[] = [];
-    const idx: number[] = [];
+    return this.sweepSurface(points, [[-width / 2, y], [width / 2, y]], 1);
+  }
+
+  /**
+   * A path resampled every `step` metres, carrying its left normal and the distance travelled.
+   *
+   * Road, gutter, kerb and pavement are all swept from the same stations, so their edges line up
+   * to the millimetre instead of drifting apart wherever two sweeps bend differently.
+   */
+  private samplePath(points: [number, number][], step = 8) {
+    const out: { x: number; z: number; nx: number; nz: number; u: number; dx: number; dz: number }[] = [];
+    let u = 0;
     for (let i = 0; i < points.length - 1; i++) {
       const [x1, z1] = points[i];
       const [x2, z2] = points[i + 1];
       const dx = x2 - x1;
       const dz = z2 - z1;
       const len = Math.hypot(dx, dz) || 1;
-      const nx = (-dz / len) * (width / 2);
-      const nz = (dx / len) * (width / 2);
-      const base = pos.length / 3;
-      pos.push(x1 + nx, y, z1 + nz, x1 - nx, y, z1 - nz, x2 + nx, y, z2 + nz, x2 - nx, y, z2 - nz);
-      idx.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+      const nx = -dz / len;
+      const nz = dx / len;
+      const steps = Math.max(1, Math.ceil(len / step));
+      // start at k=1 on later segments: repeating the joint vertex makes a zero-width quad,
+      // which is a degenerate triangle and a NaN normal
+      for (let k = i === 0 ? 0 : 1; k <= steps; k++) {
+        const t = k / steps;
+        out.push({ x: x1 + dx * t, z: z1 + dz * t, nx, nz, u: u + len * t, dx: dx / len, dz: dz / len });
+      }
+      u += len;
+    }
+    return out;
+  }
+
+  /** The station at a given distance along a sampled path, interpolated between samples. */
+  private stationAt(stations: ReturnType<City['samplePath']>, u: number) {
+    if (u <= stations[0].u) return stations[0];
+    const last = stations[stations.length - 1];
+    if (u >= last.u) return last;
+    let i = 1;
+    while (i < stations.length - 1 && stations[i].u < u) i++;
+    const p = stations[i - 1];
+    const q = stations[i];
+    const t = q.u > p.u ? (u - p.u) / (q.u - p.u) : 0;
+    return {
+      x: p.x + (q.x - p.x) * t,
+      z: p.z + (q.z - p.z) * t,
+      nx: p.nx + (q.nx - p.nx) * t,
+      nz: p.nz + (q.nz - p.nz) * t,
+      dx: p.dx + (q.dx - p.dx) * t,
+      dz: p.dz + (q.dz - p.dz) * t,
+      u,
+    };
+  }
+
+  /**
+   * Quad strip from cross-sections: rows advance along the path, columns across it, UVs are in
+   * metres divided by the tile size so a texture lands at a real-world scale.
+   *
+   * Winding is the whole point. With the columns ordered by increasing lateral offset and the
+   * rows advancing along the path, the triangle (row, col), (row, col+1), (row+1, col) faces the
+   * sky. The old ribbon() pushed the same four corners in *decreasing* lateral order, so every
+   * carriageway, pavement and river in the city carried a normal of (0,-1,0): FrontSide culled
+   * them from above and what the player actually saw was the concrete ground plane. That is the
+   * "carriageway and pavement are one surface" the owner reported twice - the carriageway was
+   * not drawn at all.
+   */
+  private stripGeometry(rows: THREE.Vector3[][], us: number[], vs: number[], tone?: number[], kind?: GroundKind): THREE.BufferGeometry {
+    const cols = vs.length;
+    if (kind) {
+      for (let i = 0; i < rows.length - 1; i++) {
+        for (let j = 0; j < cols - 1; j++) {
+          // the same two triangles stripGeometry indexes, recorded so the ground measure reads the
+          // surface that is drawn instead of a re-derived cross-section
+          this.groundQuads.push({ a: rows[i][j], b: rows[i][j + 1], c: rows[i + 1][j], d: rows[i + 1][j + 1], kind });
+        }
+      }
+    }
+    const pos: number[] = [];
+    const uv: number[] = [];
+    const idx: number[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = 0; j < cols; j++) {
+        const p = rows[i][j];
+        pos.push(p.x, p.y, p.z);
+        uv.push(us[i], vs[j]);
+      }
+    }
+    for (let i = 0; i < rows.length - 1; i++) {
+      for (let j = 0; j < cols - 1; j++) {
+        const a = i * cols + j;
+        const b = a + 1;
+        const c = a + cols;
+        const d = c + 1;
+        idx.push(a, b, c, c, b, d);
+      }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    if (tone) {
+      // per-column tone, multiplied into the map: this is how the foot of a kerb stone gets its
+      // grime and the chamfer under the cap gets its line of light, at mesh resolution instead
+      // of at texture resolution
+      const col: number[] = [];
+      for (let i = 0; i < rows.length; i++) for (let j = 0; j < cols; j++) col.push(tone[j], tone[j], tone[j]);
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    }
     g.setIndex(idx);
     g.computeVertexNormals();
     return g;
   }
 
+  /**
+   * Sweep a cross-section along a path.
+   *
+   * `profile` is [lateralOffset, heightAboveTerrain] in metres ordered by increasing lateral
+   * offset (positive = the path's left normal); `tile` is how many metres one texture repeat
+   * covers; `gaps` are [from, to] distances along the path where the surface is cut open, which
+   * is how a dropped kerb gets its opening.
+   */
+  private sweepSurface(
+    points: [number, number][],
+    profile: [number, number, number?][],
+    tile: number,
+    gaps: [number, number][] = [],
+    kind?: GroundKind
+  ): THREE.BufferGeometry {
+    const ordered = [...profile].sort((a, b) => a[0] - b[0]);
+    const ton = ordered.map((p) => p[2]);
+    // v is the 3D distance travelled along the section, not the lateral offset: a 25 cm kerb face
+    // that spans 2 cm of offset would otherwise get 2 cm of UV and stretch the concrete into
+    // stripes over the one surface that has to catch the light.
+    const vs: number[] = [0];
+    for (let j = 1; j < ordered.length; j++) {
+      const dl = ordered[j][0] - ordered[j - 1][0];
+      const dh = ordered[j][1] - ordered[j - 1][1];
+      vs.push(vs[j - 1] + Math.hypot(dl, dh) / tile);
+    }
+    const stations = this.samplePath(points);
+    const total = stations[stations.length - 1].u;
+    const runs: [number, number][] = [];
+    let cursor = 0;
+    for (const [from, to] of [...gaps].sort((a, b) => a[0] - b[0])) {
+      if (from > cursor) runs.push([cursor, Math.min(from, total)]);
+      cursor = Math.max(cursor, to);
+    }
+    if (cursor < total) runs.push([cursor, total]);
+    if (!runs.length) runs.push([0, total]);
+    const parts: THREE.BufferGeometry[] = [];
+    for (const [a, b] of runs) {
+      if (b - a < 0.05) continue;
+      const rows: THREE.Vector3[][] = [];
+      const us: number[] = [];
+      const first = this.stationAt(stations, a);
+      const last = this.stationAt(stations, b);
+      const pick: typeof stations = [first];
+      for (const s of stations) if (s.u > a + 0.01 && s.u < b - 0.01) pick.push(s);
+      pick.push(last);
+      for (const st of pick) {
+        const row: THREE.Vector3[] = [];
+        for (const [at, h] of ordered) {
+          const x = st.x + st.nx * at;
+          const z = st.z + st.nz * at;
+          row.push(new THREE.Vector3(x, terrainHeight(x, z) + h, z));
+        }
+        rows.push(row);
+        us.push(st.u / tile);
+      }
+      if (rows.length > 1) parts.push(this.stripGeometry(rows, us, vs, ton.some((t) => t !== undefined) ? ton.map((t) => t ?? 1) : undefined, kind));
+    }
+    if (parts.length === 1) return parts[0];
+    return mergeGeometries(parts) ?? parts[0];
+  }
+
+
+  /** A path pushed sideways by `dist`: used for the pavements that flank every road. */
+  offsetPath(path: [number, number][], dist: number): [number, number][] {
+    const out: [number, number][] = [];
+    for (let i = 0; i < path.length; i++) {
+      const [x, z] = path[i];
+      const prev = path[Math.max(0, i - 1)];
+      const next = path[Math.min(path.length - 1, i + 1)];
+      const dx = next[0] - prev[0];
+      const dz = next[1] - prev[1];
+      const len = Math.hypot(dx, dz) || 1;
+      out.push([x - (dz / len) * dist, z + (dx / len) * dist]);
+    }
+    return out;
+  }
+
   buildRoadRibbons() {
-    const asphalt = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.95 });
-    const ring = new THREE.MeshStandardMaterial({ color: 0x343a42, roughness: 0.95 });
-    const water = new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 });
-    for (const a of ARTERIALS) {
-      const m = new THREE.Mesh(this.ribbon(a.path, a.width, 0.035), asphalt);
-      m.receiveShadow = true;
-      this.group.add(m);
+    // The road network as data, so actors (pedestrians) navigate the streets the map draws
+    // instead of a lattice constant. One list, one width per road.
+    this.roads = [
+      ...ARTERIALS.map((a) => ({ name: a.name, width: a.width, path: a.path as [number, number][] })),
+      { name: 'Ring Road', width: 20, path: RING_ROAD as [number, number][] },
+      ...LOCAL_STREETS.map((s, i) => ({ name: `Local Street ${i}`, width: s.width, path: s.path as [number, number][] })),
+    ];
+    const mats = this.roadMaterials();
+    const geo = {
+      local: [] as THREE.BufferGeometry[],
+      arterial: [] as THREE.BufferGeometry[],
+      ring: [] as THREE.BufferGeometry[],
+      walk: [] as THREE.BufferGeometry[],
+      kerb: [] as THREE.BufferGeometry[],
+      gutter: [] as THREE.BufferGeometry[],
+      line: [] as THREE.BufferGeometry[],
+      shoulder: [] as THREE.BufferGeometry[],
+      water: [] as THREE.BufferGeometry[],
+      ramp: [] as THREE.BufferGeometry[],
+    };
+
+    for (const st of LOCAL_STREETS) {
+      geo.local.push(this.sweepSurface(st.path as [number, number][], [[-st.width / 2, 0.05], [st.width / 2, 0.05]], 4, [], 'road'));
     }
-    const r = new THREE.Mesh(this.ribbon(RING_ROAD, 20, 0.04), ring);
-    r.receiveShadow = true;
-    this.group.add(r);
+
+    const arterialRoads = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })),
+      { path: RING_ROAD as [number, number][], width: 20 },
+    ];
+    // Crossings are planned before anything is swept: the kerb has to know where its openings
+    // are, or the dropped kerb would be a second surface laid over a solid stone.
+    this.crossings = this.planCrossings();
+    const gapsByRoad = arterialRoads.map((_, ri) =>
+      this.crossings.filter((c) => c.road === ri).map((c) => [c.u - 1.2, c.u + 1.2] as [number, number])
+    );
+
+    for (let ri = 0; ri < arterialRoads.length; ri++) {
+      const road = arterialRoads[ri];
+      const e = road.width / 2;
+      const asphalt = this.sweepSurface(road.path, [[-(e - 0.58), 0.05], [e - 0.58, 0.05]], 4, [], 'road');
+      geo.arterial.push(asphalt);
+      // 1.5 m of shoulder on the twice-lane arterials; the lane edge line marks its inner edge
+      const shoulder = road.width >= 16;
+      const inner = shoulder ? 2.08 : 0.70;
+      for (const side of [-1, 1]) {
+        /**
+         * The kerb, as a cross-section rather than a painted stripe.
+         *
+         * gutter (dark concrete, 4 cm below the carriageway):
+         *   e-0.58  0.050  lip, flush with the asphalt
+         *   e-0.55  0.026  the step down
+         *   e-0.12  0.010  invert: the wet line that runs beside every Jakarta kerb
+         *   e-0.06  0.016  the channel climbs to the foot of the stone
+         *
+         * stone (toned by column, so the face is darker than the cap):
+         *   e+0.00  0.060  0.55  foot, in shadow and grime
+         *   e+0.02  0.300  0.80  24 cm of vertical face: this is what casts the shadow line
+         *   e+0.05  0.315  1.00  chamfer that catches the light
+         *   e+0.17  0.315  0.97  12 cm of cap, proud of the paving
+         *   e+0.20  0.260  0.90  chamfer down onto the trotoar
+         *
+         * 30 cm of stone, 12 cm proud, on a 4 cm gutter channel.
+         */
+        geo.gutter.push(
+          this.sweepSurface(
+            road.path,
+            [
+              [side * (e - 0.58), 0.05, 0.92], // lip: same concrete as the asphalt edge, so the join is not a line
+              [side * (e - 0.55), 0.026, 0.6], // the step down
+              [side * (e - 0.12), 0.01, 0.42], // invert: the dark wet line
+              [side * (e - 0.06), 0.016, 0.62], // climbs to the foot of the stone
+            ],
+            1.2,
+            gapsByRoad[ri],
+            'kerb'
+          )
+        );
+        geo.kerb.push(
+          this.sweepSurface(
+            road.path,
+            [
+              [side * (e - 0.06), 0.016, 0.55],
+              [side * (e + 0.0), 0.06, 0.58],
+              [side * (e + 0.02), 0.3, 0.8],
+              [side * (e + 0.05), 0.315, 1.0],
+              [side * (e + 0.17), 0.315, 0.97],
+              [side * (e + 0.2), 0.26, 0.9],
+            ],
+            1.2,
+            gapsByRoad[ri],
+            'kerb'
+          )
+        );
+        // 3.6 m of paving behind the stone, its inner edge exactly on the kerb cap chamfer, and a
+        // back face so the slab is not a sheet hovering 26 cm over the ground behind it
+        geo.walk.push(
+          this.sweepSurface(
+            road.path,
+            [
+              [side * (e + 0.2), 0.26],
+              [side * (e + 3.8), 0.26],
+              [side * (e + 3.8), 0.0],
+            ],
+            2.4,
+            [],
+            'walk'
+          )
+        );
+        geo.line.push(
+          this.sweepSurface(
+            road.path,
+            [[side * (e - inner - 0.15), 0.056], [side * (e - inner), 0.056]],
+            1
+          )
+        );
+        if (shoulder) {
+          // older, paler asphalt between the lane line and the gutter: the shoulder
+          geo.shoulder.push(
+            this.sweepSurface(road.path, [[side * (e - 0.585), 0.0525], [side * (e - inner), 0.0525]], 2, [], 'road')
+          );
+        }
+      }
+    }
+
     for (const rv of RIVERS) {
-      const m = new THREE.Mesh(this.ribbon(rv.path, rv.width, 0.05), water);
-      m.receiveShadow = true;
-      this.group.add(m);
+      geo.water.push(this.sweepSurface(rv.path, [[-rv.width / 2, 0.05], [rv.width / 2, 0.05]], 1));
     }
+
+    // one mesh per material: the old code made a mesh per road per side and paid ~40 draw calls
+    // for what is one continuous surface
+    const buckets: { geos: THREE.BufferGeometry[]; mat: THREE.Material; name: string; receive: boolean }[] = [
+      { geos: geo.local, mat: mats.asphalt, name: 'road-local', receive: true },
+      { geos: geo.arterial, mat: mats.asphalt, name: 'road-arterial', receive: true },
+      { geos: geo.shoulder, mat: mats.shoulder, name: 'road-shoulder', receive: true },
+      { geos: geo.line, mat: mats.line, name: 'lane-edge', receive: false },
+      { geos: geo.walk, mat: mats.walk, name: 'trotoar', receive: true },
+      { geos: geo.kerb, mat: mats.kerb, name: 'kerb', receive: true },
+      { geos: geo.gutter, mat: mats.gutter, name: 'gutter', receive: true },
+      { geos: geo.ramp, mat: mats.kerb, name: 'kerb-ramp', receive: true },
+      { geos: geo.water, mat: mats.water, name: 'river', receive: false },
+    ];
+    for (const b of buckets) {
+      if (!b.geos.length) continue;
+      const merged = b.geos.length === 1 ? b.geos[0] : mergeGeometries(b.geos);
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, b.mat);
+      mesh.name = b.name;
+      mesh.receiveShadow = b.receive;
+      this.group.add(mesh);
+    }
+
+    this.buildCrossingDressing(arterialRoads, mats);
+  }
+
+  /**
+   * Carriageway and pavement, as materials drawn at a real-world scale.
+   *
+   * The asphalt is a 4 m tile of value-only grain (1.5-4.5 cm specks), so at 1.7 m the eye reads
+   * grain instead of a flat fill; the trotoar is 30 cm pavers with a joint, a bevel and its own
+   * value per paver on a 2.4 m tile; the kerb carries a 1.2 m stone joint and a gradient that
+   * darkens it towards the gutter. Every variation is in value, never in hue: a warm patch on the
+   * road reads as a stain at eye height, which is what the last texture pass had to undo.
+   */
+  private roadMaterials() {
+    const asphaltTex = canvasTexture(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#282c32';
+      ctx.fillRect(0, 0, w, h);
+      // aggregate. light and dark specks are balanced so the tile mean stays on the base colour
+      for (let i = 0; i < 4200; i++) {
+        const g = Math.round(44 + rand(-13, 13));
+        ctx.fillStyle = `rgb(${g - 3},${g},${g + 5})`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 3), rand(1, 3));
+      }
+      // resurfacing ghosts, 40-90 cm across, kept very faint: at eye height a stronger oval reads
+      // as a stain on the road, which is the defect the last texture pass had to undo
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i % 2 ? 'rgba(20,22,26,0.07)' : 'rgba(60,64,70,0.06)';
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(26, 58), rand(18, 40), rand(0, 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // hairline cracks: one every couple of metres, never dead straight
+      ctx.strokeStyle = 'rgba(16,18,21,0.5)';
+      ctx.lineWidth = 1.1;
+      for (let i = 0; i < 4; i++) {
+        let x = rand(0, w);
+        let y = rand(0, h);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for (let k = 0; k < 5; k++) {
+          x += rand(-16, 16);
+          y += rand(-16, 16);
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    });
+    asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
+
+    const walkTex = canvasTexture(1024, 1024, (ctx, w, h) => {
+      const n = 8; // 30 cm pavers on a 2.4 m tile
+      const cell = w / n;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          // each paver its own value: a uniform grid of one grey is exactly what the trotoar was
+          const v = rand(-10, 10);
+          ctx.fillStyle = `rgb(${Math.round(172 + v)},${Math.round(167 + v)},${Math.round(155 + v * 0.8)})`;
+          ctx.fillRect(i * cell, j * cell, cell, cell);
+          // grain inside the paver
+          for (let k = 0; k < 90; k++) {
+            const g = Math.round(128 + rand(-20, 26));
+            ctx.fillStyle = `rgba(${g},${g - 4},${g - 12},0.20)`;
+            ctx.fillRect(i * cell + rand(0, cell), j * cell + rand(0, cell), rand(1, 3), rand(1, 3));
+          }
+          // bevelled edges: light on the top-left, shadow on the bottom-right
+          ctx.fillStyle = 'rgba(255,255,255,0.15)';
+          ctx.fillRect(i * cell + 3, j * cell + 3, cell - 6, 3);
+          ctx.fillStyle = 'rgba(0,0,0,0.10)';
+          ctx.fillRect(i * cell + 3, j * cell + cell - 6, cell - 6, 3);
+        }
+      }
+      // joints: dark, 3 px, i.e. 7 mm at this scale
+      ctx.fillStyle = 'rgba(84,80,72,0.85)';
+      for (let k = 0; k <= n; k++) {
+        ctx.fillRect(Math.min(w - 3, k * cell - 1), 0, 3, h);
+        ctx.fillRect(0, Math.min(h - 3, k * cell - 1), w, 3);
+      }
+      // chips and the odd stain, so the grid does not read as a spreadsheet
+      for (let i = 0; i < 26; i++) {
+        ctx.fillStyle = `rgba(${rand(0, 1) > 0.4 ? '92,88,80' : '206,200,188'},${rand(0.08, 0.22)})`;
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(3, 16), rand(3, 12), rand(0, 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+    walkTex.wrapS = walkTex.wrapT = THREE.RepeatWrapping;
+
+    const kerbTex = canvasTexture(128, 256, (ctx, w, h) => {
+      // v runs from the gutter (bottom of the canvas) to the cap, so a vertical gradient is the
+      // grime: the foot of the stone is dirty, the cap is washed by the rain
+      const grad = ctx.createLinearGradient(0, h, 0, 0);
+      grad.addColorStop(0, '#8d8880');
+      grad.addColorStop(0.45, '#b6b0a4');
+      grad.addColorStop(1, '#d6d0c0');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 900; i++) {
+        const g = Math.round(188 + rand(-18, 18));
+        ctx.fillStyle = `rgba(${g},${g - 5},${g - 16},0.35)`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 4), rand(1, 3));
+      }
+      // stone joints every 1.2 m along the kerb
+      ctx.fillStyle = 'rgba(64,60,54,0.55)';
+      ctx.fillRect(0, 0, 3, h);
+      ctx.fillRect(w - 4, 0, 3, h);
+    });
+    kerbTex.wrapS = kerbTex.wrapT = THREE.RepeatWrapping;
+
+    const tactileTex = canvasTexture(128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#c4941a';
+      ctx.fillRect(0, 0, w, h);
+      const n = 6; // 5 cm domes on a 30 cm tile
+      const cell = w / n;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          const cx = i * cell + cell / 2;
+          const cy = j * cell + cell / 2;
+          const g = ctx.createRadialGradient(cx - 2, cy - 3, 1, cx, cy, cell * 0.42);
+          g.addColorStop(0, '#e8c04a');
+          g.addColorStop(0.7, '#b8860f');
+          g.addColorStop(1, '#8c6408');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(cx, cy, cell * 0.32, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    });
+    tactileTex.wrapS = tactileTex.wrapT = THREE.RepeatWrapping;
+
+    const shoulderTex = canvasTexture(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#31353b';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 3400; i++) {
+        const g = Math.round(54 + rand(-14, 16));
+        ctx.fillStyle = `rgba(${g},${g + 1},${g + 5},0.5)`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 3), rand(1, 3));
+      }
+      // patch repairs: the shoulder is the oldest asphalt on a Jakarta road
+      for (let i = 0; i < 5; i++) {
+        ctx.fillStyle = i % 2 ? 'rgba(28,30,34,0.16)' : 'rgba(78,82,88,0.10)';
+        ctx.fillRect(rand(0, w), rand(0, h), rand(30, 90), rand(20, 60));
+      }
+    });
+    shoulderTex.wrapS = shoulderTex.wrapT = THREE.RepeatWrapping;
+
+    const gutterTex = canvasTexture(128, 128, (ctx, w, h) => {
+      // the channel is wet concrete: dark, cool, and never uniform
+      ctx.fillStyle = '#57544e';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 700; i++) {
+        const g = Math.round(88 + rand(-16, 18));
+        ctx.fillStyle = `rgba(${g},${g - 2},${g - 6},0.5)`;
+        ctx.fillRect(rand(0, w), rand(0, h), rand(1, 4), rand(1, 2));
+      }
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = 'rgba(30,32,34,0.35)';
+        ctx.beginPath();
+        ctx.ellipse(rand(0, w), rand(0, h), rand(8, 30), rand(4, 14), rand(0, 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+    gutterTex.wrapS = gutterTex.wrapT = THREE.RepeatWrapping;
+
+    return {
+      // the road is darker and rougher than the walk: 0.97 against 0.86, so it takes the light
+      // as a matte surface and the paving keeps a little sheen
+      asphalt: new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.97 }),
+      shoulder: new THREE.MeshStandardMaterial({ map: shoulderTex, roughness: 0.98 }),
+      walk: new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.86 }),
+      // the kerb stone carries a per-column tone (dark foot, bright chamfer) as vertex colours
+      kerb: new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.8, vertexColors: true }),
+      gutter: new THREE.MeshStandardMaterial({ map: gutterTex, roughness: 0.92, vertexColors: true }),
+      line: new THREE.MeshStandardMaterial({ color: 0xe8e4d6, roughness: 0.7 }),
+      tactile: new THREE.MeshStandardMaterial({ map: tactileTex, roughness: 0.78 }),
+      water: new THREE.MeshStandardMaterial({ color: 0x2f6577, roughness: 0.2, metalness: 0.35 }),
+    };
+  }
+
+  /** Parameter along the first segment where two centrelines cross, or null when they miss. */
+  private segmentCross(p1: [number, number], p2: [number, number], p3: [number, number], p4: [number, number]) {
+    const d1x = p2[0] - p1[0];
+    const d1z = p2[1] - p1[1];
+    const d2x = p4[0] - p3[0];
+    const d2z = p4[1] - p3[1];
+    const den = d1x * d2z - d1z * d2x;
+    if (Math.abs(den) < 1e-6) return null; // parallel
+    const t = ((p3[0] - p1[0]) * d2z - (p3[1] - p1[1]) * d2x) / den;
+    const s = ((p3[0] - p1[0]) * d1z - (p3[1] - p1[1]) * d1x) / den;
+    if (t < 0 || t > 1 || s < 0 || s > 1) return null;
+    return { t };
+  }
+
+  /** Distance along a polyline of the point `t` of segment `i`. */
+  private distanceAt(path: [number, number][], i: number, t: number) {
+    let u = 0;
+    for (let k = 1; k < i; k++) u += Math.hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1]);
+    return u + t * Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+  }
+
+  /**
+   * Where a pedestrian can actually cross, derived from the road network.
+   *
+   * The old stripes were instanced on the (i+0.5)*PITCH block lattice, which stopped matching
+   * the streets when the city moved to organic districts; they also sat at y=0.03, under the
+   * carriageway, so they were invisible as well as misplaced. A crossing is now a place where
+   * an arterial meets another road, set clear of the junction, and it exists only where there is
+   * a kerb to step off.
+   */
+  planCrossings() {
+    const arterialRoads = [
+      ...ARTERIALS.map((a) => ({ path: a.path as [number, number][], width: a.width })),
+      { path: RING_ROAD as [number, number][], width: 20 },
+    ];
+    const others = [
+      ...LOCAL_STREETS.map((s) => ({ path: s.path as [number, number][], width: s.width })),
+      ...arterialRoads,
+    ];
+    const out: { road: number; u: number }[] = [];
+    const seen: [number, number][] = [];
+    for (let ri = 0; ri < arterialRoads.length; ri++) {
+      const a = arterialRoads[ri];
+      const stations = this.samplePath(a.path, 4);
+      const total = stations[stations.length - 1].u;
+      for (const b of others) {
+        if (a.path === b.path) continue;
+        for (let i = 1; i < a.path.length; i++) {
+          for (let j = 1; j < b.path.length; j++) {
+            const hit = this.segmentCross(a.path[i - 1], a.path[i], b.path[j - 1], b.path[j]);
+            if (!hit) continue;
+            const u = this.distanceAt(a.path, i, hit.t);
+            for (const side of [-1, 1]) {
+              // clear of the other carriageway, so the stripes are not painted inside a junction
+              const at = u + side * (b.width / 2 + 3.4);
+              if (at < 8 || at > total - 8) continue;
+              const st = this.stationAt(stations, at);
+              if (seen.some(([x, z]) => Math.hypot(x - st.x, z - st.z) < 9)) continue;
+              seen.push([st.x, st.z]);
+              out.push({ road: ri, u: at });
+            }
+          }
+        }
+      }
+    }
+    return out.sort((p, q) => p.road - q.road || p.u - q.u);
+  }
+
+  /** A dropped kerb: the pavement edge ramps down to the gutter across a crossing. */
+  private rampGeometry(
+    st: { x: number; z: number; nx: number; nz: number; dx: number; dz: number },
+    side: number,
+    e: number
+  ) {
+    const nx = st.nx * side;
+    const nz = st.nz * side;
+    const at = (along: number, lat: number, h: number) => {
+      const x = st.x + st.dx * along + nx * lat;
+      const z = st.z + st.dz * along + nz * lat;
+      return new THREE.Vector3(x, terrainHeight(x, z) + h, z);
+    };
+    // Rows advance ALONG the road and columns go outward across it, which is the winding every
+    // swept ribbon uses: with the two axes the other way round the ramp's top faced the ground and
+    // was backface-culled, so the dropped kerb was a hole you could see the road through.
+    const road = at(-1.2, e - 0.58, 0.05);
+    const walk = at(-1.2, e + 0.2, 0.26);
+    const road2 = at(1.2, e - 0.58, 0.05);
+    const walk2 = at(1.2, e + 0.2, 0.26);
+    const top = side > 0
+      ? this.stripGeometry([[road, walk], [road2, walk2]], [0, 1], [0, 1], [0.9, 0.9], 'ramp')
+      : this.stripGeometry([[walk, road], [walk2, road2]], [0, 1], [0, 1], [0.9, 0.9], 'ramp');
+    // a wall under the back edge, so the opening reads as a shadow instead of a hole
+    const wall = this.stripGeometry(
+      [
+        [at(-1.2, e + 0.2, 0.26), at(1.2, e + 0.2, 0.26)],
+        [at(-1.2, e + 0.2, -0.02), at(1.2, e + 0.2, -0.02)],
+      ],
+      [0, 1],
+      [0, 1],
+      [0.7, 0.7]
+    );
+    return mergeGeometries([top, wall]) ?? top;
+  }
+
+  /**
+   * Zebra, tactile pad and dropped kerb, one set per planned crossing.
+   *
+   * The three belong together: the pad marks the crossing, the ramp is the opening in the kerb
+   * behind it, and the stripes say which way to walk. A tactile strip with nothing to step off is
+   * a painted rectangle.
+   */
+  private buildCrossingDressing(
+    arterialRoads: { path: [number, number][]; width: number }[],
+    mats: ReturnType<City['roadMaterials']>
+  ) {
+    if (!this.crossings.length) return;
+    const stripes: THREE.Matrix4[] = [];
+    const pads: THREE.Matrix4[] = [];
+    const ramps: THREE.BufferGeometry[] = [];
+    const padGeo = new THREE.PlaneGeometry(0.6, 2.4);
+    {
+      // one texture tile per 30 cm: 2 x 8 repeats across a 60 x 240 cm pad
+      const uv = padGeo.getAttribute('uv') as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2, uv.getY(i) * 8);
+      uv.needsUpdate = true;
+      padGeo.rotateX(-Math.PI / 2);
+    }
+    for (const c of this.crossings) {
+      const road = arterialRoads[c.road];
+      const st = this.stationAt(this.samplePath(road.path, 4), c.u);
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(st.dx, st.dz));
+      const e = road.width / 2;
+      // bars parallel to the traffic, stepping across the carriageway
+      for (let lat = -(e - 0.95); lat <= e - 0.95 + 0.01; lat += 0.95) {
+        const x = st.x + st.nx * lat;
+        const z = st.z + st.nz * lat;
+        stripes.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.056, z), q, new THREE.Vector3(1, 1, 1)));
+      }
+      for (const side of [-1, 1]) {
+        const x = st.x + st.nx * side * (e + 0.55);
+        const z = st.z + st.nz * side * (e + 0.55);
+        pads.push(new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z) + 0.2665, z), q, new THREE.Vector3(1, 1, 1)));
+        ramps.push(this.rampGeometry(st, side, e));
+      }
+    }
+    const stripeGeo = new THREE.BoxGeometry(0.45, 0.012, 3);
+    const stripeMesh = new THREE.InstancedMesh(stripeGeo, mats.line, stripes.length);
+    stripes.forEach((m, i) => stripeMesh.setMatrixAt(i, m));
+    stripeMesh.instanceMatrix.needsUpdate = true;
+    stripeMesh.name = 'crossing-stripes';
+    this.group.add(stripeMesh);
+
+    const padMesh = new THREE.InstancedMesh(padGeo, mats.tactile, pads.length);
+    pads.forEach((m, i) => padMesh.setMatrixAt(i, m));
+    padMesh.instanceMatrix.needsUpdate = true;
+    padMesh.receiveShadow = true;
+    padMesh.name = 'tactile';
+    this.group.add(padMesh);
+
+    const rampGeo = mergeGeometries(ramps) ?? ramps[0];
+    if (rampGeo) {
+      const rampMesh = new THREE.Mesh(rampGeo, mats.kerb);
+      rampMesh.name = 'kerb-ramp';
+      rampMesh.receiveShadow = true;
+      this.group.add(rampMesh);
+    }
+  }
+
+  // ------------------------------------------------------------ the street kit, wired
+
+  /**
+   * The kit's own street, laid between two block rows.
+   *
+   * The map's local streets are 8 m ribbons with no trotoar, no kerb relief and no markings, and
+   * `planBlockSites` lays blocks on a 90 m lattice, so a whole 25 m corridor between two rows of
+   * blocks is bare ground - that is the "everything between the junctions is nothing" the owner
+   * photographed. This finds a crossing of that lattice with enough clear ground for a full
+   * cross-section, then builds a signalised junction, three street runs out of it and a T where a
+   * side street ends on the cross corridor. Everything comes from `src/world/streetkit.ts`, so the
+   * corner radius, the kerb height and the walk depth are the same as every other street the kit
+   * will ever lay.
+   */
+  buildStreetKit() {
+    const site = this.streetKitSite();
+    if (!site) return;
+    if (!this.propAudit) this.propAudit = [];
+    if (!this.streetSpines) this.streetSpines = [];
+
+    const ctx = {
+      group: this.group,
+      colliders: this.colliders,
+      audit: this.propAudit,
+      // every surface the kit draws goes into the city's measure, exactly like a swept ribbon
+      groundQuad: (q: { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3; kind: 'road' | 'walk' | 'kerb' | 'ramp' }) => {
+        this.streetQuads.push(q);
+      },
+    };
+    // A street is laid on the city's own ground measure - the drawn terrain plane, the block plates
+    // and the arterial ribbons - never on `terrainHeight`, which is the analytic hill the 43 m
+    // terrain cells interpolate away. That mismatch is why a kit piece read 0.23-0.43 m under the
+    // surface the rest of the city stands on. The kit's own surfaces are excluded here (they are in
+    // `streetQuads`) so a finished street never lifts the next piece of itself.
+    const bed: StreetGround = (x, z) => this.baseGroundAt(x, z);
+    // and what stands ON the street stands on what the kit drew: the registered walk, kerb or ramp,
+    // read back through the same measure. No `terrain + 17 cm` anywhere.
+    const furnitureGround: StreetGround = (x, z) => this.groundHeightAt(x, z);
+
+    const WALK = 3.6;
+    const HALF = 4; // the map's local class is 8 m
+    const ARM = 14; // how far the junction's asphalt arms run out past its box
+    const armEnd = HALF + ARM;
+
+    buildSignalIntersection(ctx, site.x, site.z, 0, {
+      roadClass: 'local',
+      armsM: ARM,
+      walkWidthM: WALK,
+      lights: true,
+      ground: bed,
+      furnitureGround,
+    });
+    // the junction's own cross-section, so the arms' walks are in groundHeightAt too
+    this.streetSpines.push({ ax: site.x - armEnd, az: site.z, bx: site.x + armEnd, bz: site.z, half: HALF, walkW: WALK });
+    this.streetSpines.push({ ax: site.x, az: site.z - armEnd, bx: site.x, bz: site.z + armEnd, half: HALF, walkW: WALK });
+
+    /** one street run out of the junction, from `from` to `to` metres along the arm */
+    const run = (dx: number, dz: number, from: number, to: number, features: Record<string, unknown>) => {
+      const len = to - from;
+      if (len < 16) return;
+      const mid = (from + to) / 2;
+      buildStreetRun(ctx, site.x + dx * mid, site.z + dz * mid, Math.atan2(dx, dz), {
+        roadClass: 'local',
+        lengthM: len,
+        walkWidthM: WALK,
+        ground: bed,
+        furnitureGround,
+        ...features,
+      });
+      this.streetSpines.push({
+        ax: site.x + dx * from,
+        az: site.z + dz * from,
+        bx: site.x + dx * to,
+        bz: site.z + dz * to,
+        half: HALF,
+        walkW: WALK,
+      });
+    };
+
+    // which arm, if any, ends on a cross corridor in a T? The one with the most room decides.
+    const T_STEM = 16;
+    const dirs = [
+      { dx: 0, dz: -1, reach: site.n },
+      { dx: 0, dz: 1, reach: site.s },
+      { dx: 1, dz: 0, reach: site.e },
+      { dx: -1, dz: 0, reach: site.w },
+    ];
+    const tSite = dirs.find((d) => {
+      if (d.reach < 96) return false;
+      const tx = site.x + d.dx * 90;
+      const tz = site.z + d.dz * 90;
+      const across = Math.min(this.streetReach(tx, tz, -d.dz, d.dx), this.streetReach(tx, tz, d.dz, -d.dx));
+      return across >= 14;
+    }) ?? null;
+
+    // the runs. The one that ends in the T stops where the T's own stem asphalt begins; the rest run
+    // out to whatever the city left clear, capped at a block.
+    for (const d of dirs) {
+      const isT = !!tSite && tSite.dx === d.dx && tSite.dz === d.dz;
+      // An arm that ends at the T stops where the T's stem asphalt begins. Every other arm runs out
+      // to the next crossing of the 90 m lattice and is closed with an end cap there: a block of
+      // street, not a slice of asphalt that stops in the middle of the ground.
+      const end = isT ? 90 - HALF - T_STEM : Math.min(d.reach - 3, 90 - HALF);
+      if (end - armEnd < 16) continue;
+      const mid = (armEnd + end) / 2;
+      const span = end - armEnd;
+      const features: Record<string, unknown> = {
+        ...(isT ? {} : { capEnd: true }),
+      };
+      if (d.dz === -1) {
+        // the hero run: a crossing mid-block, a bus bay cut into one trotoar, two driveway
+        // aprons in the other, and the poles, blade and bollards that make it a street
+        features.crossings = [{ at: 0 }];
+        features.bays = [{ side: 1, at: span * 0.32, lengthM: 13, depthM: 2.2 }];
+        features.driveways = [
+          { side: -1, at: -span * 0.3, widthM: 3.6 },
+          { side: -1, at: -span * 0.14, widthM: 3.0 },
+        ];
+      } else if (d.dz === 1) {
+        features.crossings = [{ at: 0 }];
+      }
+      run(d.dx, d.dz, armEnd, end, features);
+    }
+
+    if (tSite) {
+      const tx = site.x + tSite.dx * 90;
+      const tz = site.z + tSite.dz * 90;
+      const reachA = this.streetReach(tx, tz, -tSite.dz, tSite.dx);
+      const reachB = this.streetReach(tx, tz, tSite.dz, -tSite.dx);
+      const throughM = Math.max(11, Math.min(26, Math.min(reachA, reachB) - 2));
+      // yaw puts the T's local +z (its stem) back down the arm it serves
+      buildTIntersection(ctx, tx, tz, Math.atan2(-tSite.dx, -tSite.dz), {
+        roadClass: 'local',
+        widthM: HALF * 2,
+        stemWidthM: HALF * 2,
+        throughM,
+        stemM: T_STEM,
+        walkWidthM: WALK,
+        ground: bed,
+      });
+      this.streetSpines.push({
+        ax: tx + tSite.dz * throughM,
+        az: tz - tSite.dx * throughM,
+        bx: tx - tSite.dz * throughM,
+        bz: tz + tSite.dx * throughM,
+        half: HALF,
+        walkW: WALK,
+      });
+      const stemFrom = 90 - HALF - T_STEM;
+      this.streetSpines.push({
+        ax: site.x + tSite.dx * stemFrom,
+        az: site.z + tSite.dz * stemFrom,
+        bx: tx - tSite.dx * HALF,
+        bz: tz - tSite.dz * HALF,
+        half: HALF,
+        walkW: WALK,
+      });
+    }
+  }
+
+  /** distance from a point to one of the kit's street spines, and so to its kerb lines */
+  private spineDistance(x: number, z: number, s: { ax: number; az: number; bx: number; bz: number }): number {
+    const dx = s.bx - s.ax;
+    const dz = s.bz - s.az;
+    const l2 = dx * dx + dz * dz || 1;
+    let t = ((x - s.ax) * dx + (z - s.az) * dz) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(x - (s.ax + dx * t), z - (s.az + dz * t));
+  }
+
+  /**
+   * Is the ground here free of everything a street cannot cross? Blocks (a plate may not sit on the
+   * carriageway), the map's own roads, the rivers, and the landmarks. `PAD` is half the kit's
+   * cross-section - 8 m of carriageway plus a 3.6 m trotoar and its kerb - plus a kerb's grace.
+   */
+  streetClear(x: number, z: number) {
+    const PAD = 8.6;
+    for (const b of this.blocks) {
+      const half = (b.size ?? BLOCK) / 2;
+      if (Math.abs(x - b.x) < half + PAD && Math.abs(z - b.z) < half + PAD) return false;
+    }
+    // A raised plate is a platform, a station hall, a terminal apron or a lawn: a street laid across
+    // one rides up its face, and every slab edge becomes a step in the ground the kit is measured
+    // against. The site search and its reach therefore treat a plate exactly like a block.
+    if (this.raisedPlate(x, z, PAD)) return false;
+    const { grid, segs, CELL } = this.roadSegments();
+    const list = grid.get(Math.floor(x / CELL) + ',' + Math.floor(z / CELL));
+    if (list) {
+      for (const i of list) {
+        const b = i * 5;
+        const x1 = segs[b];
+        const z1 = segs[b + 1];
+        const dx = segs[b + 2] - x1;
+        const dz = segs[b + 3] - z1;
+        const len2 = dx * dx + dz * dz || 1;
+        let t = ((x - x1) * dx + (z - z1) * dz) / len2;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t)) < segs[b + 4] + PAD) return false;
+      }
+    }
+    for (const lm of LANDMARKS) if (Math.hypot(x - lm.x, z - lm.z) < 34) return false;
+    return true;
+  }
+
+  /**
+   * Is a raised plate over (x, z), widened by `margin`? A plate counts only where its top is above
+   * the drawn terrain at the query point: a slab that the hill has swallowed is not an obstacle.
+   */
+  private raisedPlate(x: number, z: number, margin: number): boolean {
+    const terrain = this.terrainMeshHeight(x, z);
+    for (const p of this.platesNear(x, z, margin)) {
+      if (p.top - terrain <= 0.03) continue;
+      const inside =
+        p.round !== undefined
+          ? Math.hypot(x - p.x, z - p.z) <= p.round + margin
+          : Math.abs(x - p.x) <= p.hx + margin && Math.abs(z - p.z) <= p.hz + margin;
+      if (inside) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Every mapped road and river as a segment in a 40 m grid. A clearance test then touches the ~20
+   * segments near the point instead of all 4,000, which is the difference between a site search that
+   * costs a second and one that costs a frame.
+   */
+  private roadSegments() {
+    if (this.roadGrid) return this.roadGrid;
+    const CELL = 40;
+    const grid = new Map<string, number[]>();
+    const segs: number[] = [];
+    // A mapped arterial carries 3.8 m of trotoar beyond its kerb - further out than the carriageway
+    // the road list measures. A street the kit lays has to clear that paving, not just the asphalt:
+    // without the extra 3.9 m a run could stand its own trotoar inside the arterial's, and then
+    // `groundHeightAt` answered 26 cm where the kit's props stood at 17.
+    const walkPaths = new Set(WALK_ROADS.map((w) => w.path));
+    const lanes: { path: [number, number][]; width: number; extra: number }[] = [
+      ...this.roads.map((r) => ({ path: r.path as [number, number][], width: r.width, extra: walkPaths.has(r.path) ? 3.9 : 0 })),
+      ...RIVERS.map((v) => ({ path: v.path as [number, number][], width: v.width, extra: 4 })),
+    ];
+    for (const r of lanes) {
+      for (let s = 0; s < r.path.length - 1; s++) {
+        const [x1, z1] = r.path[s];
+        const [x2, z2] = r.path[s + 1];
+        const clearance = r.width / 2 + r.extra;
+        const i = segs.length;
+        segs.push(x1, z1, x2, z2, clearance);
+        const pad = clearance + 12;
+        const i0 = Math.floor((Math.min(x1, x2) - pad) / CELL);
+        const i1 = Math.floor((Math.max(x1, x2) + pad) / CELL);
+        const j0 = Math.floor((Math.min(z1, z2) - pad) / CELL);
+        const j1 = Math.floor((Math.max(z1, z2) + pad) / CELL);
+        for (let a = i0; a <= i1; a++) {
+          for (let b = j0; b <= j1; b++) {
+            const k = a + ',' + b;
+            const list = grid.get(k);
+            if (list) list.push(i);
+            else grid.set(k, [i]);
+          }
+        }
+      }
+    }
+    this.roadGrid = { grid, segs, CELL };
+    return this.roadGrid;
+  }
+
+  /** how far the ground stays clear of everything, walking out from (x, z) */
+  streetReach(x: number, z: number, dx: number, dz: number, step = 3) {
+    let d = 0;
+    while (d <= 126 && this.streetClear(x + dx * d, z + dz * d)) d += step;
+    return d;
+  }
+
+  /**
+   * A crossing of the 90 m block lattice with enough clear ground for a junction and four runs.
+   *
+   * The corridor between two rows of blocks is 24-30 m wide and the map's local streets cut across it
+   * every 112 m, so where a street fits is not where the lattice says it should: the search walks a
+   * +-8 m lateral offset grid around each crossing and keeps the first site whose every approach is
+   * clear far enough to be a street and not a stub. Deterministic for a given city - the lattice is
+   * fixed, only block sizes and their +-3 m jitter move.
+   */
+  streetKitSite() {
+    const PITCH_BLOCK = 90;
+    const xs = new Set<number>();
+    const zs = new Set<number>();
+    for (const b of this.blocks) {
+      xs.add(Math.round(b.x / PITCH_BLOCK) * PITCH_BLOCK + PITCH_BLOCK / 2);
+      zs.add(Math.round(b.z / PITCH_BLOCK) * PITCH_BLOCK + PITCH_BLOCK / 2);
+    }
+    const spots: { x: number; z: number; d: number }[] = [];
+    for (const ox of [0, 4, -4, 8, -8]) {
+      for (const oz of [0, 4, -4, 8, -8]) {
+        for (const x of xs) {
+          for (const z of zs) {
+            const px = x + ox;
+            const pz = z + oz;
+            const d = Math.hypot(px, pz);
+            if (d > 760) continue;
+            if (!this.streetClear(px, pz)) continue;
+            spots.push({ x: px, z: pz, d });
+          }
+        }
+      }
+    }
+    spots.sort((a, b) => a.d - b.d);
+    // coarse pass: rank by how much room there is, and prefer the site squeezed between two block
+    // rows (a 9-15 m margin either side) over one standing in a void - a street with no blocks on it
+    // is a road in a field
+    const coarse = spots.map((s) => {
+      const m = Math.min(
+        this.streetReach(s.x, s.z, 1, 0, 12),
+        this.streetReach(s.x, s.z, -1, 0, 12),
+        this.streetReach(s.x, s.z, 0, -1, 12),
+        this.streetReach(s.x, s.z, 0, 1, 12)
+      );
+      let gap = 999;
+      for (const b of this.blocks) {
+        const half = (b.size ?? BLOCK) / 2;
+        gap = Math.min(gap, Math.max(Math.abs(s.x - b.x) - half, Math.abs(s.z - b.z) - half));
+      }
+      return { ...s, m, gap };
+    });
+    const usable = coarse.filter((s) => s.m >= 36).sort((a, b) => a.gap - b.gap || a.d - b.d);
+    let fallback: { x: number; z: number; e: number; w: number; n: number; s: number; min: number } | null = null;
+    for (const s of usable.slice(0, 8)) {
+      const e = this.streetReach(s.x, s.z, 1, 0);
+      const w = this.streetReach(s.x, s.z, -1, 0);
+      const n = this.streetReach(s.x, s.z, 0, -1);
+      const so = this.streetReach(s.x, s.z, 0, 1);
+      const min = Math.min(e, w, n, so);
+      if (min >= 40) return { x: s.x, z: s.z, e, w, n, s: so };
+      if (min >= 26 && (!fallback || min > fallback.min)) fallback = { x: s.x, z: s.z, e, w, n, s: so, min };
+    }
+    return fallback;
   }
 
   buildWater() {
     const shape = new THREE.Shape();
-    shape.moveTo(-260, -260);
+    shape.moveTo(-WORLD_HALF - 900, -WORLD_HALF - 900);
     COASTLINE.forEach(([x, z], i) => (i ? shape.lineTo(x, -z) : shape.lineTo(x, -z)));
-    shape.lineTo(260, -260);
+    shape.lineTo(WORLD_HALF + 900, -WORLD_HALF - 900);
     shape.closePath();
     const geo = new THREE.ShapeGeometry(shape);
     const sea = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x24505f, roughness: 0.15, metalness: 0.45 }));
@@ -896,13 +3734,32 @@ export class City {
       this.buildKampungRow(cx, cz, style);
       return;
     }
-    const count = Math.random() < 0.35 ? style.lots[0] : randInt(style.lots[0], style.lots[1]);
     const area = size - 9;
-    const cells = count === 1 ? [[0, 0, area, area]] : this.splitLots(area, count, cx, cz);
+    // A block is a grid of lots with alleys between them, not three boxes on an empty plate.
+    // The plate used to read as a plaza because the lots were 25 m wide; 17-19 m lots with a
+    // 3.4 m gang give the fabric a street wall and still leave the block walkable.
+    const n = Math.max(2, Math.round(area / 18));
+    const alley = 3.4;
+    const cell = (area - alley * (n - 1)) / n;
+    const cells: [number, number, number, number][] = [];
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        // one lot in eight is left empty: a courtyard, a parking bay, a warung yard
+        if (Math.random() < 0.12) continue;
+        cells.push([
+          -area / 2 + cell / 2 + i * (cell + alley),
+          -area / 2 + cell / 2 + j * (cell + alley),
+          cell,
+          cell,
+        ]);
+      }
+    }
     for (const [ox, oz, w, d] of cells) {
-      const [lo, hi] = style.heights;
-      const h = rand(lo, hi);
-      this.makeBuilding(cx + ox, cz + oz, w, d, h, cx, cz, style);
+      // no height here: the archetype decides how tall its lot may be, and the mixer decides the
+      // archetype, so one block cannot come out as one height band. Full-cycle mode: six
+      // consecutive lots hold six different buildings, so a block with eight lots is a mix and not
+      // a repeat (the fits filter drops what the lot is too small for).
+      this.makeBuilding(cx + ox, cz + oz, w, d, cx, cz);
     }
     // market districts get tarpaulin stalls spilled onto the pavement
     if (id === 'tanahabang' || id === 'glodok') {
@@ -924,12 +3781,14 @@ export class City {
         const h = rand(style.heights[0], style.heights[1]) - (i % 2) * 0.6;
         const x = cx + side * (gangHalf + houseW / 2);
         const z = cz - houseD - gapZ * 1.5 + i * (houseD + gapZ);
-        const wall = pick(style.walls);
+        const wall = pick(style.walls as number[]);
+        // the tile is per storey already; do NOT mutate tex.repeat here, the texture is cached and
+        // shared with every other 'strips' wall in the city
         const tex = windowTexture(wall, 'strips');
-        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(1.4, 1.1);
+        const houseGeo = new THREE.BoxGeometry(houseW, h, houseD);
+        tileBoxUV(houseGeo, 1, Math.max(1, Math.round(h / 3.2)));
         const body = new THREE.Mesh(
-          new THREE.BoxGeometry(houseW, h, houseD),
+          houseGeo,
           [new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }),
            new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.95 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }),
            new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 })]
@@ -989,131 +3848,162 @@ export class City {
     ].slice(0, count);
   }
 
-  makeBuilding(x: number, z: number, w: number, d: number, h: number, blockX = x, blockZ = z, style: any = null) {
-    const chromeLike = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.35, metalness: 0.7 });
-    const wall = style ? pick(style.walls) : pick(WALLS);
-    const facade = style ? pick(['grid', 'bands', 'strips']) : pick(['grid', 'bands', 'strips']);
-    const tex = windowTexture(wall, facade);
+  /**
+   * The archetype picker for one block or one street row.
+   *
+   * A weighted draw per lot happily returns the same type four lots running, which is the wall of
+   * identical boxes this card is about; the mixer bans its last two picks, so the shortest cycle is
+   * three lots and a block is a mix by construction. State lives per block (or per row), because
+   * the point is that NEIGHBOURS differ — two corners of the map may legitimately be the same type.
+   */
+  mixerFor(scope: string, district: string | null, full = false): ArchetypeMixer {
+    let m = this.facadeMixers.get(scope);
+    if (!m) {
+      m = new ArchetypeMixer(district, full);
+      this.facadeMixers.set(scope, m);
+    }
+    return m;
+  }
+
+  /** Detail geometry, bucketed by the block group it belongs to and the material it will draw with. */
+  pushFacadeDetail(key: string, geo: THREE.BufferGeometry) {
+    let perGroup = this.facadeDetailBuckets.get(this.group);
+    if (!perGroup) {
+      perGroup = new Map();
+      this.facadeDetailBuckets.set(this.group, perGroup);
+    }
+    const list = perGroup.get(key) ?? [];
+    list.push(geo);
+    perGroup.set(key, list);
+  }
+
+  /**
+   * One building: its mass, then the street of its archetype.
+   *
+   * The body merges into a mesh per wall material per block (so a block still culls by distance);
+   * the detail merges into one mesh per detail material for the whole block. That is what lets six
+   * archetypes with rails, cornices, awnings and shutters cost a handful of draw calls instead of
+   * tens per building.
+   */
+  addFacade(plan: FacadePlan) {
+    const { wall, spec } = plan;
+    // one tile is about one storey of one bay, tiled through the geometry's UVs (tileBoxUV) rather
+    // than the texture's repeat: the material key stays (wall, type), so bodies still merge
+    const tex = windowTexture(wall, spec.tile);
     const emis = emissiveTexture();
-    const rx = Math.max(1, Math.round(w / 6.5));
-    const ry = Math.max(1, Math.round(h / 6.5));
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    emis.wrapS = emis.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(rx, ry);
-    emis.repeat.set(rx, ry);
-
-    const sideMat = new THREE.MeshStandardMaterial({
-      map: tex,
-      emissive: 0xffffff,
-      emissiveMap: emis,
-      emissiveIntensity: 0,
-      roughness: 0.82,
-      metalness: 0.06,
-    });
-    this.emissiveMats.push(sideMat);
-    const roofMat = new THREE.MeshStandardMaterial({ color: style ? style.roof : 0x4a4a4c, roughness: 0.95 });
-    const mats = [sideMat, sideMat, roofMat, roofMat, sideMat, sideMat];
-
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats);
-    b.position.set(x, h / 2 + 0.2, z);
-    b.castShadow = true;
-    b.receiveShadow = true;
-    this.group.add(b);
-
-    // parapet so the roofline is not a razor edge
-    const parapet = new THREE.Mesh(
-      new THREE.BoxGeometry(w + 0.34, 0.42, d + 0.34),
-      new THREE.MeshStandardMaterial({ color: 0xd2d0d8, roughness: 0.9 })
-    );
-    parapet.position.set(x, h + 0.12, z);
-    parapet.castShadow = true;
-    this.group.add(parapet);
-
-    // occasional billboard with real text, like the reference storefronts
-    if (Math.random() < 0.6 && h < 34) {
-      const words = style ? [...style.signs, 'DISKON', 'MURAH', 'BUKA 24 JAM'] : ['DISKON', 'MURAH', 'PROMO', 'GRATIS ONGKIR', 'BUKA 24 JAM', 'KOPI ENAK', 'SERVIS AC', 'KOSONG'];
-      const word = pick(words);
-      const bg = pick(['#e94f4f', '#2f6fd0', '#f2b134', '#39b54a', '#8a3ad9']);
-      const boardTex = canvasTexture(256, 96, (ctx, cw, ch) => {
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, cw, ch);
-        ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        ctx.fillRect(0, ch - 12, cw, 12);
-        ctx.fillStyle = '#fff8e7';
-        fitFont(ctx, word, cw - 24, 52);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(word, cw / 2, ch / 2);
+    const matKey = `${wall}|${spec.tile}`;
+    let sideMat = this.buildingMatCache.get(matKey);
+    if (!sideMat) {
+      sideMat = new THREE.MeshStandardMaterial({
+        map: tex,
+        emissive: 0xffffff,
+        emissiveMap: emis,
+        emissiveIntensity: 0,
+        roughness: 0.82,
+        metalness: 0.06,
       });
-      const board = new THREE.Mesh(
-        new THREE.BoxGeometry(Math.min(w * 0.8, 7), 2.3, 0.22),
-        new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.6, emissive: 0xffffff, emissiveMap: boardTex, emissiveIntensity: 0.08 })
-      );
-      const faces = [
-        [0, d / 2 + 0.12, 0],
-        [0, -d / 2 - 0.12, Math.PI],
-        [w / 2 + 0.12, 0, Math.PI / 2],
-        [-w / 2 - 0.12, 0, -Math.PI / 2],
-      ];
-      const face = faces[Math.floor(rand(0, 4))];
-      board.position.set(x + face[0], Math.min(h - 1.5, 8.5), z + face[1]);
-      board.rotation.y = face[2];
-      board.castShadow = true;
-      this.group.add(board);
+      this.buildingMatCache.set(matKey, sideMat);
+      this.emissiveMats.push(sideMat);
     }
 
-    // roof furniture
-    if (Math.random() < 0.7) {
-      const ac = box(rand(1.5, 3), rand(0.8, 1.4), rand(1.5, 3), 0x6c6f74);
-      ac.position.set(x + rand(-w / 3, w / 3), h + 0.2 + (ac.geometry as any).parameters.height / 2, z + rand(-d / 3, d / 3));
-      this.group.add(ac);
+    const bucket = this.buildingBuckets.get(this.group) ?? new Map();
+    const entry = bucket.get(matKey) ?? { mat: sideMat, geos: [] };
+    const m = new THREE.Matrix4().makeRotationY(plan.yaw).setPosition(plan.x, plan.y, plan.z);
+    for (const b of archetypeBody(plan)) {
+      const g = new THREE.BoxGeometry(b.w, b.h, b.d);
+      tileBoxUV(g, Math.max(1, Math.round(b.w / 3.4)), Math.max(1, Math.round(b.h / 3.4)));
+      g.translate(b.x, b.y, b.z);
+      g.applyMatrix4(m);
+      entry.geos.push(g);
     }
-    if (h > 28 && Math.random() < 0.7) {
-      const mast = box(0.22, rand(4, 10), 0.22, 0x8d9199, { metalness: 0.6, roughness: 0.4 });
-      mast.position.set(x + rand(-w / 3, w / 3), h + 0.2 + (mast.geometry as any).parameters.height / 2, z + rand(-d / 3, d / 3));
-      this.group.add(mast);
-    }
-    // ground-floor storefront wrap (all sides) + signs
-    if (!this.shopTextures) {
-      this.shopTextures = [
-        shopTexture({ wall: '#5c5650', awning: '#a8352f' }),
-        shopTexture({ wall: '#4d5560', awning: '#2f6f7a' }),
-        shopTexture({ wall: '#635748', awning: '#b3892f' }),
-        shopTexture({ wall: '#4a4f4a', awning: '#3f7a4a' }),
-      ];
-    }
-    const shopTex = pick(this.shopTextures).clone();
-    shopTex.needsUpdate = true;
-    shopTex.wrapS = shopTex.wrapT = THREE.RepeatWrapping;
-    shopTex.repeat.set(Math.max(1, Math.round(Math.max(w, d) / 9)), 1);
-    const shopMat = new THREE.MeshStandardMaterial({ map: shopTex, roughness: 0.55, emissive: 0xffffff, emissiveMap: shopTex, emissiveIntensity: 0.06 });
-    this.shopMats = this.shopMats || [];
-    this.shopMats.push(shopMat);
-    const band = new THREE.Mesh(new THREE.BoxGeometry(w + 0.24, 2.9, d + 0.24), shopMat);
-    band.position.set(x, 1.45, z);
-    band.castShadow = true;
-    band.receiveShadow = true;
-    this.group.add(band);
+    bucket.set(matKey, entry);
+    this.buildingBuckets.set(this.group, bucket);
 
-    // plesetan, bukan merek asli
-    const shopWords = ['ALFAMURTI', 'INDOMERET', 'WARTEG BAHARI', 'BAKSO PAK TJE', 'MIE GACUAN', 'SATE SENAYUN',
-      'PULSA PERDANU', 'APOTEK SEHAT', 'BENGKEL AHOS', 'KOPI TUBRUK', 'TOKO EMAS MULYA', 'LAUNDRY KILAT',
-      'PANGKAS RAMBUT', 'MARTABAK BANGKOK', 'NASI PADANG SELONGSOR', 'JAMU GENDONG'];
-    const word = pick(shopWords);
-    const signColor = pick(['#ffd257', '#ff6b6b', '#64d2ff', '#a8ff8f', '#ff9f43', '#f2f2f6']);
-    const signTex = canvasTexture(256, 64, (ctx, cw, ch) => {
-      ctx.fillStyle = signColor;
-      ctx.fillRect(0, 0, cw, ch);
-      ctx.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx.fillRect(0, ch - 7, cw, 7);
-      ctx.fillStyle = '#241f1a';
-      fitFont(ctx, word, cw - 16, 34);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(word, cw / 2, ch / 2 - 1);
+    buildFacadeDetail(plan, (key, geo) => {
+      if (key === 'shopname' && plan.shop) {
+        // The plate is drawn by the facade kit, in world space, so this is the one place that can
+        // record where it hangs. A shop's board and the shop it names are written together.
+        geo.computeBoundingBox();
+        const c = geo.boundingBox!.getCenter(new THREE.Vector3());
+        this.shopSigns.push({
+          x: c.x,
+          // the detail is built in the frame of the group it merges into, and a block group is
+          // lifted to its terrain height: a proof camera reading a local y aims one hill too low
+          y: c.y + this.group.position.y,
+          z: c.z,
+          kind: plan.shop.kind as InteriorKind,
+          name: this.roomFor(plan.shop.kind as InteriorKind)?.name ?? '',
+        });
+      }
+      this.pushFacadeDetail(key, geo);
     });
-    // entrance: the door sits on the facade that faces the street (away from the
-    // block centre), so no shop is left facing a neighbour's wall
+    this.facadeAudit.push({
+      archetype: spec.id,
+      source: plan.source || 'block',
+      x: plan.x,
+      // plan.y is local to the group the geometry merges into, and a block group is lifted to its
+      // terrain height: the audit has to carry the WORLD ground height or a proof camera aims at a
+      // facade one hill-height too low
+      y: plan.y + this.group.position.y,
+      z: plan.z,
+      yaw: plan.yaw,
+      w: plan.w,
+      d: plan.d,
+      h: plan.h,
+      wall,
+      trim: plan.trim,
+      retail: spec.retail,
+      shop: !!plan.shop,
+    });
+  }
+
+  /** Merge every detail bucket once the city is laid out: one mesh per material per block group. */
+  finalizeFacadeDetails() {
+    for (const [group, perGroup] of this.facadeDetailBuckets) {
+      for (const [key, geos] of perGroup) {
+        if (!geos.length) continue;
+        const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+        if (!merged) continue;
+        const mesh = new THREE.Mesh(merged, facadeMaterial(key));
+        mesh.name = `facade-detail:${key}`;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+        for (const g of geos) g.dispose();
+      }
+    }
+    this.facadeDetailBuckets.clear();
+    // signs and painted walls are lit after dark, like the windows they sit between
+    for (const key of facadeEmissiveKeys()) {
+      const mat = facadeMaterial(key);
+      if (mat instanceof THREE.MeshStandardMaterial) this.emissiveMats.push(mat);
+    }
+  }
+
+  makeBuilding(x: number, z: number, w: number, d: number, blockX = x, blockZ = z) {
+    // One gate for every placement path. Block lots and street frontage both come through
+    // here and each used to check only its own clearance: 462 pairs of buildings were
+    // interpenetrating, the worst by 20 m, some sites used twice at identical coordinates.
+    const rect = { minX: x - w / 2 - 0.4, maxX: x + w / 2 + 0.4, minZ: z - d / 2 - 0.4, maxZ: z + d / 2 + 0.4 };
+    for (const f of this.footprints) {
+      if (rect.minX < f.maxX && rect.maxX > f.minX && rect.minZ < f.maxZ && rect.maxZ > f.minZ) return null;
+    }
+    if (this.onRoad(x, z, 5.4)) return null;   // 3.6 m trotoar + ~1.8 m setback
+    this.footprints.push(rect);
+
+    // The type comes first, then its height and colour: a district's taste picks the archetype, and
+    // the archetype decides how tall the lot may be. A warung in a 16 m cell is not a warung.
+    const district = districtAtPoint(x, z);
+    const spec = this.mixerFor(`block:${Math.round(blockX)}:${Math.round(blockZ)}`, district, true).next(
+      (s) => s.w[0] <= w + 4 && (s.id !== 'warung' || w <= 9)
+    );
+    const fw = Math.min(w, rand(spec.w[0], spec.w[1]));
+    const fd = Math.min(d, rand(spec.d[0], spec.d[1]));
+    const fh = rand(spec.h[0], spec.h[1]);
+    const wall = pick(spec.walls);
+    const trim = trimFor(spec, wall);
+
+    // the entrance, and therefore the street facade, faces away from the block centre
     const dx = x - blockX;
     const dz = z - blockZ;
     const faceX = Math.abs(dx) > Math.abs(dz);
@@ -1123,99 +4013,75 @@ export class City {
     const doorYaw = Math.atan2(nx, nz);
     const tx = nz; // tangent along the facade
     const tz = -nx;
-    const doorX = faceX ? x + nx * (w / 2 + 0.02) : x + (w > d ? -w * 0.22 : 0);
-    const doorZ = faceX ? z + (d > w ? -d * 0.22 : 0) : z + nz * (d / 2 + 0.02);
+    // The shop's identity is decided HERE, before its facade is drawn: the plate on the wall, the
+    // door under it and the room it opens into are the same shop, so they cannot disagree.
+    const seed = Math.round(x * 7 + z * 13);
+    const shop = spec.retail ? this.nextShop() : null;
+    // a shop's door is in the bay its ground floor reserved for the entrance; anything else gets
+    // a side entrance
+    // the entrance of anything that is not a shop is off-centre, and it is also measured along the
+    // frontage (fw), not into the depth: the two axes were swapped here as well
+    const offAlong = shop ? entranceOffset(spec.id, seed) * fw : -fw * 0.22;
+    // The door sits on the facade's street face, which is half the DEPTH from the centre — the
+    // facade's local -Z is the outward normal. It used to be half the frontage WIDTH, so on every
+    // lot whose depth exceeded its width (ruko and colonial: 292 of 1278 block shops on one load)
+    // the door and its shop marker were buried inside the building, up to 4.9 m deep, and the shop
+    // could not be entered from the street at all.
+    const doorX = faceX ? x + nx * (fd / 2 + 0.02) : x + offAlong;
+    const doorZ = faceX ? z + offAlong : z + nz * (fd / 2 + 0.02);
+
+    // local -Z is the street face, so the row is turned by the outward normal
+    this.addFacade({
+      x,
+      y: 0.2,
+      z,
+      yaw: Math.atan2(-nx, -nz),
+      w: fw,
+      d: fd,
+      h: fh,
+      wall,
+      trim,
+      spec,
+      seed,
+      source: 'block',
+      shop: shop ? { kind: shop.kind, cell: shop.cell } : undefined,
+    });
+
     this.doorMatrices.push(new THREE.Matrix4().makeRotationY(doorYaw).setPosition(doorX + nx * 0.06, 1.42, doorZ + nz * 0.06));
     this.handleMatrices.push(
       new THREE.Matrix4().makeTranslation(doorX + tx * 0.45 + nx * 0.14, 1.35, doorZ + tz * 0.45 + nz * 0.14)
     );
-    // remember this entrance as an enterable shop
-    if (w > 6.5 && d > 6.5) {
-      const kind = SHOP_KINDS[this.shopDoorKindCursor++ % SHOP_KINDS.length];
-      const room = this.roomFor(kind);
-      if (room) {
-        // two doors inside a few metres make "nearest shop" ambiguous, so only the first one
-        // becomes enterable; the shopfront sign still goes up either way
-        const ex = doorX + nx * 1.1;
-        const ez = doorZ + nz * 1.1;
-        const crowded = this.shopDoors.some((dd) => Math.hypot(dd.x - ex, dd.z - ez) < 8);
-        if (!crowded) this.shopDoors.push({ x: ex, z: ez, nx, nz, kind, name: room.name });
-        // physical shop sign above the door so the street reads Indonesian
-        const boardTex = canvasTexture(512, 96, (ctx, cw, ch) => {
-          ctx.fillStyle = KIND_SIGN[kind];
-          ctx.fillRect(0, 0, cw, ch);
-          ctx.fillStyle = '#ffffff';
-          fitFont(ctx, room.name, cw - 40, 46);
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(room.name, cw / 2, ch / 2 + 1);
-        });
-        const withBoard = Math.random() < 0.5;
-        const board = new THREE.Mesh(
-          new THREE.BoxGeometry(4.4, 0.9, 0.16),
-          new THREE.MeshStandardMaterial({ map: boardTex, emissive: 0xffffff, emissiveMap: boardTex, emissiveIntensity: 0.25, roughness: 0.55 })
-        );
-        if (withBoard) {
-          board.position.set(doorX + nx * 0.18, 3.55, doorZ + nz * 0.18);
-          board.rotation.y = doorYaw;
-          board.castShadow = true;
-          this.group.add(board);
-        }
-        // welcome mat
-        const mat2 = new THREE.Mesh(
-          new THREE.BoxGeometry(2.0, 0.04, 0.8),
-          new THREE.MeshStandardMaterial({ color: KIND_MAT[kind], roughness: 0.95 })
-        );
-        if (withBoard) {
-          mat2.position.set(doorX + nx * 0.55, 0.29, doorZ + nz * 0.55);
-          mat2.rotation.y = doorYaw;
-          this.group.add(mat2);
-        }
-      }
+    // A retail frontage is a shop you can walk into, full stop. The old gate opened only the first
+    // door of a cluster and left its neighbours closed while still drawing their shutters and
+    // their fascia, and it left every door under 6.5 m shut; that is the "shops that only pretend"
+    // half of this card. `nearestShopDoor` picks the closest door the player is standing outside
+    // of, so two doors a few metres apart resolve without either one going dark.
+    if (shop) {
+      this.shopDoors.push({ x: doorX + nx * 1.1, z: doorZ + nz * 1.1, nx, nz, kind: shop.kind, name: shop.name });
+      // welcome mat in the shop's own colour, collected for one merged mesh
+      const mat = new THREE.BoxGeometry(2.0, 0.04, 0.8);
+      mat.rotateY(doorYaw);
+      mat.translate(doorX + nx * 0.55, 0.29, doorZ + nz * 0.55);
+      this.tint(mat, KIND_MAT[shop.kind]);
+      this.shopMatGeos.push(mat);
     }
 
     for (let s2 = 0; s2 < 2; s2++) {
-      const m = new THREE.Matrix4().makeRotationY(doorYaw);
-      m.setPosition(doorX + nx * (0.28 + s2 * 0.28), 0.2 + s2 * 0.13, doorZ + nz * (0.28 + s2 * 0.28));
-      this.stepMatrices.push({ m, scale: 1.9 - s2 * 0.25 });
-    }
-
-    const signMat = new THREE.MeshStandardMaterial({
-      map: signTex,
-      emissive: 0xffffff,
-      emissiveMap: signTex,
-      emissiveIntensity: 0.12,
-      roughness: 0.55,
-    });
-    for (const side of [1, -1]) {
-      const signZ = new THREE.Mesh(new THREE.BoxGeometry(w * rand(0.3, 0.5), 0.72, 0.14), signMat);
-      signZ.position.set(x, 3.3, z + side * (d / 2 + 0.2));
-      this.group.add(signZ);
-      const signX = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.72, d * rand(0.25, 0.4)), signMat);
-      signX.position.set(x + side * (w / 2 + 0.2), 3.3, z);
-      this.group.add(signX);
-    }
-
-    if (Math.random() < 0.5) {
-      const awningMat = new THREE.MeshStandardMaterial({ color: pick([0xd94f4f, 0x3f8fbf, 0xe0a83f, 0x4fae6a]), roughness: 0.8 });
-      const along = faceX ? d : w;
-      const aw = new THREE.Mesh(new THREE.BoxGeometry(along * 0.7, 0.18, 1.6), awningMat);
-      aw.position.set(doorX + nx * 0.8, 3.2, doorZ + nz * 0.8);
-      aw.rotation.y = doorYaw;
-      aw.castShadow = true;
-      this.group.add(aw);
+      const m2 = new THREE.Matrix4().makeRotationY(doorYaw);
+      m2.setPosition(doorX + nx * (0.28 + s2 * 0.28), 0.2 + s2 * 0.13, doorZ + nz * (0.28 + s2 * 0.28));
+      this.stepMatrices.push({ m: m2, scale: 1.9 - s2 * 0.25 });
     }
 
     this.colliders.push({
-      minX: x - w / 2,
-      maxX: x + w / 2,
-      minZ: z - d / 2,
-      maxZ: z + d / 2,
-      h: h + 0.2,
+      minX: x - fw / 2,
+      maxX: x + fw / 2,
+      minZ: z - fd / 2,
+      maxZ: z + fd / 2,
+      h: fh + 0.2,
     });
 
     // remember which facade faces the street so spanduk banners can be strung there
-    this.facades.push({ x, z, w, d, faceX, dir: outward });
+    this.facades.push({ x, z, w: fw, d: fd, faceX, dir: outward });
   }
 
   decorateBlockEdge(cx: any, cz: any) {
@@ -1235,27 +4101,56 @@ export class City {
       const s = rand(0.85, 1.25);
       const tx = cx + pick([-half, half]) + rand(-1, 1);
       const tz = cz + pick([-half, half]) + rand(-1, 1);
-      const trunk = new THREE.Matrix4().makeTranslation(tx, 1.4 * s + 0.26, tz);
+      // the block group is lifted to the terrain at its centre, and this tree stands at the edge:
+      // sample the surface under the trunk and convert it into the group's frame
+      const gy = this.localGroundY(tx, tz);
+      const trunk = new THREE.Matrix4().makeTranslation(tx, gy + 1.8 * s, tz);
       trunk.scale(new THREE.Vector3(s, s, s));
       this.treeTrunks.push(trunk);
-      const crown = new THREE.Matrix4().makeTranslation(tx, 3.5 * s + 0.26, tz);
+      const crown = new THREE.Matrix4().makeTranslation(tx, gy + 4.3 * s, tz);
       crown.scale(new THREE.Vector3(s, s, s));
       this.treeCrowns.push(crown);
     }
   }
 
+  /**
+   * The ground under (x,z), expressed in the local frame of the group currently being built.
+   *
+   * `this.group` is swapped to a block group while the city generates, and that group is lifted to
+   * `terrainHeight` at the block's CENTRE (see buildBlocks). A prop 13 m away therefore sees a
+   * local zero that is not the ground under its own footprint: the trees in the parks and lots
+   * stood a fixed 0.28 m over that local zero, which is 0.4-0.7 m of daylight on a slope.
+   * `tests/world/placement.mjs` reports it as a floating pier, because a 3 m trunk is a thin tall
+   * column. Anything added to a lifted group has to convert the world height back into local.
+   */
+  private localGroundY(x: number, z: number): number {
+    let y = 0;
+    for (let g: THREE.Object3D | null = this.group; g; g = g.parent) y += g.position.y;
+    return this.groundHeightAt(x, z) - y;
+  }
+
+  /**
+   * A tree, seated on the ground under its own trunk.
+   *
+   * A block group is lifted to the terrain height at the block's CENTRE, and the park/lot tree
+   * stands up to 13 m away, so the group's local zero is not the ground under this trunk. The
+   * previous build put every trunk at a fixed 0.28 m over that local zero, which on a hillside is
+   * up to 1.2 m of daylight under the bark - `tests/world/placement.mjs` reports it as a floating
+   * pier because a 4 m trunk is a thin tall column.
+   */
   tree(x: number, z: number, scale = 1) {
+    const base = this.localGroundY(x, z);
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22 * scale, 0.32 * scale, 3.2 * scale, 6),
       new THREE.MeshStandardMaterial({ color: 0x6b4f34, roughness: 1 })
     );
-    trunk.position.set(x, 1.6 * scale + 0.28, z);
+    trunk.position.set(x, base + 1.6 * scale, z);
     trunk.castShadow = true;
     this.group.add(trunk);
     const leafMat = new THREE.MeshStandardMaterial({ color: pick([0x2bae4a, 0x1c7c3b, 0x39c455]), roughness: 1, flatShading: true });
     for (let i = 0; i < 2; i++) {
       const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(rand(1.5, 2.1) * scale, 0), leafMat);
-      leaf.position.set(x + rand(-0.5, 0.5) * scale, (3.4 + i * 1.2) * scale, z + rand(-0.5, 0.5) * scale);
+      leaf.position.set(x + rand(-0.5, 0.5) * scale, base + (3.4 + i * 1.2) * scale, z + rand(-0.5, 0.5) * scale);
       leaf.castShadow = true;
       this.group.add(leaf);
     }
@@ -1375,7 +4270,11 @@ export class City {
         lightLampM.push(new THREE.Matrix4().makeTranslation(cx, 3.58, cz + 0.17));
       }
     }
-    this.propAudit = [];
+    // Drop only the entries this pass re-places. Clearing the whole list (the old behaviour)
+    // made the haltes and carts invisible to the audit, but keeping the stale stall entries
+    // flagged them against the terrain instead of the kerb they were later moved onto.
+    const REPLACED = new Set(['bin', 'hydrant', 'bench', 'bench-leg', 'traffic-mast', 'traffic-arm', 'traffic-lens', 'traffic-housing', 'stall']);
+    this.propAudit = this.propAudit.filter((e) => !REPLACED.has(e.name));
     // Ground props used to assume a kerb wherever the old grid said there was one. With
     // organic blocks a kerb exists only on real plates, so drop the instances that land on
     // asphalt and lift the rest onto the plate they actually stand on.
@@ -1387,10 +4286,13 @@ export class City {
         for (const m of rawMatrices) {
           const pos = new THREE.Vector3().setFromMatrixPosition(m);
           if (this.groundHeightAt(pos.x, pos.z) <= 0) continue;
-          // traffic lights were modelled from the road surface (0), everything else already
-          // assumed a 0.26 kerb: only the lights need the lift
+          // One contract: a prop's base sits on the ground under it. The matrices were authored
+          // against two different floors (road-level for traffic lights, kerb-level 0.26 for the
+          // rest), so the correction is the delta between the real ground and that assumed
+          // floor - not the raw terrain height, which double-counts the kerb on a plate.
+          const assumedBase = name.startsWith('traffic-') ? 0 : 0.26;
           const lifted = m.clone();
-          if (name.startsWith('traffic-')) lifted.elements[13] += 0.26;
+          lifted.elements[13] += this.groundHeightAt(pos.x, pos.z) - assumedBase;
           kept.push(lifted);
         }
         matrices = kept;
@@ -1703,6 +4605,11 @@ export class City {
     const hutBase = box(2.4, 0.16, 2.4, 0xb4aea0);
     hutBase.position.set(rx, rg + 0.08, rz);
     this.group.add(hutBase);
+    // the block corner is on a grade, so the plinth takes up the drop on the low side: the hut is
+    // a level box and a base hanging over a slope is what reads as "pos ronda miring" (t_accfc928)
+    const hutSkirt = box(2.36, 0.6, 2.36, 0xa8a296);
+    hutSkirt.position.set(rx, rg - 0.3, rz);
+    this.group.add(hutSkirt);
     this.propAudit.push({ name: 'pos-ronda', x: rx, z: rz, bottom: rg });
     const hutBack = box(2.2, 2.0, 0.14, 0xe8e2d2);
     hutBack.position.set(rx, rg + 1.16, rz - 1.12);
@@ -1786,67 +4693,458 @@ export class City {
     });
   }
 
+  /**
+   * Start on the Thamrin-Sudirman spine just north of Bundaran HI: a real street in the
+   * dense part of the map, so the first thing the player sees is the city, not a field.
+   */
   getSpawn() {
-    return new THREE.Vector3(PITCH * 0.5, 0, PITCH * 0.5 + 4);
+    const spine = ARTERIALS[0].path;
+    const [ax, az] = spine[1];
+    const [bx, bz] = spine[2];
+    const t = 0.55;
+    const baseX = ax + (bx - ax) * t;
+    const baseZ = az + (bz - az) * t;
+    const inside = (x: number, z: number) =>
+      this.colliders.some((c) => x > c.minX - 1 && x < c.maxX + 1 && z > c.minZ - 1 && z < c.maxZ + 1);
+    // walk along the spine until a point is free: spawning inside a wall made the camera start
+    // inside a building and every shot hit a wall at zero distance
+    // the spawn guard has to look clear of street furniture too: a halte platform, a cart or a
+    // parked ojek on the kerb is enough to pin the player, which is what "walked 1 m" was
+    const clearOf = (x: number, z: number) =>
+      this.colliders.every((c) => x < c.minX - 3 || x > c.maxX + 3 || z < c.minZ - 3 || z > c.maxZ + 3);
+    // Start on the carriageway, not on a plate. snapToVerge pulls a point onto the nearest
+    // block plate so props have a kerb to stand on -- using it here put the player on a park
+    // lawn at y = 0.56 m, two metres from the asphalt, which is why the street looked like a
+    // plain pale surface with no road under him.
+    if (clearOf(baseX, baseZ)) return new THREE.Vector3(baseX, 0, baseZ);
+    for (const d of [3, -3, 6, -6, 9, -9, 12, -12, 18, -18, 24, -24]) {
+      for (const dz of [0, 6, -6, 12, -12, 20, -20]) {
+        const x = baseX + d;
+        const z = baseZ + dz;
+        if (!inside(x, z) && clearOf(x, z)) return new THREE.Vector3(x, 0, z);
+      }
+    }
+    return new THREE.Vector3(baseX, 0, baseZ);
+  }
+
+  /**
+   * Show only the blocks near the player. The city is 2.5 km across, so drawing all of it
+   * costs ~2k draw calls; at street level the player sees a 400 m bubble anyway.
+   */
+  updateCulling(x: number, z: number, radius = 220) {
+    const r2 = radius * radius;
+    for (const b of this.blockGroups) {
+      const dx = b.x - x;
+      const dz = b.z - z;
+      b.group.visible = dx * dx + dz * dz < r2;
+    }
   }
 
 
   /**
-   * The two vehicles that say "Jakarta" faster than any building: the orange bajaj and a row
-   * of ojeks waiting at the kerb. Both are parked props for now - they are placed where the
-   * city would put them (a bajaj rank in Glodok and Tanah Abang, ojeks clustered on the
-   * pavement) rather than being driven, so they cost no simulation.
+   * Street frontage: buildings that line the roads, facing them.
+   *
+   * Square blocks on a lattice always leave a ~60 m empty margin along a road (the corridor
+   * the block centre has to clear), which is what made the city read as a wide empty plain
+   * with buildings in the distance. A city is a wall of buildings with a road in front, so
+   * the rows are laid along each road here: depth behind, facade toward the asphalt.
    */
-  buildIndonesianVehicles() {
-    const rankDistricts = new Set(['glodok', 'tanahabang', 'kampung']);
-    const spots = this.blocks.filter((b) => b.type === 'city' || b.type === 'lot');
-    let bajaj = 0;
-    let ojek = 0;
-    for (const b of spots) {
-      const district = districtAtPoint(b.x, b.z);
-      const half = ((b.size ?? BLOCK) / 2) + 2.6;
-      const yaw = rand(0, Math.PI * 2);
-      if (bajaj < 10 && rankDistricts.has(district) && Math.random() < 0.45) {
-        const jit = rand(-half * 0.5, half * 0.5);
-        const x = b.x + jit;
-        const z = b.z - half + 3.4;   // on the plate, clear of the parked cars on the road
-        const model = new Bajaj({ simple: true });
-        model.root.position.set(x, 0, z);
-        model.root.rotation.y = yaw;
-        this.group.add(model.root);
-        this.colliders.push({ minX: x - 0.9, maxX: x + 0.9, minZ: z - 1.4, maxZ: z + 1.4, h: 1.7 });
-        bajaj++;
-        continue;
-      }
-      // ojeks park in a cluster of three along the kerb
-      if (ojek < 18 && Math.random() < 0.3) {
-        const count = 3;
-        for (let i = 0; i < count; i++) {
-          const x = b.x + rand(-half * 0.6, half * 0.6);
-          const z = b.z - half + 1.8 + i * 1.5;
-          const bike = new Ojek({});
-          bike.group.position.set(x, 0, z);
-          bike.group.rotation.y = yaw + rand(-0.25, 0.25);
-          bike.group.scale.setScalar(0.98);
-          this.group.add(bike.group);
-          ojek++;
+
+  buildFrontage() {
+    const roads = [...ARTERIALS.map((a) => ({ path: a.path, width: a.width })), { path: RING_ROAD, width: 20 }];
+    for (const road of roads) {
+      for (let i = 0; i < road.path.length - 1; i++) {
+        const [x1, z1] = road.path[i];
+        const [x2, z2] = road.path[i + 1];
+        const len = Math.hypot(x2 - x1, z2 - z1);
+        const dx = (x2 - x1) / len;
+        const dz = (z2 - z1) / len;
+        const nx = -dz;
+        const nz = dx;
+        for (const side of [-1, 1]) {
+          // one mixing run per road side, in full-cycle mode: six neighbours are six types, which is
+          // the mix a street wall needs (a block interior keeps a plain weighted draw)
+          const mixer = this.mixerFor(`row:${road.path[i]}:${i}:${side}`, districtAtPoint(x1 + nx * side * 12, z1 + nz * side * 12), true);
+          let t = 6;
+          while (t < len - 6) {
+            // The type decides the lot: a warung wants 5 m of frontage and a slab wants 30, which
+            // is why the row used to be a uniform band of one width and one height. peek(), not
+            // next(): a lot rejected by the gates below must not spend the type.
+            const spec = mixer.peek();
+            const w = rand(spec.w[0], spec.w[1]);      // frontage width along the street
+            const d = rand(spec.d[0], spec.d[1]);      // depth behind the facade
+            const h = rand(spec.h[0], spec.h[1]);
+            const px = x1 + dx * (t + w / 2) + nx * side * (road.width / 2 + 6.2 + d / 2);
+            const pz = z1 + dz * (t + w / 2) + nz * side * (road.width / 2 + 6.2 + d / 2);
+            let onRoad = false;
+            for (const other of roads) {
+              if (this.distToPath(px, pz, other.path) < other.width / 2 + 2) { onRoad = true; break; }
+            }
+            // The frontage row never asked whether the ground was already taken, so it built
+            // straight through block lots: 462 pairs of interpenetrating buildings, worst 20 m.
+            // It also never checked its own footprint against the road it faces.
+            const foot = {
+              minX: px - Math.max(w, d) / 2 - 0.4, maxX: px + Math.max(w, d) / 2 + 0.4,
+              minZ: pz - Math.max(w, d) / 2 - 0.4, maxZ: pz + Math.max(w, d) / 2 + 0.4,
+            };
+            const taken = this.footprints.some((f) => foot.minX < f.maxX && foot.maxX > f.minX && foot.minZ < f.maxZ && foot.maxZ > f.minZ);
+            if (!onRoad && !isWater(px, pz) && !taken) {
+              this.footprints.push(foot);
+              mixer.commit(spec);
+              const wall = pick(spec.walls);
+              const trim = trimFor(spec, wall);
+              // local -Z must face the road, or the frontage turns its back on the street: the old
+              // row was rotated by the direction of travel, so every shopfront plate and window
+              // faced down the road and the street saw a blank flank.
+              const yaw = Math.atan2(side * nx, side * nz);
+              const seed = Math.round(px * 7 + pz * 13);
+              // the shop identity comes before the facade, for the same reason as on a block lot
+              const shop = spec.retail ? this.nextShop() : null;
+              this.addFacade({
+                x: px,
+                y: terrainHeight(px, pz) + 0.3,
+                z: pz,
+                yaw,
+                w,
+                d,
+                h,
+                wall,
+                trim,
+                spec,
+                seed,
+                source: 'frontage',
+                shop: shop ? { kind: shop.kind, cell: shop.cell } : undefined,
+              });
+              /**
+               * A frontage shop is a shop you can walk into.
+               *
+               * These rows are 540 of the ~790 shopfronts per city that carried a fascia, roller
+               * shutters and a canopy over a wall with no door instance in it: the street said
+               * "shop" and pressing E did nothing. The door goes in the bay the archetype already
+               * reserved for its entrance (`entranceOffset`), which is the bay the plate names, so
+               * the plate, the door and the room are one shop.
+               */
+              if (shop) {
+                const gy = terrainHeight(px, pz) + 0.3;   // the plinth the facade stands on
+                const outX = -Math.sin(yaw);
+                const outZ = -Math.cos(yaw);
+                const tanX = Math.cos(yaw);
+                const tanZ = -Math.sin(yaw);
+                const along = entranceOffset(spec.id, seed) * w;
+                const doorX = px + tanX * along + outX * (d / 2 + 0.06);
+                const doorZ = pz + tanZ * along + outZ * (d / 2 + 0.06);
+                const doorYaw = yaw + Math.PI;
+                // the door's bottom sits on the same plinth course the block lots use: the detail
+                // is built 0.3 m above the terrain, so a door placed on the terrain would sink
+                this.doorMatrices.push(
+                  new THREE.Matrix4().makeRotationY(doorYaw).setPosition(doorX, gy + 1.22, doorZ)
+                );
+                this.handleMatrices.push(
+                  new THREE.Matrix4().makeTranslation(doorX + tanX * 0.45 + outX * 0.14, gy + 1.15, doorZ + tanZ * 0.45 + outZ * 0.14)
+                );
+                this.shopDoors.push({
+                  x: doorX + outX * 1.1,
+                  z: doorZ + outZ * 1.1,
+                  nx: outX,
+                  nz: outZ,
+                  kind: shop.kind,
+                  name: shop.name,
+                });
+              }
+              // collider in world space (axis-aligned box around the rotated footprint)
+              const halfX = (Math.abs(Math.cos(yaw)) * w + Math.abs(Math.sin(yaw)) * d) / 2;
+              const halfZ = (Math.abs(Math.sin(yaw)) * w + Math.abs(Math.cos(yaw)) * d) / 2;
+              this.colliders.push({ minX: px - halfX, maxX: px + halfX, minZ: pz - halfZ, maxZ: pz + halfZ, h });
+            }
+            t += w + rand(1.5, 4.5);
+          }
         }
-        this.colliders.push({ minX: b.x - 1.4, maxX: b.x + 1.4, minZ: b.z - half + 1.0, maxZ: b.z - half + 6.0, h: 1.4 });
       }
     }
-    this.vehicleCounts = { bajaj, ojek };
   }
 
-  // sidewalk plate height (blocks sit ~26cm above the asphalt)
-  groundHeightAt(x: number, z: number) {
-    // measured against the plates that actually exist, not the old lattice: with organic
-    // blocks a point can be on a kerb that is nowhere near a grid cell centre
-    for (const b of this.blocks) {
-      const half = (b.size ?? BLOCK) / 2 + 1.2; // props stand at the plate edge, not the centre
-      if (Math.abs(x - b.x) < half && Math.abs(z - b.z) < half) return 0.26;
+
+  /**
+   * The landforms that make the horizon read as Jakarta: the Bogor foothills sitting behind
+   * the southern edge of the map, and the raised tanggul that run along every flood canal.
+   *
+   * The heightfield in src/world/terrain.ts gives the ground its shape, but a displaced plane
+   * is still a plane: at 18 m per quad the rise is invisible. These are real geometry with
+   * silhouettes, and they are what tells the eye the city sits on land that goes somewhere.
+   */
+  buildTerrainFeatures() {
+    // 1. the foothills: low, wide ridges beyond the last row of blocks
+    const hillMat = new THREE.MeshStandardMaterial({ color: 0x4a5f45, roughness: 1, flatShading: true });
+    const hillMatFar = new THREE.MeshStandardMaterial({ color: 0x51657f, roughness: 1, flatShading: true });
+    const edge = WORLD_HALF;
+    for (let i = 0; i < 9; i++) {
+      const x = -edge + 200 + i * (edge * 2 - 400) / 8 + rand(-70, 70);
+      const r = rand(150, 260);
+      const h = rand(50, 100);
+      // outside the last block, not on top of it: a 400 m cone centred at the edge
+      // reaches 400 m into town and reads as a green slab hanging over the street
+      const z = edge + r * rand(0.55, 0.95);
+      const geo = new THREE.ConeGeometry(r, h, 7, 1);
+      const hill = new THREE.Mesh(geo, i % 3 === 0 ? hillMatFar : hillMat);
+      hill.position.set(x, terrainHeight(x, Math.min(z, edge - 1)) + h / 2 - 10, z);
+      hill.rotation.y = rand(0, Math.PI);
+      hill.scale.set(1, 1, rand(0.6, 1.1));
+      this.group.add(hill);
     }
-    return 0;
+
+    // 2. the canals themselves: water in the middle, a concrete tanggul either side. The
+    // heightfield cannot cut a channel this narrow at 18 m per quad, so it is a mesh.
+    const bankMat = new THREE.MeshStandardMaterial({ color: 0x7d786a, roughness: 0.95 });
+    const waterMat = new THREE.MeshStandardMaterial({ color: 0x2b5a63, roughness: 0.22, metalness: 0.35 });
+    for (const river of RIVERS) {
+      const surf = new THREE.Mesh(this.ribbon(river.path, river.width - 3, 0.3), waterMat);
+      surf.receiveShadow = true;
+      this.group.add(surf);
+      for (const side of [-1, 1]) {
+        const offsets: [number, number][] = [];
+        const pts = river.path;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const [x1, z1] = pts[i];
+          const [x2, z2] = pts[i + 1];
+          const len = Math.hypot(x2 - x1, z2 - z1) || 1;
+          const nx = -(z2 - z1) / len;
+          const nz = (x2 - x1) / len;
+          const off = river.width / 2 + 3.2;
+          offsets.push([x1 + nx * off * side, z1 + nz * off * side]);
+          offsets.push([x2 + nx * off * side, z2 + nz * off * side]);
+        }
+        const band = new THREE.Mesh(this.ribbon(offsets, 6.4, 0.42), bankMat);
+        band.receiveShadow = true;
+        band.castShadow = true;
+        this.group.add(band);
+      }
+    }
   }
+
+  // ---------------------------------------------------------------- the ground measure
+
+  /**
+   * The one ground measure in the game: how high is the surface that was actually built under
+   * (x, z), and what kind of surface is it.
+   *
+   * Everything that has to touch the ground reads this - the player, every pedestrian, the cars and
+   * the prop seating - so there is exactly one answer to "where is the floor here". The four things
+   * it has to know about, and the reason the old version was wrong:
+   *
+   *  1. A block plate is ONE flat 26 cm box lifted by the terrain under the block's centre
+   *     (`blockGroup.position.y`). Adding 26 cm to `terrainHeight(x, z)` at the query point instead
+   *     describes a plate that does not exist: on the southern rise the built slab and the analytic
+   *     number are 7 m apart, and downtown the plate's own corners are 20-40 cm off. Every slab is
+   *     registered with its real world top as it is built, so the measure cannot drift from the mesh.
+   *  2. The swept ribbons (carriageway, gutter, kerb stone, trotoar, crossing ramps) are registered
+   *     quad by quad as they are swept, so their height is the quad's own interpolation: the
+   *     cross-section's real profile, the chord between two stations, and the ramp's slope included.
+   *  3. The street kit's own carriageway, kerbs, walks and ramps are registered the same way as it
+   *     draws them. It used to be reconstructed here as `terrainHeight + 5/17 cm`, on a hill the
+   *     43 m terrain cells interpolate away - the kit sat up to 0.43 m under the city it was in.
+   *  4. The bare terrain is the drawn plane's own interpolation (190 segments), because
+   *     `terrainHeight` at the query point is up to 30 cm away from the triangles the player sees.
+   *
+   * `margin` widens the slabs for the placement questions ("is this slot on a pavement?"); actors
+   * always ask with the default 0.
+   */
+  groundInfoAt(x: number, z: number, margin = 0): { y: number; kind: GroundKind } {
+    return this.surfaceAt(x, z, margin, true);
+  }
+
+  /**
+   * The same measure with the street kit's own surfaces left out: the ground a city street is LAID
+   * on.
+   *
+   * The kit has to build against this, not against `groundInfoAt`, or every slab would sit on the
+   * slab drawn before it and a junction would climb its own pavement. Everything else - block
+   * plates, the arterial ribbons, the terrain plane - is here, because the street is laid on those.
+   */
+  baseGroundAt(x: number, z: number): number {
+    return this.surfaceAt(x, z, 0, false).y;
+  }
+
+  private surfaceAt(x: number, z: number, margin: number, includeStreet: boolean): { y: number; kind: GroundKind } {
+    let best: { y: number; kind: GroundKind } = { y: this.terrainMeshHeight(x, z), kind: 'terrain' };
+
+    // 1. the plates, the kerb rings under them, lawns, lots and the landmark squares
+    for (const p of this.platesNear(x, z, margin)) {
+      if (p.top <= best.y) continue;
+      const dx = x - p.x;
+      const dz = z - p.z;
+      const inside = p.round !== undefined
+        ? Math.hypot(dx, dz) <= p.round + margin
+        : Math.abs(dx) <= p.hx + margin && Math.abs(dz) <= p.hz + margin;
+      if (inside) best = { y: p.top, kind: p.kind };
+    }
+
+    // 2. the swept ribbons: carriageway, gutter, kerb stone, trotoar and the crossing ramps.
+    // Every quad was registered as it was swept, so this reads the surface that is drawn - the
+    // cross-section's real profile, the chord between two stations, and the ramp's slope included.
+    for (const q of this.quadsNear(x, z)) {
+      const y = quadHeightAt(q, x, z);
+      if (y !== null && y > best.y) best = { y, kind: q.kind };
+    }
+
+    // 3. the street kit's own surfaces, registered as it draws them. A kit piece is a surface like
+    // any ribbon in the city: what it lays is what the measure reads, so the carriageway the player
+    // walks on is the carriageway the kit drew - not `terrain + 5 cm`, which is what let the kit sit
+    // 0.43 m under the drawn city on the foothills.
+    if (includeStreet) {
+      for (const q of this.streetQuadsNear(x, z)) {
+        const y = quadHeightAt(q, x, z);
+        if (y !== null && y > best.y) best = { y, kind: q.kind };
+      }
+    }
+
+    return best;
+  }
+
+  /** The height of the built ground under (x, z), in metres. See `groundInfoAt`. */
+  groundHeightAt(x: number, z: number, margin = 0): number {
+    return this.groundInfoAt(x, z, margin).y;
+  }
+
+  /**
+   * The drawn terrain plane's own height: `buildGround` displaces a 190-segment plane, so between
+   * vertices the visible ground is a linear interpolation of `terrainHeight` at the corners, not
+   * `terrainHeight(x, z)`. On a 6.6 m cell the two differ by centimetres, and on the foothills by
+   * tens of them - enough to show as a foot under the road.
+   */
+  private terrainMeshHeight(x: number, z: number): number {
+    const half = TERRAIN_SPAN / 2;
+    const cell = TERRAIN_SPAN / TERRAIN_SEGS;
+    const fx = (x + half) / cell;
+    const fz = (z + half) / cell;
+    const ix = Math.floor(fx);
+    const iy = Math.floor(fz);
+    if (ix < 0 || iy < 0 || ix >= TERRAIN_SEGS || iy >= TERRAIN_SEGS) return terrainHeight(x, z);
+    const u = fx - ix;
+    const v = fz - iy;
+    // PlaneGeometry builds the grid from -half to +half in both axes (its local y is negated before
+    // the -90 degree rotation), so j grows with z
+    const X = (i: number) => -half + i * cell;
+    const Z = (j: number) => -half + j * cell;
+    const hA = terrainHeight(X(ix), Z(iy));
+    const hD = terrainHeight(X(ix + 1), Z(iy));
+    const hB = terrainHeight(X(ix), Z(iy + 1));
+    // PlaneGeometry splits the quad into (A,B,D) and (B,C,D), so the cell is two triangles
+    if (u + v <= 1) return hA + u * (hD - hA) + v * (hB - hA);
+    const hC = terrainHeight(X(ix + 1), Z(iy + 1));
+    return hC + (1 - u) * (hB - hC) + (1 - v) * (hD - hC);
+  }
+
+  /** The registered slabs under (x, z), coarse-grid bucketed: the plate list is 400 entries. */
+  private platesNear(x: number, z: number, margin: number): GroundPlate[] {
+    const CELL = 48;
+    const key = (i: number, j: number) => (i + 512) * 1024 + (j + 512);
+    // props are seated while the city is still being built, so the grid has to notice slabs that
+    // were registered after the first query: a cached grid indexed only the first few blocks and the
+    // rest of the map measured as bare terrain
+    if (!this.groundGrid || this.groundGridCount !== this.grounds.length) {
+      const grid = new Map<number, GroundPlate[]>();
+      for (const p of this.grounds) {
+        const r = p.round ?? Math.max(p.hx, p.hz);
+        const i0 = Math.floor((p.x - r) / CELL);
+        const i1 = Math.floor((p.x + r) / CELL);
+        const j0 = Math.floor((p.z - r) / CELL);
+        const j1 = Math.floor((p.z + r) / CELL);
+        for (let i = i0; i <= i1; i++) {
+          for (let j = j0; j <= j1; j++) {
+            const k = key(i, j);
+            const list = grid.get(k);
+            if (list) list.push(p);
+            else grid.set(k, [p]);
+          }
+        }
+      }
+      this.groundGrid = grid;
+      this.groundGridCount = this.grounds.length;
+    }
+    const i = Math.floor(x / CELL);
+    const j = Math.floor(z / CELL);
+    const out = this.groundGrid.get(key(i, j)) ?? [];
+    if (margin <= 0) return out;
+    // a widened query can reach a slab filed in a neighbouring cell
+    const widened: GroundPlate[] = [...out];
+    for (let di = -1; di <= 1; di++) {
+      for (let dj = -1; dj <= 1; dj++) {
+        if (!di && !dj) continue;
+        const list = this.groundGrid.get(key(i + di, j + dj));
+        if (list) widened.push(...list);
+      }
+    }
+    return widened;
+  }
+
+  /** The swept ground quads under (x, z), bucketed by cell: 3k quads cannot be tested per frame. */
+  private quadsNear(x: number, z: number): { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3; kind: GroundKind }[] {
+    const CELL = 24;
+    const key = (i: number, j: number) => (i + 1024) * 4096 + (j + 1024);
+    if (!this.quadGrid || this.quadGridCount !== this.groundQuads.length) {
+      const grid = new Map<number, number[]>();
+      for (let k = 0; k < this.groundQuads.length; k++) {
+        const q = this.groundQuads[k];
+        const minX = Math.min(q.a.x, q.b.x, q.c.x, q.d.x);
+        const maxX = Math.max(q.a.x, q.b.x, q.c.x, q.d.x);
+        const minZ = Math.min(q.a.z, q.b.z, q.c.z, q.d.z);
+        const maxZ = Math.max(q.a.z, q.b.z, q.c.z, q.d.z);
+        for (let i = Math.floor(minX / CELL); i <= Math.floor(maxX / CELL); i++) {
+          for (let j = Math.floor(minZ / CELL); j <= Math.floor(maxZ / CELL); j++) {
+            const kk = key(i, j);
+            const list = grid.get(kk);
+            if (list) list.push(k);
+            else grid.set(kk, [k]);
+          }
+        }
+      }
+      this.quadGrid = grid;
+      this.quadGridCount = this.groundQuads.length;
+    }
+    const ids = this.quadGrid.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
+    if (!ids) return [];
+    const out = [];
+    for (const id of ids) out.push(this.groundQuads[id]);
+    return out;
+  }
+
+  /**
+   * The street kit's own surfaces under (x, z), bucketed the same way as the swept ribbons.
+   *
+   * A separate list, so a kit piece can ask "what am I being laid on" without seeing its own paving,
+   * while the rest of the game sees the finished street.
+   */
+  private streetQuadsNear(x: number, z: number): { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; d: THREE.Vector3; kind: GroundKind }[] {
+    const CELL = 24;
+    const key = (i: number, j: number) => (i + 1024) * 4096 + (j + 1024);
+    if (!this.streetQuadGrid || this.streetQuadGridCount !== this.streetQuads.length) {
+      const grid = new Map<number, number[]>();
+      for (let k = 0; k < this.streetQuads.length; k++) {
+        const q = this.streetQuads[k];
+        const minX = Math.min(q.a.x, q.b.x, q.c.x, q.d.x);
+        const maxX = Math.max(q.a.x, q.b.x, q.c.x, q.d.x);
+        const minZ = Math.min(q.a.z, q.b.z, q.c.z, q.d.z);
+        const maxZ = Math.max(q.a.z, q.b.z, q.c.z, q.d.z);
+        for (let i = Math.floor(minX / CELL); i <= Math.floor(maxX / CELL); i++) {
+          for (let j = Math.floor(minZ / CELL); j <= Math.floor(maxZ / CELL); j++) {
+            const kk = key(i, j);
+            const list = grid.get(kk);
+            if (list) list.push(k);
+            else grid.set(kk, [k]);
+          }
+        }
+      }
+      this.streetQuadGrid = grid;
+      this.streetQuadGridCount = this.streetQuads.length;
+    }
+    const ids = this.streetQuadGrid.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
+    if (!ids) return [];
+    const out = [];
+    for (const id of ids) out.push(this.streetQuads[id]);
+    return out;
+  }
+
+
 
   randomRoadPoint(minDistFrom = null, min = 40) {
     for (let tries = 0; tries < 60; tries++) {
@@ -1909,7 +5207,9 @@ export class City {
     const b = pick(candidates);
     // every block has its own footprint now, so the sidewalk ring has to follow it instead of
     // assuming the old 38 m cell
-    const half = ((b.size ?? BLOCK) / 2) - 2.2;
+    // the pavement ring runs *outside* the block: frontage buildings line the block edge,
+    // so a ring at size/2 - 2.2 walks pedestrians through the shop row
+    const half = ((b.size ?? BLOCK) / 2) + 3.4;
     const t = rand(-half, half);
     const side = randInt(0, 3);
     if (side === 0) return new THREE.Vector3(b.x + t, 0, b.z - half);
@@ -1927,15 +5227,28 @@ export class City {
   }
 
   randomSidewalkPoint() {
-    const b = pick(this.blocks);
-    const edge = Math.floor(rand(0, 4));
-    const size = b.size ?? BLOCK;
-    const off = size / 2 - 2.2;
-    const t = rand(-size / 2 + 2, size / 2 - 2);
-    if (edge === 0) return new THREE.Vector3(b.x + t, 0, b.z - off);
-    if (edge === 1) return new THREE.Vector3(b.x + t, 0, b.z + off);
-    if (edge === 2) return new THREE.Vector3(b.x - off, 0, b.z + t);
-    return new THREE.Vector3(b.x + off, 0, b.z + t);
+    // A pavement point is only useful if something can stand on it. Crates, barrels and cash
+    // pickups are all placed with this call, and a point inside a bench or a halte produced a
+    // pickup nobody could reach: the player is pushed out of the collider before the 1.7 m
+    // radius is ever satisfied.
+    let last = new THREE.Vector3();
+    for (let attempt = 0; attempt < 14; attempt++) {
+      const b = pick(this.blocks);
+      const edge = Math.floor(rand(0, 4));
+      const size = b.size ?? BLOCK;
+      const off = size / 2 + 3.4;
+      const t = rand(-size / 2 + 2, size / 2 - 2);
+      if (edge === 0) last.set(b.x + t, 0, b.z - off);
+      else if (edge === 1) last.set(b.x + t, 0, b.z + off);
+      else if (edge === 2) last.set(b.x - off, 0, b.z + t);
+      else last.set(b.x + off, 0, b.z + t);
+      if (this.nearLayang(last.x, last.z, 6)) continue;
+      const blocked = this.colliders.some(
+        (c) => last.x > c.minX - 1.2 && last.x < c.maxX + 1.2 && last.z > c.minZ - 1.2 && last.z < c.maxZ + 1.2
+      );
+      if (!blocked) return last.clone();
+    }
+    return last;
   }
 
   update(dt: number, dayT: any) {
@@ -1969,18 +5282,27 @@ export class City {
     );
     this.hemi.intensity = lerp(0.78, 0.95, daylight);
     this.hemi.color.setHex(daylight > 0.3 ? 0xbfd8ff : 0x4a5f8a);
-    this.hemi.groundColor.setHex(daylight > 0.3 ? 0x59a05e : 0x2a2b33);
+    this.hemi.groundColor.setHex(daylight > 0.3 ? 0x8a8377 : 0x2a2b33);
 
     this.daylight = daylight;
     const night = 1 - clamp((daylight - 0.05) / 0.4, 0, 1);
     for (const m of this.emissiveMats) m.emissiveIntensity = night * 0.9;
-    if (this.shopMats) for (const m of this.shopMats) m.emissiveIntensity = 0.05 + night * 0.9;
     for (const m of this.lampMats) m.emissiveIntensity = 0.15 + night * 2.2;
 
     if (this.focusTarget) this.updateNightLights(dayT, this.focusTarget);
 
     const dist = 130;
     this.sun.position.set(sunX * dist, Math.max(8, sunY * 130), 42);
+
+    // a bus collider belongs to the bus, wherever the bus is: rewrite the same boxes from its
+    // transform, so the wall a body walks into is the wall it can see
+    for (const bus of this.buses) {
+      const p = bus.group.position;
+      writeRotatedFootprint(bus.boxes, p.x, p.z, bus.group.rotation.y, bus.halfWidth, bus.halfLength, bus.height);
+      bus.audit.x = p.x;
+      bus.audit.z = p.z;
+      bus.audit.bottom = p.y;
+    }
   }
 
 }
