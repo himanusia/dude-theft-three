@@ -102,6 +102,9 @@ node tools/shoot-shop-boards.mjs   # headless: searches the city for the stance 
                                    # shop plates land legibly in frame, photographs it from across
                                    # the street and measures the saved PNG (ink inside each plate's
                                    # projected rect). Writes proof/shop-boards.png
+node tests/world/crash-frame.mjs  # 12/12: a crash may never fill the frame with one colour
+                                  # (samples the centre pixel and the whole frame for 2 s after
+                                  # the hit, and fails if the boom ends up inside a wall)
 ```
 
 `city.ojeks` lists every live bike with its real group position and the cargo box's local

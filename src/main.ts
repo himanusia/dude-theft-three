@@ -478,6 +478,8 @@ const camShoulder = new THREE.Vector3();
 const _camTmp = new THREE.Vector3();
 const BASE_FOV = 58;
 let camDistActual = 5.8;
+/** extra height the boom takes on when a wall is closer than the car's own body */
+let camRise = 0;
 let autoAlignTimer = 0;
 let cinematic = false; // test hook: freeze the follow camera for asset comparison shots
 
@@ -542,17 +544,31 @@ function updateCamera(dt: number) {
   // On foot the camera may not come closer than 2.4 m: at 1.1 m the character's own head filled
   // a third of the screen whenever a kerb or a wall pulled the boom in.
   const minBoom = player.inCar ? 4.4 : player.inInterior ? 1.5 : 2.4;
-  const allowed = boomHit ? Math.max(minBoom, boomHit.dist - 0.45) : camDist;
+  // …but clipping the wall meant the camera went THROUGH it: taking the larger of the two put it
+  // a metre or two inside the facade, where every face is back-culled and the frame is nothing
+  // but the background — the "screen turns blue when I crash" report. A wall closer than the
+  // body's clearance is therefore resolved by RISING over the car instead of entering the wall:
+  // the camera stays outside the world, the car stays in frame, and geometry still stands between
+  // the lens and the sky.
+  let allowed = camDist;
+  let rise = 0;
+  if (boomHit) {
+    const clip = Math.max(0.6, boomHit.dist - 0.45);
+    allowed = Math.min(camDist, clip);
+    if (clip < minBoom) rise = (minBoom - clip) * 0.9;
+  }
   camDistActual = lerp(camDistActual, allowed, clamp(dt * (allowed < camDistActual ? 20 : 4.5), 0, 1));
+  camRise = lerp(camRise, rise, clamp(dt * (rise > camRise ? 14 : 4.5), 0, 1));
 
   camGoal.copy(camTarget).addScaledVector(dir, camDistActual).add(camShoulder);
   // The boom may not sink into the street, but the floor must not flatten the look either:
   // clamping y and still aiming at the player turned a full up-look into a look-down, because at
   // PITCH_UP the boom's own end is 4.7 m below the target and the cap caught it. The cap is
   // ground-relative (an interior has its own floor at y = 0), so it holds on the southern rise
-  // where an absolute 0.75 m is metres underground.
+  // where an absolute 0.75 m is metres underground. The rise over a wall is added on top, so
+  // climbing out of a crash never pushes the camera below that floor.
   const floorY = player.inInterior ? 0.75 : city.groundHeightAt(camGoal.x, camGoal.z) + 0.75;
-  camGoal.y = Math.max(camGoal.y, floorY);
+  camGoal.y = Math.max(camGoal.y + camRise, floorY);
 
   // smooth the camera-local offset rather than the world position, so the
   // framing stays glued to the player while the boom settles
@@ -807,9 +823,11 @@ function exitInterior() {
 function toggleVehicle() {
   if (player.inCar) {
     const car = player.inCar;
-    if (player.inCar) player.inCar.setDriverVisible(true);
-    if (player.inCar) player.inCar.setDriverVisible(true);
-  player.inCar = null;
+    car.setDriverVisible(true);
+    player.inCar = null;
+    // hand the car back: a stolen cruiser rejoins the police pool and its AI may drive it again
+    if (car.isPolice) police.releaseControl(car);
+    else car.owner = 'ai';
     const side = new THREE.Vector3(Math.cos(car.yaw), 0, -Math.sin(car.yaw));
     player.pos.set(car.pos.x + side.x * 2.1, 0, car.pos.z + side.z * 2.1);
     for (const b of city.colliders) {
@@ -830,6 +848,10 @@ function toggleVehicle() {
   if (!near) return;
   player.inCar = near.car;
   near.car.setDriverVisible(false);
+  // Hand the controls over before the next frame. police.update() runs after updateDriving(),
+  // so a cruiser whose AI is still attached would overwrite the player's steering every frame.
+  if (near.car.isPolice) police.takeControl(near.car);
+  else near.car.owner = 'player';
   character.group.visible = false;
   camYaw = near.car.yaw + Math.PI;
   autoAlignTimer = 0;
@@ -958,6 +980,8 @@ function updateDriving(dt: number) {
   // cop cars ram the player
   for (const entry of police.cars) {
     const cop = entry.car;
+    // the cruiser you are driving is not ramming itself
+    if (cop === car) continue;
     const d = Math.hypot(cop.pos.x - car.pos.x, cop.pos.z - car.pos.z);
     const now = performance.now();
     if (d < 3.4 && Math.abs(cop.speed) > 5 && now - (entry.lastRam ?? 0) > 700) {
@@ -1275,9 +1299,10 @@ function explode(car: any) {
     shotFx.spark(p, pick([0xffa030, 0xff5a20, 0xffd070]), 6, 0.13);
   }
   if (car === player.inCar) {
-    if (player.inCar) player.inCar.setDriverVisible(true);
-    if (player.inCar) player.inCar.setDriverVisible(true);
-  player.inCar = null;
+    car.setDriverVisible(true);
+    player.inCar = null;
+    if (car.isPolice) police.releaseControl(car);
+    else car.owner = 'ai';
     character.group.visible = true;
     hurt(45);
     hud.toast('Your car blew up', 'bad');
@@ -1513,6 +1538,7 @@ function resetCar(car: any, spot?: { pos: THREE.Vector3; yaw: number }) {
   car.wrecked = false;
   car.honk = 0;
   car.aiPaused = false;
+  car.owner = 'ai';
   car.brakeLight = false;
   car.mesh.position.set(car.pos.x, 0, car.pos.z);
   car.mesh.rotation.y = car.yaw;
