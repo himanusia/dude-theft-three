@@ -1,0 +1,1330 @@
+{
+ "base": "http://127.0.0.1:8981",
+ "road": {
+  "name": "Thamrin–Sudirman",
+  "width": 20,
+  "length": 1290.2
+ },
+ "total": 1290.2055371023223,
+ "rays": [
+  {
+   "u": 77.4,
+   "at": [
+    -8.11,
+    -470.17
+   ],
+   "hit": "road-arterial",
+   "hitY": 1.306,
+   "aboveTerrain": 0.041,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 1.306,
+     "above": 0.041,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 1.252,
+     "above": -0.013,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 203.6,
+   "at": [
+    -17.1,
+    -344.34
+   ],
+   "hit": "road-arterial",
+   "hitY": -0.323,
+   "aboveTerrain": 0.061,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.323,
+     "above": 0.061,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.374,
+     "above": 0.009,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 329.7,
+   "at": [
+    -24.73,
+    -218.14
+   ],
+   "hit": "road-arterial",
+   "hitY": -1.045,
+   "aboveTerrain": 0.056,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.045,
+     "above": 0.056,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.093,
+     "above": 0.007,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 455.9,
+   "at": [
+    -16.05,
+    -92.28
+   ],
+   "hit": "road-arterial",
+   "hitY": -1.28,
+   "aboveTerrain": 0.055,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.28,
+     "above": 0.055,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.329,
+     "above": 0.006,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 582,
+   "at": [
+    -7.37,
+    33.57
+   ],
+   "hit": "road-arterial",
+   "hitY": -1.246,
+   "aboveTerrain": 0.059,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.246,
+     "above": 0.059,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.295,
+     "above": 0.01,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 708.2,
+   "at": [
+    -0.57,
+    159.44
+   ],
+   "hit": "road-arterial",
+   "hitY": -0.122,
+   "aboveTerrain": 0.059,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.122,
+     "above": 0.059,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.181,
+     "above": 0,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 834.3,
+   "at": [
+    3.93,
+    285.51
+   ],
+   "hit": "road-arterial",
+   "hitY": 0.298,
+   "aboveTerrain": 0.057,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 0.298,
+     "above": 0.057,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 0.243,
+     "above": 0.003,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 960.5,
+   "at": [
+    8.43,
+    411.58
+   ],
+   "hit": "road-arterial",
+   "hitY": -0.345,
+   "aboveTerrain": 0.06,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.345,
+     "above": 0.06,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.397,
+     "above": 0.008,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 1086.6,
+   "at": [
+    4.67,
+    537.47
+   ],
+   "hit": "road-arterial",
+   "hitY": -0.475,
+   "aboveTerrain": 0.059,
+   "faceNormalY": 1,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.475,
+     "above": 0.059,
+     "ny": 1
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.517,
+     "above": 0.017,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 1212.8,
+   "at": [
+    0.16,
+    663.54
+   ],
+   "hit": "road-arterial",
+   "hitY": 4.736,
+   "aboveTerrain": 0.058,
+   "faceNormalY": 0.998,
+   "roadMesh": "road-arterial",
+   "road": true,
+   "stack": [
+    {
+     "name": "road-arterial",
+     "chain": "road-arterial<Group<Scene",
+     "type": "BufferGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 4.736,
+     "above": 0.058,
+     "ny": 0.998
+    },
+    {
+     "name": "terrain",
+     "chain": "terrain<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 4.684,
+     "above": 0.006,
+     "ny": 0.998
+    }
+   ]
+  }
+ ],
+ "centre": [
+  {
+   "u": 77.4,
+   "hit": "(unnamed)",
+   "above": 0.064,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 203.6,
+   "hit": "road-arterial",
+   "above": 0.062,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 329.7,
+   "hit": "road-arterial",
+   "above": 0.056,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 455.9,
+   "hit": "road-arterial",
+   "above": 0.056,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 582,
+   "hit": "(unnamed)",
+   "above": 0.07,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 708.2,
+   "hit": "road-arterial",
+   "above": 0.06,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 834.3,
+   "hit": "road-arterial",
+   "above": 0.057,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 960.5,
+   "hit": "road-arterial",
+   "above": 0.061,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 1086.6,
+   "hit": "road-arterial",
+   "above": 0.06,
+   "roadUnder": "road-arterial"
+  },
+  {
+   "u": 1212.8,
+   "hit": "road-arterial",
+   "above": 0.057,
+   "roadUnder": "road-arterial"
+  }
+ ],
+ "kerbFace": {
+  "at": [
+   -18.09,
+   -31.79
+  ],
+  "hit": "kerb",
+  "distance": 1.21,
+  "height": 0.15,
+  "facesRoad": 0.997
+ },
+ "summary": {
+  "points": 10,
+  "roadHits": 10,
+  "nonRoad": []
+ },
+ "winding": [
+  {
+   "name": "kerb",
+   "geometry": "BoxGeometry",
+   "side": 0,
+   "count": 385,
+   "tris": 4620,
+   "area": 3063026.4,
+   "up": 1523767,
+   "down": 1523767,
+   "vertical": 15491.8,
+   "maxDownFrac": 0.498,
+   "worst": {
+    "area": 2227.9,
+    "at": [
+     -841,
+     -0.29,
+     -776
+    ],
+    "normalY": -1,
+    "tris": 6
+   },
+   "downFrac": 0.497
+  },
+  {
+   "name": "plate",
+   "geometry": "BoxGeometry",
+   "side": 0,
+   "count": 387,
+   "tris": 4644,
+   "area": 2989252.6,
+   "up": 1482203.1,
+   "down": 1482203.1,
+   "vertical": 24844.5,
+   "maxDownFrac": 0.496,
+   "worst": {
+    "area": 510,
+    "at": [
+     -609.8,
+     0.45,
+     -726
+    ],
+    "normalY": -1,
+    "tris": 6
+   },
+   "downFrac": 0.496
+  },
+  {
+   "name": "lot",
+   "geometry": "BoxGeometry",
+   "side": 0,
+   "count": 71,
+   "tris": 852,
+   "area": 445286.7,
+   "up": 221850.2,
+   "down": 221850.2,
+   "vertical": 1586.3,
+   "maxDownFrac": 0.498,
+   "worst": {
+    "area": 1707.99,
+    "at": [
+     1083.1,
+     31.09,
+     898.5
+    ],
+    "normalY": -1,
+    "tris": 7
+   },
+   "downFrac": 0.498
+  },
+  {
+   "name": "lawn",
+   "geometry": "BoxGeometry",
+   "side": 0,
+   "count": 51,
+   "tris": 612,
+   "area": 320123.5,
+   "up": 159378.3,
+   "down": 159378.3,
+   "vertical": 1367.1,
+   "maxDownFrac": 0.498,
+   "worst": {
+    "area": 1484.55,
+    "at": [
+     -659.9,
+     0.27,
+     -834.5
+    ],
+    "normalY": -1,
+    "tris": 7
+   },
+   "downFrac": 0.498
+  },
+  {
+   "name": "lawn",
+   "geometry": "CylinderGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 128,
+   "area": 1419.7,
+   "up": 702.3,
+   "down": 702.3,
+   "vertical": 15.1,
+   "maxDownFrac": 0.495,
+   "worst": {
+    "area": 21.95,
+    "at": [
+     32.5,
+     -0.97,
+     60.3
+    ],
+    "normalY": -1,
+    "tris": 96
+   },
+   "downFrac": 0.495
+  },
+  {
+   "name": "river",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 1682,
+   "area": 162031.7,
+   "up": 161994.1,
+   "down": 37.6,
+   "vertical": 0,
+   "maxDownFrac": 0,
+   "worst": {
+    "area": 37.6,
+    "at": [
+     -808.6,
+     -0.09,
+     513.8
+    ],
+    "normalY": -1,
+    "tris": 580
+   },
+   "downFrac": 0
+  },
+  {
+   "name": "crossing-stripes",
+   "geometry": "BoxGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 12,
+   "area": 2.8,
+   "up": 1.3,
+   "down": 1.3,
+   "vertical": 0.1,
+   "maxDownFrac": 0.464,
+   "worst": {
+    "area": 0.67,
+    "at": [
+     -0.2,
+     -0.01,
+     -1.5
+    ],
+    "normalY": -1,
+    "tris": 7
+   },
+   "downFrac": 0.464
+  },
+  {
+   "name": "trotoar",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 11768,
+   "area": 89997,
+   "up": 83940.8,
+   "down": 0.6,
+   "vertical": 6055.5,
+   "maxDownFrac": 0,
+   "worst": {
+    "area": 0.61,
+    "at": [
+     544.3,
+     -0.33,
+     -534.6
+    ],
+    "normalY": -1,
+    "tris": 9897
+   },
+   "downFrac": 0
+  },
+  {
+   "name": "plate",
+   "geometry": "PlaneGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 2,
+   "area": 1280,
+   "up": 1280,
+   "down": 0,
+   "vertical": 0,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  },
+  {
+   "name": "road-local",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 12096,
+   "area": 290639.6,
+   "up": 290639.6,
+   "down": 0,
+   "vertical": 0,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  },
+  {
+   "name": "road-arterial",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 2942,
+   "area": 184001,
+   "up": 184001,
+   "down": 0,
+   "vertical": 0,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  },
+  {
+   "name": "road-shoulder",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 3888,
+   "area": 23009.4,
+   "up": 23009.4,
+   "down": 0,
+   "vertical": 0,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  },
+  {
+   "name": "lane-edge",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 5884,
+   "area": 3493.4,
+   "up": 3493.4,
+   "down": 0,
+   "vertical": 0,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  },
+  {
+   "name": "kerb",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 31900,
+   "area": 11952.1,
+   "up": 5136.6,
+   "down": 0,
+   "vertical": 6815.5,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  },
+  {
+   "name": "gutter",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 19140,
+   "area": 11894.6,
+   "up": 11894.6,
+   "down": 0,
+   "vertical": 0.1,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  },
+  {
+   "name": "tactile",
+   "geometry": "PlaneGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 2,
+   "area": 1.4,
+   "up": 1.4,
+   "down": 0,
+   "vertical": 0,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  },
+  {
+   "name": "kerb-ramp",
+   "geometry": "BufferGeometry",
+   "side": 0,
+   "count": 1,
+   "tris": 1344,
+   "area": 878.6,
+   "up": 652.8,
+   "down": 0,
+   "vertical": 225.8,
+   "maxDownFrac": 0,
+   "worst": null,
+   "downFrac": 0
+  }
+ ],
+ "sweeps": [
+  {
+   "name": "lawn",
+   "parent": "Group<Group<Scene",
+   "geometry": "CylinderGeometry",
+   "material": "#4e8a44",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 128,
+   "area": 1419.7,
+   "up": 702.3,
+   "down": 702.3,
+   "vertical": 15.1,
+   "downFrac": 0.495,
+   "downWorst": {
+    "area": 21.95,
+    "at": [
+     32.5,
+     -0.97,
+     60.3
+    ],
+    "normalY": -1,
+    "tris": 96
+   }
+  },
+  {
+   "name": "river",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#2f6577",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 1682,
+   "area": 162031.7,
+   "up": 161994.1,
+   "down": 37.6,
+   "vertical": 0,
+   "downFrac": 0,
+   "downWorst": {
+    "area": 37.6,
+    "at": [
+     -808.6,
+     -0.09,
+     513.8
+    ],
+    "normalY": -1,
+    "tris": 580
+   }
+  },
+  {
+   "name": "trotoar",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 11768,
+   "area": 89997,
+   "up": 83940.8,
+   "down": 0.6,
+   "vertical": 6055.5,
+   "downFrac": 0,
+   "downWorst": {
+    "area": 0.61,
+    "at": [
+     544.3,
+     -0.33,
+     -534.6
+    ],
+    "normalY": -1,
+    "tris": 9897
+   }
+  },
+  {
+   "name": "road-local",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 12096,
+   "area": 290639.6,
+   "up": 290639.6,
+   "down": 0,
+   "vertical": 0,
+   "downFrac": 0,
+   "downWorst": null
+  },
+  {
+   "name": "road-arterial",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 2942,
+   "area": 184001,
+   "up": 184001,
+   "down": 0,
+   "vertical": 0,
+   "downFrac": 0,
+   "downWorst": null
+  },
+  {
+   "name": "road-shoulder",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 3888,
+   "area": 23009.4,
+   "up": 23009.4,
+   "down": 0,
+   "vertical": 0,
+   "downFrac": 0,
+   "downWorst": null
+  },
+  {
+   "name": "lane-edge",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#e8e4d6",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 5884,
+   "area": 3493.4,
+   "up": 3493.4,
+   "down": 0,
+   "vertical": 0,
+   "downFrac": 0,
+   "downWorst": null
+  },
+  {
+   "name": "kerb",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": true,
+   "tris": 31900,
+   "area": 11952.1,
+   "up": 5136.6,
+   "down": 0,
+   "vertical": 6815.5,
+   "downFrac": 0,
+   "downWorst": null
+  },
+  {
+   "name": "gutter",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": true,
+   "tris": 19140,
+   "area": 11894.6,
+   "up": 11894.6,
+   "down": 0,
+   "vertical": 0.1,
+   "downFrac": 0,
+   "downWorst": null
+  },
+  {
+   "name": "kerb-ramp",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": true,
+   "tris": 1344,
+   "area": 878.6,
+   "up": 652.8,
+   "down": 0,
+   "vertical": 225.8,
+   "downFrac": 0,
+   "downWorst": null
+  }
+ ],
+ "others": [
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ShapeGeometry",
+   "material": "#24505f",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 11,
+   "area": 10138121.5,
+   "up": 0,
+   "down": 10138121.5,
+   "vertical": 0,
+   "downFrac": 1,
+   "downWorst": {
+    "area": 6512400,
+    "at": [
+     -1197,
+     0.02,
+     855
+    ],
+    "normalY": -1,
+    "tris": 0
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#51657f",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 344008.1,
+   "up": 175920.8,
+   "down": 168087.3,
+   "vertical": 0,
+   "downFrac": 0.489,
+   "downWorst": {
+    "area": 24012.47,
+    "at": [
+     -876.7,
+     68.1,
+     1378.2
+    ],
+    "normalY": -1,
+    "tris": 13
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 268278.2,
+   "up": 136889.7,
+   "down": 131388.5,
+   "vertical": 0,
+   "downFrac": 0.49,
+   "downWorst": {
+    "area": 18769.78,
+    "at": [
+     433.3,
+     66.85,
+     1296.6
+    ],
+    "normalY": -1,
+    "tris": 13
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 268474.4,
+   "up": 139506.7,
+   "down": 128967.7,
+   "vertical": 0,
+   "downFrac": 0.48,
+   "downWorst": {
+    "area": 18423.95,
+    "at": [
+     -341.2,
+     69.12,
+     1456
+    ],
+    "normalY": -1,
+    "tris": 12
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 230850.3,
+   "up": 118218.1,
+   "down": 112632.2,
+   "vertical": 0,
+   "downFrac": 0.488,
+   "downWorst": {
+    "area": 16090.31,
+    "at": [
+     -581,
+     68.68,
+     1556
+    ],
+    "normalY": -1,
+    "tris": 7
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 224840.5,
+   "up": 114632.9,
+   "down": 110207.6,
+   "vertical": 0,
+   "downFrac": 0.49,
+   "downWorst": {
+    "area": 15743.95,
+    "at": [
+     1252.1,
+     67.55,
+     1359.9
+    ],
+    "normalY": -1,
+    "tris": 7
+   }
+  },
+  {
+   "name": "facade-detail:trim:a8a08c",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#a8a08c",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 46272,
+   "area": 235172.7,
+   "up": 106685.5,
+   "down": 106685.5,
+   "vertical": 21801.7,
+   "downFrac": 0.454,
+   "downWorst": {
+    "area": 142.58,
+    "at": [
+     -6.3,
+     9.67,
+     479.7
+    ],
+    "normalY": -1,
+    "tris": 5587
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 223045.5,
+   "up": 119268.1,
+   "down": 103777.4,
+   "vertical": 0,
+   "downFrac": 0.465,
+   "downWorst": {
+    "area": 14825.34,
+    "at": [
+     926.4,
+     68.64,
+     1451
+    ],
+    "normalY": -1,
+    "tris": 13
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#51657f",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 199012.4,
+   "up": 104835.6,
+   "down": 94176.8,
+   "vertical": 0,
+   "downFrac": 0.473,
+   "downWorst": {
+    "area": 13453.83,
+    "at": [
+     644.8,
+     68.22,
+     1218.3
+    ],
+    "normalY": -1,
+    "tris": 13
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 192431.1,
+   "up": 99570.1,
+   "down": 92861,
+   "vertical": 0,
+   "downFrac": 0.483,
+   "downWorst": {
+    "area": 13265.86,
+    "at": [
+     46.5,
+     68,
+     1301.3
+    ],
+    "normalY": -1,
+    "tris": 13
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#51657f",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 171653.9,
+   "up": 93309.6,
+   "down": 78344.3,
+   "vertical": 0,
+   "downFrac": 0.456,
+   "downWorst": {
+    "area": 11192.05,
+    "at": [
+     -247.2,
+     68.89,
+     1234.6
+    ],
+    "normalY": -1,
+    "tris": 9
+   }
+  },
+  {
+   "name": "facade-detail:trim:8b939b",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#8b939b",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 12024,
+   "area": 174800.6,
+   "up": 72085.3,
+   "down": 72085.3,
+   "vertical": 30630.1,
+   "downFrac": 0.412,
+   "downWorst": {
+    "area": 348.76,
+    "at": [
+     -560.9,
+     7.27,
+     675.5
+    ],
+    "normalY": -1,
+    "tris": 10062
+   }
+  }
+ ],
+ "materials": [
+  {
+   "name": "road-arterial",
+   "roughness": 0.97,
+   "metalness": 0,
+   "mapMeanRGB": [
+    40,
+    44,
+    50
+   ],
+   "mapLuma": 43.7
+  },
+  {
+   "name": "road-local",
+   "roughness": 0.97,
+   "metalness": 0,
+   "mapMeanRGB": [
+    40,
+    44,
+    50
+   ],
+   "mapLuma": 43.7
+  },
+  {
+   "name": "road-shoulder",
+   "roughness": 0.98,
+   "metalness": 0,
+   "mapMeanRGB": [
+    50,
+    54,
+    59
+   ],
+   "mapLuma": 53.2
+  },
+  {
+   "name": "trotoar",
+   "roughness": 0.86,
+   "metalness": 0,
+   "mapMeanRGB": [
+    173,
+    168,
+    155
+   ],
+   "mapLuma": 167.8
+  },
+  {
+   "name": "kerb",
+   "roughness": 0.8,
+   "metalness": 0,
+   "mapMeanRGB": [
+    179,
+    173,
+    161
+   ],
+   "mapLuma": 173.4,
+   "tone": [
+    0.55,
+    1
+   ]
+  },
+  {
+   "name": "gutter",
+   "roughness": 0.92,
+   "metalness": 0,
+   "mapMeanRGB": [
+    85,
+    83,
+    77
+   ],
+   "mapLuma": 82.9,
+   "tone": [
+    0.42,
+    0.92
+   ]
+  },
+  {
+   "name": "tactile",
+   "roughness": 0.78,
+   "metalness": 0,
+   "mapMeanRGB": [
+    197,
+    150,
+    29
+   ],
+   "mapLuma": 151.2
+  }
+ ],
+ "contrast": {
+  "walkOverRoadMap": 3.84,
+  "roughnessRoad": 0.97,
+  "roughnessWalk": 0.86
+ },
+ "crossings": {
+  "planned": 168,
+  "tactilePads": 336,
+  "zebraBars": 2619,
+  "rampVerts": 2688,
+  "firstPad": {
+   "at": [
+    -0.04,
+    -398.63
+   ],
+   "hit": "tactile",
+   "above": 0.266,
+   "stack": [
+    "tactile@+0.266",
+    "tactile@+0.266",
+    "trotoar@+0.235"
+   ]
+  }
+ }
+}

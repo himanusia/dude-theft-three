@@ -20,6 +20,9 @@ const BASE = process.env.DTA_URL || process.argv[2] || 'http://127.0.0.1:8765';
 const OUT = process.env.ROAD_SHOT || 'screenshots/proof/road-vs-walk.png';
 /** the card's acceptance floor: walk patch must be at least this much brighter than the road */
 const MIN_RATIO = 1.6;
+/** The city builds synchronously on load and this Mac routinely sits at load average 20+ while
+ *  other lanes run: the default 30 s navigation budget fails before a single frame exists. */
+const NAV_TIMEOUT = Number(process.env.SHOT_NAV_TIMEOUT || 240000);
 const PATCH = 20; // px box side sampled around each projected world point
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -119,6 +122,7 @@ const browser = await puppeteer.launch({
   headless: 'new',
   args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--mute-audio'],
   defaultViewport: { width: 1600, height: 1000 },
+  protocolTimeout: 300000,
 });
 
 try {
@@ -128,7 +132,7 @@ try {
   page.on('console', (m) => {
     if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) errors.push(m.text());
   });
-  await page.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
   await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
   await sleep(1200);
   await page.click('#start-btn');

@@ -1,0 +1,654 @@
+{
+ "base": "http://127.0.0.1:8982",
+ "road": {
+  "name": "Thamrin–Sudirman",
+  "width": 20,
+  "length": 1290.2
+ },
+ "total": 1290.2055371023223,
+ "rays": [
+  {
+   "u": 77.4,
+   "at": [
+    -8.11,
+    -470.17
+   ],
+   "hit": "(unnamed)",
+   "hitY": 1.252,
+   "aboveTerrain": -0.013,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 1.252,
+     "above": -0.013,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 203.6,
+   "at": [
+    -17.1,
+    -344.34
+   ],
+   "hit": "(unnamed)",
+   "hitY": -0.374,
+   "aboveTerrain": 0.009,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.374,
+     "above": 0.009,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 329.7,
+   "at": [
+    -24.73,
+    -218.14
+   ],
+   "hit": "(unnamed)",
+   "hitY": -1.093,
+   "aboveTerrain": 0.007,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.093,
+     "above": 0.007,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 455.9,
+   "at": [
+    -16.05,
+    -92.28
+   ],
+   "hit": "(unnamed)",
+   "hitY": -1.329,
+   "aboveTerrain": 0.006,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.329,
+     "above": 0.006,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 582,
+   "at": [
+    -7.37,
+    33.57
+   ],
+   "hit": "(unnamed)",
+   "hitY": -1.295,
+   "aboveTerrain": 0.01,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -1.295,
+     "above": 0.01,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 708.2,
+   "at": [
+    -0.57,
+    159.44
+   ],
+   "hit": "(unnamed)",
+   "hitY": -0.181,
+   "aboveTerrain": 0,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.181,
+     "above": 0,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 834.3,
+   "at": [
+    3.93,
+    285.51
+   ],
+   "hit": "(unnamed)",
+   "hitY": 0.243,
+   "aboveTerrain": 0.003,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 0.243,
+     "above": 0.003,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 960.5,
+   "at": [
+    8.43,
+    411.58
+   ],
+   "hit": "(unnamed)",
+   "hitY": -0.397,
+   "aboveTerrain": 0.008,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.397,
+     "above": 0.008,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 1086.6,
+   "at": [
+    4.67,
+    537.47
+   ],
+   "hit": "(unnamed)",
+   "hitY": -0.517,
+   "aboveTerrain": 0.017,
+   "faceNormalY": 1,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": -0.517,
+     "above": 0.017,
+     "ny": 1
+    }
+   ]
+  },
+  {
+   "u": 1212.8,
+   "at": [
+    0.16,
+    663.54
+   ],
+   "hit": "(unnamed)",
+   "hitY": 4.684,
+   "aboveTerrain": 0.006,
+   "faceNormalY": 0.998,
+   "roadMesh": null,
+   "road": false,
+   "stack": [
+    {
+     "name": "(unnamed)",
+     "chain": "Mesh<Group<Scene",
+     "type": "PlaneGeometry",
+     "mat": "#ffffff",
+     "side": 0,
+     "y": 4.684,
+     "above": 0.006,
+     "ny": 0.998
+    }
+   ]
+  }
+ ],
+ "centre": [
+  {
+   "u": 77.4,
+   "hit": "(unnamed)",
+   "above": 0.083,
+   "roadUnder": null
+  },
+  {
+   "u": 203.6,
+   "hit": "(unnamed)",
+   "above": 0.013,
+   "roadUnder": null
+  },
+  {
+   "u": 329.7,
+   "hit": "(unnamed)",
+   "above": 0.007,
+   "roadUnder": null
+  },
+  {
+   "u": 455.9,
+   "hit": "(unnamed)",
+   "above": 0.009,
+   "roadUnder": null
+  },
+  {
+   "u": 582,
+   "hit": "(unnamed)",
+   "above": 0.089,
+   "roadUnder": null
+  },
+  {
+   "u": 708.2,
+   "hit": "(unnamed)",
+   "above": 0.003,
+   "roadUnder": null
+  },
+  {
+   "u": 834.3,
+   "hit": "(unnamed)",
+   "above": 0.004,
+   "roadUnder": null
+  },
+  {
+   "u": 960.5,
+   "hit": "(unnamed)",
+   "above": 0.008,
+   "roadUnder": null
+  },
+  {
+   "u": 1086.6,
+   "hit": "(unnamed)",
+   "above": 0.018,
+   "roadUnder": null
+  },
+  {
+   "u": 1212.8,
+   "hit": "(unnamed)",
+   "above": 0.075,
+   "roadUnder": null
+  }
+ ],
+ "kerbFace": {
+  "at": [
+   -18.09,
+   -31.79
+  ],
+  "hit": "(no hit)",
+  "distance": null,
+  "height": null,
+  "facesRoad": null
+ },
+ "summary": {
+  "points": 10,
+  "roadHits": 0,
+  "nonRoad": [
+   "(unnamed) @ -8.11,-470.17",
+   "(unnamed) @ -17.1,-344.34",
+   "(unnamed) @ -24.73,-218.14",
+   "(unnamed) @ -16.05,-92.28",
+   "(unnamed) @ -7.37,33.57",
+   "(unnamed) @ -0.57,159.44",
+   "(unnamed) @ 3.93,285.51",
+   "(unnamed) @ 8.43,411.58",
+   "(unnamed) @ 4.67,537.47",
+   "(unnamed) @ 0.16,663.54"
+  ]
+ },
+ "winding": [],
+ "sweeps": [],
+ "others": [
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ShapeGeometry",
+   "material": "#24505f",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 11,
+   "area": 10138121.5,
+   "up": 0,
+   "down": 10138121.5,
+   "vertical": 0,
+   "downFrac": 1,
+   "downWorst": {
+    "area": 6512400,
+    "at": [
+     -1197,
+     0.02,
+     855
+    ],
+    "normalY": -1,
+    "tris": 0
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 7320,
+   "area": 428851.8,
+   "up": 152718.2,
+   "down": 152718.2,
+   "vertical": 123415.3,
+   "downFrac": 0.356,
+   "downWorst": {
+    "area": 145.7,
+    "at": [
+     994,
+     0.5,
+     649.4
+    ],
+    "normalY": -1,
+    "tris": 7122
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 7224,
+   "area": 422099.9,
+   "up": 150251.2,
+   "down": 150251.2,
+   "vertical": 121597.4,
+   "downFrac": 0.356,
+   "downWorst": {
+    "area": 145.7,
+    "at": [
+     994,
+     0.5,
+     669.6
+    ],
+    "normalY": -1,
+    "tris": 6978
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#ffffff",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 6888,
+   "area": 400025,
+   "up": 142247.9,
+   "down": 142247.9,
+   "vertical": 115529.2,
+   "downFrac": 0.356,
+   "downWorst": {
+    "area": 145.7,
+    "at": [
+     994,
+     0.5,
+     689.7
+    ],
+    "normalY": -1,
+    "tris": 6666
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 287866,
+   "up": 148219.2,
+   "down": 139646.8,
+   "vertical": 0,
+   "downFrac": 0.485,
+   "downWorst": {
+    "area": 19949.55,
+    "at": [
+     917.8,
+     67.87,
+     1242
+    ],
+    "normalY": -1,
+    "tris": 7
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 262067.8,
+   "up": 138247.5,
+   "down": 123820.3,
+   "vertical": 0,
+   "downFrac": 0.472,
+   "downWorst": {
+    "area": 17688.61,
+    "at": [
+     1286.8,
+     68.04,
+     1560.6
+    ],
+    "normalY": -1,
+    "tris": 13
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#51657f",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 236318.2,
+   "up": 120567.8,
+   "down": 115750.3,
+   "vertical": 0,
+   "downFrac": 0.49,
+   "downWorst": {
+    "area": 16535.76,
+    "at": [
+     672.2,
+     67.97,
+     1442.3
+    ],
+    "normalY": -1,
+    "tris": 13
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "BufferGeometry",
+   "material": "#1e2228",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 1282,
+   "area": 101596.1,
+   "up": 0,
+   "down": 101596.1,
+   "vertical": 0,
+   "downFrac": 1,
+   "downWorst": {
+    "area": 80.89,
+    "at": [
+     -191,
+     11.31,
+     731.4
+    ],
+    "normalY": -0.99,
+    "tris": 866
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 208549.7,
+   "up": 107933.6,
+   "down": 100616.2,
+   "vertical": 0,
+   "downFrac": 0.482,
+   "downWorst": {
+    "area": 14373.74,
+    "at": [
+     200.8,
+     67.74,
+     1292.2
+    ],
+    "normalY": -1,
+    "tris": 7
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 187828.4,
+   "up": 99623.7,
+   "down": 88204.7,
+   "vertical": 0,
+   "downFrac": 0.47,
+   "downWorst": {
+    "area": 12600.67,
+    "at": [
+     482,
+     66.93,
+     1394.9
+    ],
+    "normalY": -1,
+    "tris": 7
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#4a5f45",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 183273.8,
+   "up": 96498.6,
+   "down": 86775.3,
+   "vertical": 0,
+   "downFrac": 0.473,
+   "downWorst": {
+    "area": 12396.47,
+    "at": [
+     -640.5,
+     68.04,
+     1364.7
+    ],
+    "normalY": -1,
+    "tris": 7
+   }
+  },
+  {
+   "name": "(unnamed)",
+   "parent": "Group<Scene",
+   "geometry": "ConeGeometry",
+   "material": "#51657f",
+   "side": 0,
+   "vertexColors": false,
+   "tris": 14,
+   "area": 162029.4,
+   "up": 85437.2,
+   "down": 76592.2,
+   "vertical": 0,
+   "downFrac": 0.473,
+   "downWorst": {
+    "area": 10941.74,
+    "at": [
+     -937.4,
+     68.04,
+     1304.8
+    ],
+    "normalY": -1,
+    "tris": 13
+   }
+  }
+ ],
+ "materials": [],
+ "contrast": {
+  "walkOverRoadMap": null,
+  "roughnessRoad": null,
+  "roughnessWalk": null
+ },
+ "crossings": {
+  "planned": null,
+  "tactilePads": null,
+  "zebraBars": null,
+  "rampVerts": null,
+  "firstPad": null
+ }
+}

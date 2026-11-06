@@ -1,0 +1,78 @@
+PLACE {
+ "road": "Thamrin–Sudirman",
+ "width": 20,
+ "frac": 0.24,
+ "side": -1,
+ "eye": [
+  -10.94,
+  0.9,
+  -237.54
+ ],
+ "groundUnderEye": -0.802,
+ "roadPatch": {
+  "x": 1166.7930126048975,
+  "y": 695.3695382888957,
+  "behind": false
+ },
+ "walkPatch": {
+  "x": 511.7596559330063,
+  "y": 701.3322089554025,
+  "behind": false
+ },
+ "kerbPatch": {
+  "x": 768.3497877540232,
+  "y": 698.0416512256836,
+  "behind": false
+ },
+ "candidates": 36,
+ "skipped": 15
+}
+IMAGE {"file":"proof/road-vs-walk-final.png","w":1600,"h":1000}
+PATCHES {
+ "road": {
+  "luma": 58.2,
+  "rgb": [
+   57,
+   58,
+   61
+  ],
+  "box": {
+   "x": 1157,
+   "y": 685,
+   "w": 20,
+   "h": 20
+  },
+  "px": 400
+ },
+ "walk": {
+  "luma": 170.7,
+  "rgb": [
+   176,
+   170,
+   158
+  ],
+  "box": {
+   "x": 502,
+   "y": 691,
+   "w": 20,
+   "h": 20
+  },
+  "px": 400
+ },
+ "kerb": {
+  "luma": 150.8,
+  "rgb": [
+   156,
+   150,
+   141
+  ],
+  "box": {
+   "x": 758,
+   "y": 688,
+   "w": 20,
+   "h": 20
+  },
+  "px": 400
+ }
+}
+RATIO {"walkOverRoad":2.93,"kerbFaceOverRoad":2.59,"floor":1.6}
