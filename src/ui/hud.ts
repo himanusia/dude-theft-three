@@ -30,6 +30,8 @@ export class HUD {
   /** last result of layout(); also read by tests through window.__game.hud */
   declare layoutInfo: HudLayoutInfo;
   private layoutQueued = false;
+  /** --hud-tr-h as last published, so the top-right watcher can tell a real change */
+  private publishedTrH = -1;
   declare fullMapCtx: any;
   declare lastCash: number;
   declare hitTimer: number;
@@ -105,6 +107,7 @@ export class HUD {
     this.mapProjection = null;
     this.onSettings = null;
     this.weaponIconId = '';
+    this.watchTopRow();
     this.el.helpBtn?.addEventListener('click', () => this.toggleHelp());
     this.el.helpClose?.addEventListener('click', () => this.toggleHelp(false));
     this.el.help?.addEventListener('click', (e: Event) => {
@@ -175,7 +178,8 @@ export class HUD {
 
     // a taller cash/wanted stack moves everything the narrow layout anchors under it
     const topRight = box('#topright');
-    root.style.setProperty('--hud-tr-h', `${Math.ceil(topRight ? topRight.height : 0)}px`);
+    this.publishedTrH = Math.ceil(topRight ? topRight.height : 0);
+    root.style.setProperty('--hud-tr-h', `${this.publishedTrH}px`);
     // short layouts put the hint chip directly under the objective column
     const topLeft = box('#tl');
     root.style.setProperty('--hud-tl-bottom', `${Math.ceil(topLeft ? topLeft.bottom : 0)}px`);
@@ -203,6 +207,22 @@ export class HUD {
       this.layoutQueued = false;
       this.layout();
     });
+  }
+
+  /**
+   * #topright is not a fixed-height box: it gains a WANTED caption the moment the player
+   * earns a star, and its cash figure can grow a digit. The narrow and touch layouts anchor
+   * the minimap, the ammo chip and the toast column under --hud-tr-h, so a row that grows
+   * after boot moved nothing and the stars landed on the map. Watch the row itself instead
+   * of relying on every caller to remember layout().
+   */
+  watchTopRow() {
+    const node = document.getElementById('topright');
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    new ResizeObserver(() => {
+      const h = Math.ceil(node.getBoundingClientRect().height);
+      if (h !== this.publishedTrH) this.scheduleLayout();
+    }).observe(node);
   }
 
   setWeapon(name: string, slot: number, reserve: number, id?: string) {
@@ -300,6 +320,9 @@ export class HUD {
       this.el.stars.dataset.n = String(n);
       this.el.stars.innerHTML = s;
       this.el.wantedLabel.textContent = n > 0 ? 'WANTED' : '';
+      // the caption appears with the first star: the row is taller now, and every
+      // narrow/touch anchor below it (the map, the ammo chip, the toasts) has to move
+      this.scheduleLayout();
     }
   }
 

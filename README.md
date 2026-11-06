@@ -105,6 +105,11 @@ node tools/shoot-shop-boards.mjs   # headless: searches the city for the stance 
 node tests/world/crash-frame.mjs  # 12/12: a crash may never fill the frame with one colour
                                   # (samples the centre pixel and the whole frame for 2 s after
                                   # the hit, and fails if the boom ends up inside a wall)
+node tools/probe-hud-overlap.mjs   # headless: earns three stars through the police system and
+                                   # measures every HUD box at 390x844, 414x896, 768x1024 and
+                                   # 1280x760, before and after the wanted row appears. Writes
+                                   # proof/hud-overlap-<label>.json (exit 2 on an overlap) and
+                                   # proof/phone-wanted.png
 ```
 
 `city.ojeks` lists every live bike with its real group position and the cargo box's local

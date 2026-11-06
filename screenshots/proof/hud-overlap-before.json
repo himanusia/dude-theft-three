@@ -1,0 +1,337 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:8993",
+  "base": "3fa73d7",
+  "viewports": [
+    {
+      "tag": "390x844",
+      "label": "phone portrait",
+      "mode": "narrow",
+      "scale": "0.800",
+      "starsClear": {
+        "trVar": "68px",
+        "topRight": {
+          "sel": "#topright",
+          "x": 257.25,
+          "y": 12,
+          "w": 118.75,
+          "h": 67.38
+        },
+        "wanted": {
+          "sel": "#wanted",
+          "x": 257.25,
+          "y": 52.8,
+          "w": 118.75,
+          "h": 26.58
+        },
+        "minimap": {
+          "sel": "#minimap",
+          "x": 252.41,
+          "y": 84,
+          "w": 128,
+          "h": 128
+        },
+        "overlaps": 0
+      },
+      "wantedState": {
+        "wanted": 3,
+        "stars": 3,
+        "label": "WANTED",
+        "atMeasure": {
+          "stars": "3",
+          "label": "WANTED",
+          "policeStars": 3
+        }
+      },
+      "starsOn": {
+        "trVar": "68px",
+        "topRight": {
+          "sel": "#topright",
+          "x": 257.25,
+          "y": 12,
+          "w": 118.75,
+          "h": 82.38
+        },
+        "wanted": {
+          "sel": "#wanted",
+          "x": 257.25,
+          "y": 52.8,
+          "w": 118.75,
+          "h": 41.58
+        },
+        "minimap": {
+          "sel": "#minimap",
+          "x": 252.41,
+          "y": 84,
+          "w": 128,
+          "h": 128
+        },
+        "overlaps": 3
+      },
+      "clearOverlaps": [],
+      "wantedOverlaps": [
+        {
+          "a": "#topright",
+          "b": "#minimap",
+          "ox": 118.75,
+          "oy": 10.38,
+          "area": 1232.6
+        },
+        {
+          "a": "#wanted",
+          "b": "#minimap",
+          "ox": 118.75,
+          "oy": 10.38,
+          "area": 1232.6
+        },
+        {
+          "a": "#stars",
+          "b": "#minimap",
+          "ox": 104.38,
+          "oy": 7.19,
+          "area": 750.5
+        }
+      ],
+      "maxOverlapArea": 1232.6,
+      "errors": [],
+      "shots": [
+        "/Users/mac/Code/dude-theft-three/.worktrees/t_a9d32a5c/screenshots/proof/phone-wanted-before.png"
+      ]
+    },
+    {
+      "tag": "414x896",
+      "label": "phone portrait (large)",
+      "mode": "narrow",
+      "scale": "0.800",
+      "starsClear": {
+        "trVar": "68px",
+        "topRight": {
+          "sel": "#topright",
+          "x": 281.25,
+          "y": 12,
+          "w": 118.75,
+          "h": 67.38
+        },
+        "wanted": {
+          "sel": "#wanted",
+          "x": 281.25,
+          "y": 52.8,
+          "w": 118.75,
+          "h": 26.58
+        },
+        "minimap": {
+          "sel": "#minimap",
+          "x": 276.41,
+          "y": 84,
+          "w": 128,
+          "h": 128
+        },
+        "overlaps": 0
+      },
+      "wantedState": {
+        "wanted": 3,
+        "stars": 3,
+        "label": "WANTED",
+        "atMeasure": {
+          "stars": "3",
+          "label": "WANTED",
+          "policeStars": 3
+        }
+      },
+      "starsOn": {
+        "trVar": "68px",
+        "topRight": {
+          "sel": "#topright",
+          "x": 281.25,
+          "y": 12,
+          "w": 118.75,
+          "h": 82.38
+        },
+        "wanted": {
+          "sel": "#wanted",
+          "x": 281.25,
+          "y": 52.8,
+          "w": 118.75,
+          "h": 41.58
+        },
+        "minimap": {
+          "sel": "#minimap",
+          "x": 276.41,
+          "y": 84,
+          "w": 128,
+          "h": 128
+        },
+        "overlaps": 3
+      },
+      "clearOverlaps": [],
+      "wantedOverlaps": [
+        {
+          "a": "#topright",
+          "b": "#minimap",
+          "ox": 118.75,
+          "oy": 10.38,
+          "area": 1232.6
+        },
+        {
+          "a": "#wanted",
+          "b": "#minimap",
+          "ox": 118.75,
+          "oy": 10.38,
+          "area": 1232.6
+        },
+        {
+          "a": "#stars",
+          "b": "#minimap",
+          "ox": 104.38,
+          "oy": 7.19,
+          "area": 750.5
+        }
+      ],
+      "maxOverlapArea": 1232.6,
+      "errors": [],
+      "shots": []
+    },
+    {
+      "tag": "768x1024",
+      "label": "tablet portrait",
+      "mode": "regular",
+      "scale": "0.873",
+      "starsClear": {
+        "trVar": "69px",
+        "topRight": {
+          "sel": "#topright",
+          "x": 633.94,
+          "y": 12,
+          "w": 120.06,
+          "h": 68.33
+        },
+        "wanted": {
+          "sel": "#wanted",
+          "x": 633.94,
+          "y": 53.23,
+          "w": 120.06,
+          "h": 27.09
+        },
+        "minimap": {
+          "sel": "#minimap",
+          "x": 628,
+          "y": 104,
+          "w": 128,
+          "h": 128
+        },
+        "overlaps": 0
+      },
+      "wantedState": {
+        "wanted": 3,
+        "stars": 3,
+        "label": "WANTED",
+        "atMeasure": {
+          "stars": "3",
+          "label": "WANTED",
+          "policeStars": 3
+        }
+      },
+      "starsOn": {
+        "trVar": "69px",
+        "topRight": {
+          "sel": "#topright",
+          "x": 633.94,
+          "y": 12,
+          "w": 120.06,
+          "h": 83.33
+        },
+        "wanted": {
+          "sel": "#wanted",
+          "x": 633.94,
+          "y": 53.23,
+          "w": 120.06,
+          "h": 42.09
+        },
+        "minimap": {
+          "sel": "#minimap",
+          "x": 628,
+          "y": 104,
+          "w": 128,
+          "h": 128
+        },
+        "overlaps": 0
+      },
+      "clearOverlaps": [],
+      "wantedOverlaps": [],
+      "maxOverlapArea": 0,
+      "errors": [],
+      "shots": []
+    },
+    {
+      "tag": "1280x760",
+      "label": "laptop",
+      "mode": "regular",
+      "scale": "0.864",
+      "starsClear": {
+        "trVar": "73px",
+        "topRight": {
+          "sel": "#topright",
+          "x": 1144.02,
+          "y": 12.09,
+          "w": 123.89,
+          "h": 73
+        },
+        "wanted": {
+          "sel": "#wanted",
+          "x": 1144.02,
+          "y": 57.3,
+          "w": 123.89,
+          "h": 27.8
+        },
+        "minimap": {
+          "sel": "#minimap",
+          "x": 1095,
+          "y": 575,
+          "w": 169,
+          "h": 169
+        },
+        "overlaps": 0
+      },
+      "wantedState": {
+        "wanted": 3,
+        "stars": 3,
+        "label": "WANTED",
+        "atMeasure": {
+          "stars": "3",
+          "label": "WANTED",
+          "policeStars": 3
+        }
+      },
+      "starsOn": {
+        "trVar": "73px",
+        "topRight": {
+          "sel": "#topright",
+          "x": 1144.02,
+          "y": 12.09,
+          "w": 123.89,
+          "h": 88
+        },
+        "wanted": {
+          "sel": "#wanted",
+          "x": 1144.02,
+          "y": 57.3,
+          "w": 123.89,
+          "h": 42.8
+        },
+        "minimap": {
+          "sel": "#minimap",
+          "x": 1095,
+          "y": 575,
+          "w": 169,
+          "h": 169
+        },
+        "overlaps": 0
+      },
+      "clearOverlaps": [],
+      "wantedOverlaps": [],
+      "maxOverlapArea": 0,
+      "errors": [],
+      "shots": []
+    }
+  ]
+}
