@@ -113,6 +113,8 @@ interface PlayerState {
   shootCd: number;
   aimHold: number;
   weapon: WeaponId;
+  /** the pouch: starting kit plus every gun taken this run, in the order acquired */
+  owned: Set<WeaponId>;
   ammo: Record<string, { mag: number; reserve: number }>;
   grounded: boolean;
   rhythm: number;
@@ -137,6 +139,7 @@ const player: PlayerState = {
   shootCd: 0,
   aimHold: 0,
   weapon: 'pistol',
+  owned: new Set(STARTING_WEAPONS),
   ammo: {},
   grounded: true,
   rhythm: 0,
@@ -1032,6 +1035,9 @@ function equipWeapon(id: WeaponId) {
     heldModel = null;
   }
   player.weapon = id;
+  // this build has no gate on the slots, so taking a gun in hand is picking it up: the pouch
+  // is what survives a reload, and it has to describe the same six-gun roster as the table
+  player.owned.add(id);
   const a = ammoFor(id);
   player.mag = a.mag;
   player.magSize = spec.magSize;
@@ -1464,12 +1470,11 @@ function captureSave(): Omit<SaveData, 'version' | 'savedAt'> {
     hp: player.hp,
     wanted: police.wanted,
     dayT,
-    // this build has one gun: the pistol is the whole roster, saved by name so a
-    // later weapon system can extend the field without a schema bump
-    weapon: 'pistol',
+    // the gun in hand and the pouch that holds it, both read from the live roster: a hardcoded
+    // `pistol` here is what used to drop a player back to the starting gun on Continue
+    weapon: player.weapon,
     ammo: player.mag,
-    magSize: player.magSize,
-    ownedWeapons: ['pistol'],
+    ownedWeapons: [...player.owned],
     objectives: {
       drove: flags.drove,
       chaos: flags.chaos,
@@ -1499,8 +1504,14 @@ function applySave(data: SaveData) {
   resetInterior(); // a save made inside a shop stores the street anchor, never the room
   player.hp = clamp(data.hp, 1, 100);
   player.cash = data.cash;
-  player.mag = clamp(data.ammo, 0, data.magSize);
-  player.magSize = data.magSize;
+  // the pouch and the gun in hand come from the save, not from the boot default: every owned
+  // weapon gets its spec magazine first, so a switch after a reload cannot invent one
+  player.owned = new Set(data.ownedWeapons.filter((w): w is WeaponId => !!WEAPONS[w as WeaponId]));
+  player.ammo = {};
+  for (const id of player.owned) player.ammo[id] = { mag: WEAPONS[id].magSize, reserve: WEAPONS[id].reserve };
+  equipWeapon(WEAPONS[data.weapon as WeaponId] ? (data.weapon as WeaponId) : 'pistol');
+  player.mag = clamp(Math.round(data.ammo), 0, player.magSize);
+  player.ammo[player.weapon].mag = player.mag;
   player.reloading = 0;
   player.lastHit = performance.now() - 60000; // a restored wound should still regen
   camYaw = data.player.camYaw;
@@ -1595,8 +1606,9 @@ function newGame() {
   player.yaw = 0;
   player.hp = 100;
   player.cash = 250;
-  player.mag = 12;
-  player.magSize = 12;
+  // a fresh run owns the starting pouch again and holds the 9mm, not whatever the last run ended with
+  player.owned = new Set(STARTING_WEAPONS);
+  player.ammo = {};
   player.reloading = 0;
   player.shootCd = 0;
   player.rhythm = 0;
@@ -1656,6 +1668,7 @@ function newGame() {
   }
   audio.engineUpdate({ on: false });
 
+  equipWeapon('pistol'); // fresh mag + reserve, and drops any model the last run held
   hud.setCash(player.cash);
   hud.setHealth(player.hp);
   hud.setStars(0);
@@ -2186,6 +2199,10 @@ window.__game = {
   objectives: flags,
   player,
   equipWeapon,
+  /** the pouch as a plain array: a Set does not survive the headless harness's serialisation */
+  get ownedWeapons() {
+    return [...player.owned];
+  },
   get weaponSpec() {
     return WEAPONS[player.weapon];
   },

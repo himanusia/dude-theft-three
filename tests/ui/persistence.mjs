@@ -71,8 +71,9 @@ try {
   });
 
   const boot = async () => {
-    await page.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
+    // a loaded headless box can take over a minute to compile the module graph behind the canvas
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded', timeout: 120000 });
+    await page.waitForFunction('window.__game !== undefined', { timeout: 120000 });
     await sleep(900);
   };
   const state = () => page.evaluate(() => window.__game.state);
@@ -116,6 +117,19 @@ try {
   await page.keyboard.up('w');
   await sleep(300);
 
+  // ---------------------------------------------------------------- weapon roster round trip
+  // the pistol is not special any more: take the AK off the rack, pick the shotgun up (this
+  // build has no ownership gate, so stepping into a slot is the pickup), then put the AK back
+  // in hand so the blob being saved carries a non-default gun and a two-gun pouch
+  await page.keyboard.press('Digit6');
+  await sleep(300);
+  await page.keyboard.press('Digit5');
+  await sleep(300);
+  await page.keyboard.press('Digit6');
+  await sleep(300);
+  const armed = await page.evaluate(() => ({ weapon: window.__game.player.weapon, owned: window.__game.ownedWeapons }));
+  check('AK is in hand and the shotgun is in the pouch', armed.weapon === 'ak' && armed.owned.includes('shotgun'), armed);
+
   await page.evaluate(() => {
     const g = window.__game;
     g._test.addCash(1234);
@@ -134,6 +148,8 @@ try {
       yaw: +g.player.yaw.toFixed(3),
       cash: g.player.cash,
       mag: g.player.mag,
+      weapon: g.player.weapon,
+      owned: g.ownedWeapons,
       wanted: +g.police.wanted.toFixed(2),
       dayT: +g.state.dayT.toFixed(4),
       objectives: { ...g.objectives },
@@ -148,7 +164,7 @@ try {
   check(
     'pause writes a versioned dta.save.v1',
     !!parsed &&
-      parsed.version === 2 &&
+      parsed.version === 3 &&
       typeof parsed.player?.x === 'number' &&
       typeof parsed.player?.camYaw === 'number' &&
       typeof parsed.cash === 'number' &&
@@ -160,6 +176,11 @@ try {
     parsed && { version: parsed.version, cash: parsed.cash, dayT: parsed.dayT, wanted: parsed.wanted, ammo: parsed.ammo, weapon: parsed.weapon }
   );
   check('objective progress is saved', !!parsed && parsed.objectives.drove === true, parsed && parsed.objectives);
+  check(
+    'save carries the equipped weapon id and the pouch',
+    !!parsed && parsed.weapon === 'ak' && parsed.ownedWeapons.includes('shotgun') && parsed.ownedWeapons.includes('ak'),
+    parsed && { weapon: parsed.weapon, ownedWeapons: parsed.ownedWeapons }
+  );
   check('saved payload matches live state', !!parsed && parsed.cash === before.cash && Math.abs(parsed.dayT - before.dayT) < 0.01, {
     saved: parsed && { cash: parsed.cash, dayT: parsed.dayT },
     live: before,
@@ -185,6 +206,8 @@ try {
       yaw: +g.player.yaw.toFixed(3),
       cash: g.player.cash,
       mag: g.player.mag,
+      weapon: g.player.weapon,
+      owned: g.ownedWeapons,
       wanted: +g.police.wanted.toFixed(2),
       dayT: +g.state.dayT.toFixed(4),
       paused: g.state.paused,
@@ -199,12 +222,53 @@ try {
   // the wanted meter keeps cooling down while the restore is in flight, so allow one decay tick
   check('wanted level restored', Math.abs(after.wanted - before.wanted) < 0.2, { before: before.wanted, after: after.wanted });
   check('ammo restored', after.mag === before.mag, { before: before.mag, after: after.mag });
+  // the acceptance line for this card: what is in hand and what the pouch holds, after a reload
+  console.log('WEAPONS after continue: ' + JSON.stringify({ weapon: after.weapon, owned: after.owned }));
+  check(
+    'AK is still in hand after the reload, with the shotgun still owned',
+    after.weapon === 'ak' && after.owned.includes('shotgun') && JSON.stringify(after.owned) === JSON.stringify(before.owned),
+    { weapon: after.weapon, owned: after.owned, before: { weapon: before.weapon, owned: before.owned } }
+  );
   check('objective progress restored', after.objectives.drove === true && after.objectives.chaos === before.objectives.chaos, {
     before: before.objectives,
     after: after.objectives,
   });
   check('continue unpauses', after.paused === false, { paused: after.paused });
   check('no console errors during restore', errs.length === 0, errs.slice(0, 4));
+
+  // ---------------------------------------------------------------- pre-bump save migrates
+  // a v2 blob still has to open the run. Its writer hardcoded the pistol and the one-gun pouch,
+  // so the gun falls back to the 9mm and the pouch to the starting kit; position and cash stay,
+  // and the first save of the restored run re-stamps the schema.
+  const v2Blob = { ...parsed, version: 2, weapon: 'pistol', ownedWeapons: ['pistol'], wanted: 0 };
+  await page.evaluate((blob) => localStorage.setItem('dta.save.v1', JSON.stringify(blob)), v2Blob);
+  errs.length = 0;
+  warns.length = 0;
+  await boot();
+  const offered = await page.evaluate(() => document.getElementById('start-btn').textContent.trim());
+  await page.click('#start-btn');
+  await sleep(1400);
+  const migrated = await page.evaluate(() => ({
+    weapon: window.__game.player.weapon,
+    owned: window.__game.ownedWeapons,
+    cash: window.__game.player.cash,
+    pos: window.__game.player.pos.toArray().map((v) => +v.toFixed(2)),
+    version: JSON.parse(localStorage.getItem('dta.save.v1')).version,
+  }));
+  const v2Drift = Math.hypot(migrated.pos[0] - before.pos[0], migrated.pos[2] - before.pos[2]);
+  check(
+    'a pre-bump (v2) save loads without a warning and falls back to the starting gun',
+    /continue/i.test(offered) &&
+      migrated.weapon === 'pistol' &&
+      migrated.owned.includes('pistol') &&
+      migrated.owned.includes('fist') &&
+      v2Drift < 0.75 &&
+      saveWarns() === 0 &&
+      errs.length === 0,
+    { weapon: migrated.weapon, owned: migrated.owned, v2Drift: +v2Drift.toFixed(3), warns, errs: errs.slice(0, 4) }
+  );
+  check('the migrated run keeps its cash', migrated.cash === parsed.cash, { before: parsed.cash, after: migrated.cash });
+  check('the migrated run is re-stamped v3 by its first save', migrated.version === 3, { version: migrated.version });
 
   // ---------------------------------------------------------------- autosave beat
   const beat0 = await page.evaluate(() => JSON.parse(localStorage.getItem('dta.save.v1')).savedAt);
