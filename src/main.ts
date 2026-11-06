@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { City, PITCH, WORLD_HALF } from './world/city';
+import { City, WORLD_HALF } from './world/city';
 import { Character } from './actors/character';
 import { plantOnGround, soleY } from './actors/plant';
 import { Car, driverLook } from './vehicles/car';
@@ -12,6 +12,7 @@ import { Ragdoll } from './actors/ragdoll';
 import { PedManager } from './actors/npc';
 import { Police } from './systems/police';
 import { Traffic } from './vehicles/traffic';
+import { TransjakartaBus, TransjakartaService } from './vehicles/transjakarta';
 import { PlacedInterior, InteriorKind } from './world/interior';
 import { HUD } from './ui/hud';
 import { AudioSys } from './core/audio';
@@ -148,7 +149,11 @@ scene.add(character.group);
 
 const peds = new PedManager(scene, city, 40);
 const police = new Police(scene, city, audio);
-const traffic = new Traffic(scene, city, 8);
+const traffic = new Traffic(scene, city, 26);
+// The busway in service. Corridor 1 runs the map's own spine (Thamrin–Sudirman) through the
+// spawn junction, so the player meets a TransJakarta bus in normal play instead of only seeing
+// one parked beside a halte.
+const tj = new TransjakartaService(scene, city, { count: 3 });
 
 // headlight rig that follows whichever car the player is driving
 const headlight = new THREE.SpotLight(0xfff2cc, 0, 55, 0.55, 0.45, 1.6);
@@ -1636,24 +1641,10 @@ function newGame() {
   }
 
   for (const car of cityCars) resetCar(car, city.randomParkingSpot());
-  for (const entry of traffic.cars) {
-    const i = Math.floor(rand(-2, 3));
-    const j = Math.floor(rand(-2, 3));
-    const heading = pick([
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ]);
-    entry.cell = { i, j };
-    entry.heading = heading;
-    entry.wait = 0;
-    entry.honked = 0;
-    resetCar(entry.car, {
-      pos: new THREE.Vector3((i + 0.5) * PITCH, 0, (j + 0.5) * PITCH),
-      yaw: Math.atan2(heading[0], heading[1]),
-    });
-  }
+  // Ambient cars come back onto the road around the player, not onto the block lattice they
+  // were spaced along when the city was a grid: (i+0.5)*PITCH is the middle of a block now, so
+  // a restart used to teleport the whole population inside buildings, where it stayed.
+  for (const entry of traffic.cars) traffic.recycle(entry, player.pos);
 
   // the headlight rig rides on whichever car was driven: park it back on the scene
   if (headlightAttached) {
@@ -1972,6 +1963,7 @@ function update(dt: number) {
   if (!player.inInterior) peds.update(dt, pedContext());
 
   if (!player.inInterior) traffic.update(dt, { playerPos: player.pos, playerCar: player.inCar, peds, wanted: police.wanted });
+  if (!player.inInterior) tj.update(dt);
 
   if (!player.inInterior) police.update(dt, {
     playerPos: player.pos,
@@ -2202,6 +2194,7 @@ window.__game = {
   peds,
   cityCars,
   traffic,
+  tj,
   pickups,
   ragdolls,
   audio,
@@ -2246,6 +2239,8 @@ window.__game = {
   },
   _test: {
     newGame,
+    /** the bus constructor, so a harness can build an auditable copy of the asset */
+    busClass: TransjakartaBus,
     save: saveGame,
     toggleMap,
     toggleSettings,
