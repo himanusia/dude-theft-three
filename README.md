@@ -70,6 +70,11 @@ node tests/world/engine-audio.mjs  # 13/13: the engine loop that ships as audio/
                                    # decoded and audible while driving: one live looping node, level
                                    # and pitch sampled at three road speeds, quieter in a closed
                                    # cabin than in the open cockpit, silent behind a shop wall
+node tests/world/ambience-audio.mjs # 18/18: all nine licensed ambience assets are served, loaded
+                                   # and heard inside 60 s (beds crossfade on arterials / pasar /
+                                   # kaki lima / rain, horns from a passing car and moped, the
+                                   # becak bell, gamelan on the menu), one-shots never loop, and
+                                   # the mute silences the street bus
 node tools/measure-ground.mjs      # prints foot / drawn surface / measure / terrain at three
                                    # points and fails if any foot-to-surface delta is over 2 cm
 node tools/shoot-feet.mjs          # headless: a pavement-level frame of the feet on the trotoar,
@@ -105,6 +110,11 @@ node tools/shoot-shop-boards.mjs   # headless: searches the city for the stance 
 node tests/world/crash-frame.mjs  # 12/12: a crash may never fill the frame with one colour
                                   # (samples the centre pixel and the whole frame for 2 s after
                                   # the hit, and fails if the boom ends up inside a wall)
+node tools/probe-hud-overlap.mjs   # headless: earns three stars through the police system and
+                                   # measures every HUD box at 390x844, 414x896, 768x1024 and
+                                   # 1280x760, before and after the wanted row appears. Writes
+                                   # proof/hud-overlap-<label>.json (exit 2 on an overlap) and
+                                   # proof/phone-wanted.png
 ```
 
 `city.ojeks` lists every live bike with its real group position and the cargo box's local

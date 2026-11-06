@@ -1,5 +1,9 @@
 // Audio: CC0 Kenney SFX (impact/digital/sci-fi packs) + CC-BY Kevin MacLeod BGM.
 // Engine loop is a pitched CC0 sci-fi loop; siren is synthesized with WebAudio.
+//
+// The Jakarta street layer (docs/audio-sourcing.md) lives here too: four looping ambience beds
+// that stream as media elements and crossfade with where the player is standing, four one-shots
+// that ride a car or a pedal vehicle passing close, and the gamelan menu loop.
 
 const SFX_FILES = {
   shot_pistol: 'audio/sfx/shot_pistol.ogg',
@@ -20,12 +24,41 @@ const SFX_FILES = {
   // the engine loop the repo already ships: 5.0 s, mono, 44.1 kHz Vorbis. It is a loop, not a
   // sting, so it is loaded once and retuned per frame instead of retriggered.
   engine: 'audio/sfx/engine.ogg',
+  // one-shots from the Jakarta street kit: a horn belongs to a vehicle that just came close, so
+  // it is a decoded buffer played once, never a loop
+  angkot_horn: 'audio/ambience/angkot-horn.ogg',
+  moped_horn: 'audio/ambience/moped-horn.ogg',
+  moped_passby: 'audio/ambience/moped-passby.ogg',
+  pedal_bell: 'audio/ambience/pedal-bell.ogg',
+};
+
+/**
+ * The four ambience beds. These recordings run 45 s to 3 min, so they are streamed through a
+ * media element into a gain node instead of decoding the whole thing into memory: at 44.1 kHz
+ * float32, the pasar loop alone would be ~28 MB decoded. Each bed is silent at gain 0 until the
+ * director in `systems/ambience.ts` fades it in; `BED_LEVEL` is the full-volume ceiling so four
+ * overlapping beds never sum past a comfortable street murmur.
+ */
+const BEDS = {
+  city_crowd: 'audio/ambience/city-crowd-ambience.ogg',
+  pasar_market: 'audio/ambience/pasar-market-ambience.ogg',
+  warung: 'audio/ambience/warung-ambience.ogg',
+  tropical_rain: 'audio/ambience/tropical-rain.ogg',
+};
+
+const BED_LEVEL: Record<string, number> = {
+  city_crowd: 0.3,
+  pasar_market: 0.4,
+  warung: 0.34,
+  tropical_rain: 0.42,
 };
 
 const BGM = {
   funk: 'audio/bgm/funk.mp3',
   chase: 'audio/bgm/chase.mp3',
   calm: 'audio/bgm/calm.mp3',
+  // the menu cue: a 1931 gamelan pelog recording, public domain (CREDITS.md)
+  gamelan: 'audio/ambience/gamelan-menu-loop.ogg',
 };
 
 export class AudioSys {
@@ -40,6 +73,14 @@ export class AudioSys {
   declare sirenNodes: any;
   declare master: any;
   declare sfx: any;
+  /** bus for the streaming ambience beds; rides the SFX slider and the mute, like the SFX bus */
+  declare ambienceBus: any;
+  declare beds: Record<string, any>;
+  declare initPromise: any;
+  /** per one-shot name: how many times it has actually started, and when it first did */
+  declare oneShotStats: Record<string, { plays: number; firstAt: number }>;
+  /** per BGM mode: same accounting, so the menu cue can be proven to have played */
+  declare bgmStats: Record<string, { plays: number; firstAt: number }>;
   // what the engine graph was last asked for, so a probe (and the mute path) can tell a live
   // engine from one that is only ramping towards a target
   declare engineSeq: number;
@@ -69,7 +110,26 @@ export class AudioSys {
     this.bgmVol = 1;
   }
 
+  /**
+   * Build the context once. `init()` is called by the menu unlock and again by Start, and both
+   * can be in flight at the same time (the click that unlocks the menu is often the click on
+   * Start), so the work lives behind one promise instead of two half-built graphs.
+   */
   async init() {
+    if (this.ready) return;
+    if (!this.initPromise) {
+      // a failed build must not poison the mixer for the rest of the page: Start retries it
+      this.initPromise = this.build().catch((e: any) => {
+        this.initPromise = null;
+        throw e;
+      });
+    }
+    return this.initPromise;
+  }
+
+  private async build() {
+    this.oneShotStats = {};
+    this.bgmStats = {};
     const AC = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
@@ -80,6 +140,11 @@ export class AudioSys {
     this.sfx = this.ctx.createGain();
     this.sfx.gain.value = this.muted ? 0 : this.sfxVol;
     this.sfx.connect(this.master);
+    // the street beds are world sound, not menu music: they ride the same slider as the SFX and
+    // are silenced by the same mute, but they get their own bus so their sum stays bounded
+    this.ambienceBus = this.ctx.createGain();
+    this.ambienceBus.gain.value = this.muted ? 0 : this.sfxVol * 0.9;
+    this.ambienceBus.connect(this.master);
 
     const load = async (url: string) => {
       const res = await fetch(url);
@@ -94,6 +159,21 @@ export class AudioSys {
       if (results[i]) this.buffers[name] = results[i];
     });
 
+    // beds: stream the file, take its output into the WebAudio graph, keep it silent at gain 0
+    this.beds = {};
+    for (const [name, url] of Object.entries(BEDS)) {
+      const el = new Audio(url);
+      el.loop = true;
+      el.preload = 'auto';
+      el.volume = 1;
+      const source = this.ctx.createMediaElementSource(el);
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0;
+      source.connect(gain);
+      gain.connect(this.ambienceBus);
+      this.beds[name] = { el, gain, playing: false, starts: 0, firstAt: 0, target: 0, source };
+    }
+
     for (const [k, url] of Object.entries(BGM)) {
       const el = new Audio(url);
       el.loop = true;
@@ -106,6 +186,84 @@ export class AudioSys {
 
   resume() {
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+  /**
+   * Fade one ambience bed towards `target` (0..1 of its own ceiling). The source keeps looping at
+   * gain 0 when the player leaves the zone, so walking back in costs no restart and no gap; the
+   * beds are loops, never stings. `fade` is seconds of linear ramp, which is what makes two zones
+   * crossfade instead of one cutting out before the other comes up.
+   */
+  ambienceSet(name: string, target: number, fade = 1.6) {
+    const bed = this.beds?.[name];
+    if (!bed) return;
+    const unit = Math.min(1, Math.max(0, Number.isFinite(target) ? target : 0));
+    const want = unit * (BED_LEVEL[name] ?? 0.3);
+    if (unit > 0.01 && !bed.playing) {
+      bed.playing = true;
+      bed.starts += 1;
+      if (!bed.firstAt) bed.firstAt = performance.now();
+      const p = bed.el.play?.();
+      if (p && p.catch) p.catch(() => {});
+    }
+    // already heading there: do not re-arm the parameter every frame
+    if (Math.abs(want - bed.target) < 0.004) return;
+    bed.target = want;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const g = bed.gain.gain;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(want, t + Math.max(0.05, fade));
+  }
+
+  /** What every ambience asset is doing, for the headless probe. Reads the live graph, not flags. */
+  ambienceState() {
+    const assets: Record<string, any> = {};
+    for (const [name, bed] of Object.entries(this.beds ?? {})) {
+      assets[name] = {
+        kind: 'bed',
+        loaded: !!bed.el && !bed.el.error && bed.el.readyState >= 2,
+        readyState: bed.el ? bed.el.readyState : 0,
+        playing: !!bed.el && !bed.el.paused,
+        plays: bed.starts,
+        firstAt: bed.firstAt,
+        gain: bed.gain ? +bed.gain.gain.value.toFixed(4) : 0,
+        target: +bed.target.toFixed(4),
+        loop: !!bed.el && bed.el.loop,
+      };
+    }
+    for (const name of ['angkot_horn', 'moped_horn', 'moped_passby', 'pedal_bell']) {
+      const s = this.oneShotStats?.[name] ?? { plays: 0, firstAt: 0 };
+      assets[name] = {
+        kind: 'one-shot',
+        loaded: !!this.buffers?.[name],
+        playing: false,
+        plays: s.plays,
+        firstAt: s.firstAt,
+        loop: false,
+      };
+    }
+    const gam = this.bgmEls?.gamelan;
+    const gs = this.bgmStats?.gamelan ?? { plays: 0, firstAt: 0 };
+    assets.gamelan = {
+      kind: 'menu-loop',
+      loaded: !!gam && !gam.error && gam.readyState >= 2,
+      readyState: gam ? gam.readyState : 0,
+      playing: !!gam && !gam.paused,
+      plays: gs.plays,
+      firstAt: gs.firstAt,
+      volume: gam ? +gam.volume.toFixed(3) : 0,
+      loop: !!gam && gam.loop,
+    };
+    return {
+      ready: this.ready,
+      ctxState: this.ctx ? this.ctx.state : null,
+      muted: this.muted,
+      volumes: { master: this.masterVol, sfx: this.sfxVol, bgm: this.bgmVol },
+      ambienceGain: this.ambienceBus ? +this.ambienceBus.gain.value.toFixed(3) : 0,
+      assets,
+    };
   }
 
   play(name: string, { vol = 1, rate = 1, pan = 0 } = {}) {
@@ -127,6 +285,10 @@ export class AudioSys {
     src.connect(g);
     node.connect(this.sfx ?? this.master);
     src.start();
+    let stat = this.oneShotStats[name];
+    if (!stat) stat = this.oneShotStats[name] = { plays: 0, firstAt: 0 };
+    stat.plays += 1;
+    if (!stat.firstAt) stat.firstAt = performance.now();
   }
 
   step() {
@@ -148,6 +310,9 @@ export class AudioSys {
     Object.entries(this.bgmEls).forEach(([k, el]) => {
       if (k === mode) {
         el.play?.().catch(() => {});
+        const stat = (this.bgmStats[k] ??= { plays: 0, firstAt: 0 });
+        stat.plays += 1;
+        if (!stat.firstAt) stat.firstAt = performance.now();
         this.fadeEl(el, this.bgmVolume, 1.2);
       } else if (k === prev) {
         this.fadeEl(el, 0, 1.2, () => el.pause());
@@ -325,6 +490,7 @@ export class AudioSys {
     if (typeof bgm === 'number') this.bgmVol = unit(bgm);
     if (this.master) this.master.gain.value = this.muted ? 0 : this.masterVol;
     if (this.sfx) this.sfx.gain.value = this.muted ? 0 : this.sfxVol;
+    if (this.ambienceBus) this.ambienceBus.gain.value = this.muted ? 0 : this.sfxVol * 0.9;
     this.bgmVolume = 0.28 * this.bgmVol;
     if (this.bgmMode) {
       Object.entries(this.bgmEls).forEach(([k, el]) => {
@@ -337,6 +503,7 @@ export class AudioSys {
     this.muted = !this.muted;
     if (this.master) this.master.gain.value = this.muted ? 0 : this.masterVol;
     if (this.sfx) this.sfx.gain.value = this.muted ? 0 : this.sfxVol;
+    if (this.ambienceBus) this.ambienceBus.gain.value = this.muted ? 0 : this.sfxVol * 0.9;
     Object.values(this.bgmEls).forEach((el) => (el.muted = this.muted));
     return this.muted;
   }

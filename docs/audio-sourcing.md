@@ -94,6 +94,35 @@ All 9 accepted files are stored in `public/audio/ambience/`, normalized to lower
 
 ---
 
-## Integration Guide: Wiring into `src/audio.ts` (AudioSys API)
+## Integration: shipped wiring
 
-To wire these assets into `src/audio.ts` without altering the existing audio architecture, declare an `AMBIENCE_FILES` map alongside `SFX_FILES` and `BGM` (or expand `SFX_FILES` with one-shot horns and bells like `angkot_horn: 'audio/ambience/angkot-horn.ogg'`, `moped_horn: 'audio/ambience/moped-horn.ogg'`, and `pedal_bell: 'audio/ambience/pedal-bell.ogg'`). For looping environmental soundscapes (`warung-ambience.ogg`, `pasar-market-ambience.ogg`, `city-crowd-ambience.ogg`, `tropical-rain.ogg`), instantiate dedicated `HTMLAudioElement` instances or `AudioBufferSourceNode` loops in `AudioSys.init()` with `loop = true` and `volume = 0`, exposing a helper method such as `setAmbienceBed(name: string, targetVolume: number, fadeSeconds = 1.0)` that smoothly ramps their gain via `fadeEl()`. For `gamelan-menu-loop.ogg`, add `gamelan: 'audio/ambience/gamelan-menu-loop.ogg'` to the `BGM` registry so it can be transitioned seamlessly via `audioSys.startBgm('gamelan')`. For `moped-passby.ogg`, positional 3D panning can be applied when scooters and motorbikes traverse within camera bounds.
+The recommendation above was implemented, with the details that only showed up in code:
+
+- `src/core/audio.ts` owns the mixer. The four beds (`city_crowd`, `pasar_market`, `warung`,
+  `tropical_rain`) are streamed through `HTMLAudioElement` + `createMediaElementSource` into one
+  gain each on a dedicated ambience bus, because decoding an 80 s 44.1 kHz stereo loop into
+  float32 costs ~28 MB per file. `ambienceSet(name, target, fade)` ramps the gain; the source
+  keeps looping at gain 0 when the player leaves the zone, so beds crossfade instead of cutting.
+- The four one-shots (`angkot_horn`, `moped_horn`, `moped_passby`, `pedal_bell`) are decoded
+  buffers in the existing `SFX_FILES` map and go through `play()`; they are never looped.
+- `gamelan-menu-loop.ogg` is a `BGM` entry (`startBgm('gamelan')`) started by the first gesture on
+  the title screen, and crossfaded to `funk` when a run starts.
+- `src/systems/ambience.ts` is the director: the city-crowd bed tracks distance to the arterials,
+  the pasar bed the two `pasar` POIs, the warung bed the six placed kaki lima carts
+  (`city.cartSpots`), and the rain bed the weather cycle it also owns (clear → rain → clear, with
+  a 900-segment rain field so the bed cannot be heard on a clear sky). A traffic car that comes
+  within ~34 m honks once per approach (5 s global spacing); two moped riders (`Ojek`) ride the
+  nearest arterial past the player and fire the pass-by + squeaker horn; the pedal bell rings when
+  the player walks up to a becak or a gerobak.
+- There is no bicycle actor in the world. The pedal bell's owners are the two becak (bicycle-wheeled
+  pedicabs) and the six gerobak carts with bicycle wheels, which is where the ring actually comes
+  from on a Jakarta street; wiring it to a nonexistent bicycle would have made the sound sourceless.
+- Buses respected: master → the ambience bus (scaled by the SFX slider) and the `N` mute, which
+  drops the bus to 0 and makes `play()` refuse while muted. The menu cue follows the BGM slider and
+  mute, like the other music.
+- Evidence: `node tests/world/ambience-audio.mjs` (18 checks: all nine loaded + a play event inside
+  60 s, the crossfades, the mute, 8,937,322 bytes served) plus tsc and `npm run build` clean.
+  `node tests/world/audit.mjs` is 5/6 on this base: its one red check is `no floating props`
+  (`street:run-local` / `street:t-intersection` / `pos-ronda` / `warung-leg`, seed-dependent), the
+  street-kit and vehicle ground contract that a separate change owns. It reproduces on the untouched
+  base build without this wiring, and the ambience work adds no world geometry.

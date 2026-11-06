@@ -27,8 +27,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VIEWPORTS = [
   { w: 360, h: 640, touch: true, label: 'phone portrait (small)' },
   { w: 390, h: 844, touch: true, label: 'phone portrait' },
+  { w: 414, h: 896, touch: true, label: 'phone portrait (large)' },
   { w: 768, h: 1024, touch: true, label: 'tablet portrait' },
   { w: 1280, h: 720, touch: false, label: 'laptop' },
+  { w: 1280, h: 760, touch: false, label: 'laptop (tall)' },
   { w: 1920, h: 1080, touch: false, label: 'desktop' },
   { w: 2560, h: 1080, touch: false, label: 'ultrawide' },
   { w: 844, h: 390, touch: true, label: 'phone landscape' },
@@ -64,6 +66,8 @@ function auditHud() {
     const out = [];
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
+        // #topright holds #cash, #wanted and #stars: containment is not a collision
+        if (list[i].el.contains(list[j].el) || list[j].el.contains(list[i].el)) continue;
         const o = overlap(list[i], list[j]);
         if (o.ox > 0.5 && o.oy > 0.5) out.push({ a: list[i].sel, b: list[j].sel, ox: o.ox, oy: o.oy });
       }
@@ -73,14 +77,14 @@ function auditHud() {
 
   // decorative overlays (crosshair, hit marker, damage vignette) are excluded:
   // they are centred effects, not panels
-  const LEAVES = ['#objective', '#fps', '#cash', '#wanted-label', '#stars', '#minimap', '#ammo-wrap', '#health-wrap', '#hints', '#prompt', '#toasts', '#help-btn', '#touch-stick'];
+  const LEAVES = ['#objective', '#fps', '#cash', '#wanted-label', '#stars', '#topright', '#wanted', '#minimap', '#ammo-wrap', '#health-wrap', '#hints', '#prompt', '#toasts', '#help-btn', '#touch-stick'];
   const panels = [];
   for (const sel of LEAVES) {
     const el = document.querySelector(sel);
-    if (vis(el)) panels.push({ sel, ...rect(el) });
+    if (vis(el)) panels.push({ sel, el, ...rect(el) });
   }
   for (const b of document.querySelectorAll('.t-btn')) {
-    if (vis(b)) panels.push({ sel: '.t-btn[' + (b.dataset.action || '?') + ']', ...rect(b) });
+    if (vis(b)) panels.push({ sel: '.t-btn[' + (b.dataset.action || '?') + ']', el: b, ...rect(b) });
   }
 
   // --- readability
@@ -135,6 +139,17 @@ function auditHud() {
     texts.push({ sel: sel + pseudo, text: cs.content.slice(0, 24), size: +parseFloat(cs.fontSize).toFixed(1), contrast: +contrast(fg, chipBg(el)).toFixed(2) });
   }
 
+  // The wanted row is the one panel that changes height after boot: prove the fixture
+  // actually has it on screen, or every overlap check below passes on an empty row.
+  const wantedLabelEl = document.getElementById('wanted-label');
+  const starsEl = document.getElementById('stars');
+  const wanted = {
+    label: (wantedLabelEl.textContent || '').trim(),
+    stars: Number(starsEl.dataset.n || 0),
+    policeStars: window.__game.police.starCount,
+    h: +document.getElementById('wanted').getBoundingClientRect().height.toFixed(1),
+  };
+
   const promptEl = document.getElementById('prompt');
   const prompt = vis(promptEl) ? { ...rect(promptEl), text: promptEl.textContent, share: +(rect(promptEl).w / window.innerWidth).toFixed(3) } : null;
   const minimap = panels.find((p) => p.sel === '#minimap');
@@ -149,7 +164,8 @@ function auditHud() {
     hudScaleVar: getComputedStyle(document.body).getPropertyValue('--hud-scale').trim(),
     layoutInfo: window.__game.hud.layoutInfo,
     minimapSize: minimap ? minimap.w : null,
-    panels,
+    wanted,
+    panels: panels.map(({ el, ...p }) => p),
     overlaps: pairs(panels),
     outside: panels.filter((p) => p.x < 3.5 || p.y < 3.5 || p.x + p.w > window.innerWidth - 3.5 || p.y + p.h > window.innerHeight - 3.5),
     texts,
@@ -276,8 +292,11 @@ const fmt = (n) => (Math.round(n * 10) / 10).toFixed(1);
       errs.push('console: ' + m.text());
     });
     await page.setViewport({ width: vp.w, height: vp.h, deviceScaleFactor: 1, isMobile: vp.touch, hasTouch: vp.touch });
-    await page.goto(BASE + '/index.html', { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction('window.__game !== undefined', { timeout: 60000 });
+    // The city is built synchronously on load, so a loaded machine (other lanes building,
+    // SwiftShader) turns the default 30 s into a false red: the world suites already carry
+    // an explicit budget for the same reason.
+    await page.goto(BASE + '/index.html', { waitUntil: 'domcontentloaded', timeout: 180000 });
+    await page.waitForFunction('window.__game !== undefined', { timeout: 120000 });
     await sleep(600);
 
     // start the game (audio init + pointer lock are irrelevant headless)
@@ -295,7 +314,12 @@ const fmt = (n) => (Math.round(n * 10) / 10).toFixed(1);
       g._test.setTime(0.36);
       const h = g.hud;
       h.setCash(2450);
-      h.setStars(3);
+      // A wanted level has to be earned through the police system: hud.setStars() alone is
+      // overwritten by the next update tick, which is how this suite once measured a HUD
+      // with no wanted row while claiming three stars.
+      g.police.maxCars = 0; // the row is the subject here, not the chase
+      g.police.addWanted(3);
+      h.setStars(g.police.starCount);
       h.setHealth(72);
       h.setAmmo(7, 12, false);
       h.setObjective('Drive to the warung before the cops arrive');
@@ -327,6 +351,7 @@ const fmt = (n) => (Math.round(n * 10) / 10).toFixed(1);
     // assertion required the chip to be present and failed on its own fixture.
     const promptOk = !a.prompt || a.prompt.w <= vp.w * 0.4 + 0.5;
     const minimapPromptOk = !a.minimapPrompt || !(a.minimapPrompt.ox > 0.5 && a.minimapPrompt.oy > 0.5);
+    const wantedOk = a.wanted.label === 'WANTED' && a.wanted.stars >= 3 && a.wanted.policeStars >= 3;
     const speedoOk = speedo.hits.length === 0 && speedo.inside;
     const pauseOk = pause.display === 'flex' && pause.inside && pause.resumeInView && pause.minFont >= 12;
     const helpOk = help.shown && help.inside && help.minFont >= 12 && help.rows >= 8;
@@ -341,6 +366,7 @@ const fmt = (n) => (Math.round(n * 10) / 10).toFixed(1);
     check(`${tag} contrast: min ${a.minContrast}:1`, contrastOk, a.worstContrast);
     check(`${tag} prompt ${a.prompt ? `${Math.round(a.prompt.w)}px <= 40% of ${vp.w}px` : 'not in range'}`, promptOk, a.prompt);
     check(`${tag} minimap clear of prompt`, minimapPromptOk, a.minimapPrompt);
+    check(`${tag} wanted row active (${a.wanted.stars} stars, label "${a.wanted.label}")`, wantedOk, a.wanted);
     check(`${tag} speedo visible (driving) overlaps nothing`, speedoOk, { rect: speedo.speedo, hits: speedo.hits, inside: speedo.inside });
     check(`${tag} pause panel fits, resume reachable, text >= 12px`, pauseOk, { rect: pause.rect, resume: pause.resumeBox, scrolls: pause.scrolls, minFont: pause.minFont });
     check(`${tag} help sheet fits, ${help.rows} rows, ${help.minFont}px, mode=${help.mode}`, helpOk, { rect: help.rect, inside: help.inside });
@@ -348,8 +374,8 @@ const fmt = (n) => (Math.round(n * 10) / 10).toFixed(1);
     check(`${tag} scale ${a.scale} == clamp(min/880) and mode ${a.mode}`, scaleOk, { expectScale: +expectScale.toFixed(3), expectMode, scale: a.scale, mode: a.mode });
     check(`${tag} no console/page errors`, clean, errs.slice(0, 4));
 
-    const line = `${geometryOk && fontsOk && contrastOk && promptOk && minimapPromptOk && speedoOk && pauseOk && helpOk && inputOk && scaleOk && clean ? 'PASS' : 'FAIL'} ` +
-      `${tag} ${vp.label} :: mode=${a.mode} scale=${a.scale} overlaps=${a.overlaps.length} outside=${a.outside.length} ` +
+    const line = `${geometryOk && fontsOk && contrastOk && promptOk && minimapPromptOk && wantedOk && speedoOk && pauseOk && helpOk && inputOk && scaleOk && clean ? 'PASS' : 'FAIL'} ` +
+      `${tag} ${vp.label} :: mode=${a.mode} scale=${a.scale} wanted=${a.wanted.stars}stars/${a.wanted.h}px overlaps=${a.overlaps.length} outside=${a.outside.length} ` +
       `minFont=${a.minFont} minContrast=${a.minContrast} prompt=${a.prompt ? Math.round(a.prompt.w) : 0}/${Math.round(vp.w * 0.4)}px ` +
       `panels=${a.panels.length} door=${door.name}`;
     lines.push(line);

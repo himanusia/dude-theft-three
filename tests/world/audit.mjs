@@ -13,8 +13,10 @@ function check(name, ok, detail) {
   const page = await b.newPage();
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));
+  // both intents kept: the 180 s navigation budget this branch raised for slow
+  // headless boots, and the 120 s readiness wait the bus work needs on a cold page
   await page.goto((process.env.DTA_URL || 'http://127.0.0.1:8765') + '/index.html', { waitUntil: 'domcontentloaded', timeout: 180000 });
-  await page.waitForFunction('window.__game !== undefined', { timeout: 40000 });
+  await page.waitForFunction('window.__game !== undefined', { timeout: 120000 });
   await sleep(1500);
   await page.click('#start-btn');
   await sleep(2500);
